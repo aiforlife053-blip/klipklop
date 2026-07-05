@@ -1,0 +1,704 @@
+<!doctype html>
+<html lang="id">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>KlipKlop Dashboard</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link
+            href="https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700&display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            body {
+                font-family: "Urbanist", sans-serif;
+            }
+        </style>
+    </head>
+    <body
+        class="bg-[#fcfcfc] text-[#111827] min-h-screen flex flex-col antialiased"
+    >
+        <header
+            class="bg-white border-b border-[#efefef] px-8 py-3.5 flex items-center justify-between sticky top-0 z-50"
+        >
+            <div
+                class="flex items-center space-x-2 text-[#4f46e5] font-bold text-[22px] tracking-tight"
+            >
+                <svg
+                    class="w-6 h-6 text-[#3b82f6]"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    viewBox="0 0 24 24"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M7.5 3.75H6A2.25 2.25 0 003.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0120.25 6v1.5m0 9V18A2.25 2.25 0 0118 20.25h-1.5m-9 0H6A2.25 2.25 0 013.75 18v-1.5M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
+                </svg>
+                <span class="text-black">KlipKlop</span>
+            </div>
+
+            <div class="flex items-center space-x-5">
+                <button
+                    onclick="
+                        document
+                            .getElementById('settings-modal')
+                            .classList.remove('hidden')
+                    "
+                    class="text-gray-500 hover:text-black p-1 transition focus:outline-none"
+                    title="Pengaturan API & Model"
+                >
+                    <svg
+                        class="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.2"
+                        viewBox="0 0 24 24"
+                    >
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.43l-1.003.767c-.29.223-.443.601-.403.956.011.1.018.203.018.306s-.007.205-.018.306c-.04.355.114.733.403.956l1.003.767a1.125 1.125 0 01.26 1.43l-1.296 2.247a1.125 1.125 0 01-1.37.49l-1.216-.456c-.356-.133-.751-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.43l1.004-.767c.29-.223.443-.601.403-.956a6.4 6.4 0 01-.018-.306c0-.103.007-.205.018-.306.04-.355-.114-.733-.403-.956l-1.004-.767a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.49l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28z"
+                        />
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                        />
+                    </svg>
+                </button>
+
+                <button
+                    class="flex items-center space-x-2.5 text-[14px] font-bold text-gray-800 hover:text-black focus:outline-none"
+                >
+                    <div
+                        class="w-7 h-7 rounded-lg bg-[#6d28d9] text-white flex items-center justify-center font-bold text-[13px]"
+                    >
+                        a
+                    </div>
+                    <span>aiforlife</span>
+                    <svg
+                        class="w-4 h-4 text-gray-400"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        viewBox="0 0 24 24"
+                    >
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M19 9l-7 7-7-7"
+                        />
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <div class="flex flex-1">
+            <aside
+                class="w-[240px] bg-[#f9fafb] border-r border-[#eeeeee] p-5 space-y-1 hidden md:block"
+            >
+                <a
+                    href="#"
+                    id="nav-home"
+                    data-page="home"
+                    class="flex items-center space-x-3.5 px-4 py-3 rounded-xl bg-[#eaeaea] text-black font-bold text-[15px]"
+                >
+                    <svg
+                        class="w-5 h-5 text-gray-700"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        viewBox="0 0 24 24"
+                    >
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"
+                        />
+                    </svg>
+                    <span>Beranda</span>
+                </a>
+                <a
+                    href="#"
+                    id="nav-history"
+                    data-page="history"
+                    class="flex items-center space-x-3.5 px-4 py-3 rounded-xl text-gray-600 hover:bg-gray-100 hover:text-black font-semibold text-[15px] transition-colors"
+                >
+                    <svg
+                        class="w-5 h-5 text-gray-400"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        viewBox="0 0 24 24"
+                    >
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"
+                        />
+                    </svg>
+                    <span>Riwayat</span>
+                </a>
+            </aside>
+
+            <main class="flex-1 p-8 max-w-6xl space-y-7 w-full">
+                <div id="page-home" class="space-y-7">
+                <section
+                    class="bg-white border border-[#e5e7eb] rounded-2xl p-7 shadow-sm"
+                >
+                    <div class="space-y-5">
+                        <div>
+                            <label
+                                class="block text-[15px] font-bold text-black mb-0.5"
+                                >Link YouTube</label
+                            >
+                            <p class="text-[13px] text-gray-500 mb-3.5">
+                                Durasi video sumber: 5 menit sampai 120 menit.
+                            </p>
+                            <input
+                                id="youtube-url"
+                                type="text"
+                                placeholder="https://www.youtube.com/watch?v=..."
+                                class="w-full px-4 py-3.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-[14px] text-gray-700 bg-white"
+                            />
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+                            <div class="md:col-span-2">
+                                <label
+                                    class="block text-[15px] font-bold text-black mb-2"
+                                    >Ukuran Layar</label
+                                >
+                                <div class="grid grid-cols-3 gap-3">
+                                    <label
+                                        class="border border-indigo-600 bg-indigo-50/30 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer text-center transition"
+                                    >
+                                        <input
+                                            type="radio"
+                                            name="screen_size"
+                                            class="sr-only"
+                                            checked
+                                        />
+                                        <span
+                                            class="text-[14px] font-bold text-indigo-600 block"
+                                            >9:16</span
+                                        >
+                                        <span
+                                            class="text-[11px] text-indigo-500"
+                                            >Shorts / TikTok</span
+                                        >
+                                    </label>
+                                    <label
+                                        class="border border-gray-200 hover:border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer text-center transition"
+                                    >
+                                        <input
+                                            type="radio"
+                                            name="screen_size"
+                                            class="sr-only"
+                                        />
+                                        <span
+                                            class="text-[14px] font-bold text-gray-700 block"
+                                            >1:1</span
+                                        >
+                                        <span class="text-[11px] text-gray-400"
+                                            >Instagram Post</span
+                                        >
+                                    </label>
+                                    <label
+                                        class="border border-gray-200 hover:border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer text-center transition"
+                                    >
+                                        <input
+                                            type="radio"
+                                            name="screen_size"
+                                            class="sr-only"
+                                        />
+                                        <span
+                                            class="text-[14px] font-bold text-gray-700 block"
+                                            >16:9</span
+                                        >
+                                        <span class="text-[11px] text-gray-400"
+                                            >Landscape</span
+                                        >
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label
+                                    class="block text-[15px] font-bold text-black mb-2"
+                                    >Suntik Subtitel</label
+                                >
+                                <div
+                                    class="border border-gray-200 rounded-xl p-3 h-[70px] flex items-center justify-between px-4"
+                                >
+                                    <div>
+                                        <span
+                                            class="text-[14px] font-bold text-gray-800 block"
+                                            >Generasikan Teks</span
+                                        >
+                                        <span class="text-[11px] text-gray-400"
+                                            >Captions on/off video</span
+                                        >
+                                    </div>
+                                    <label
+                                        class="relative inline-flex items-center cursor-pointer"
+                                    >
+                                        <input
+                                            id="captions"
+                                            type="checkbox"
+                                            value=""
+                                            class="sr-only peer"
+                                            checked
+                                        />
+                                        <div
+                                            class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#4f46e5]"
+                                        ></div>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center pt-1">
+                            <button
+                                onclick="
+                                    document
+                                        .getElementById('instruction-modal')
+                                        .classList.remove('hidden')
+                                "
+                                type="button"
+                                class="text-[13px] text-[#4f46e5] font-bold hover:text-indigo-700 flex items-center space-x-1.5 transition"
+                            >
+                                <svg
+                                    class="w-4 h-4"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.2"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"
+                                    />
+                                </svg>
+                                <span>Tambah Arahan Klip (Opsional)</span>
+                            </button>
+                        </div>
+
+                        <button
+                            id="process-button"
+                            class="w-full bg-[#9da1f3] hover:bg-[#8b90f0] text-white font-bold py-3.5 rounded-xl text-[15px] transition shadow-sm"
+                        >
+                            Proses Klip
+                        </button>
+                    </div>
+                </section>
+
+                <section
+                    class="bg-white border border-[#e5e7eb] rounded-2xl p-7 shadow-sm min-h-[460px] flex flex-col justify-between"
+                >
+                    <div>
+                        <h2
+                            class="text-[20px] font-bold text-black mb-0.5 tracking-tight"
+                        >
+                            Hasil Klip
+                        </h2>
+                        <p class="text-[13px] text-gray-500">
+                            Lihat klip yang sudah jadi dan pantau progress yang
+                            sedang diproses.
+                        </p>
+                    </div>
+
+                    <div
+                        class="flex flex-col items-center justify-center py-10 text-center max-w-xl mx-auto"
+                    >
+                        <div
+                            class="w-20 h-20 bg-[#eff2fe] text-[#4f46e5] rounded-3xl flex items-center justify-center mb-6 shadow-sm"
+                        >
+                            <svg
+                                class="w-9 h-9 text-[#4f46e5]"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2.2"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                />
+                            </svg>
+                        </div>
+
+                        <h3
+                            class="text-[19px] font-bold text-black mb-2.5 tracking-tight"
+                        >
+                            Siap Membuat Klip Viral Pertamamu?
+                        </h3>
+                        <p
+                            class="text-[13px] text-gray-500 leading-relaxed max-w-md"
+                        >
+                            Tempel link YouTube di atas, dan biarkan AI kami
+                            menemukan 3 momen emas terbaik dari videomu. Proses
+                            otomatis, hasil profesional.
+                        </p>
+                    </div>
+
+                    <div
+                        class="border-t border-gray-100/70 pt-6 grid grid-cols-1 md:grid-cols-3 gap-6 text-[13px]"
+                    >
+                        <div
+                            class="flex items-center space-x-3.5 justify-center md:justify-start"
+                        >
+                            <div
+                                class="w-7 h-7 rounded-full bg-[#eff2fe] text-[#4f46e5] flex items-center justify-center font-bold text-[12px]"
+                            >
+                                1
+                            </div>
+                            <div>
+                                <p class="font-bold text-black">Paste Link</p>
+                                <p class="text-gray-400 text-[12px]">
+                                    Tempel URL YouTube
+                                </p>
+                            </div>
+                            <div
+                                class="hidden md:block flex-1 text-right text-gray-300 pl-4"
+                            >
+                                <svg
+                                    class="w-4 h-4 inline"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        d="M9 5l7 7-7 7"
+                                    />
+                                </svg>
+                            </div>
+                        </div>
+                        <div
+                            class="flex items-center space-x-3.5 justify-center"
+                        >
+                            <div
+                                class="w-7 h-7 rounded-full bg-[#eff2fe] text-[#4f46e5] flex items-center justify-center font-bold text-[12px]"
+                            >
+                                2
+                            </div>
+                            <div>
+                                <p class="font-bold text-black">AI Bekerja</p>
+                                <p class="text-gray-400 text-[12px]">
+                                    Otomatis pilih 5 klip
+                                </p>
+                            </div>
+                            <div
+                                class="hidden md:block flex-1 text-right text-gray-300 pl-4"
+                            >
+                                <svg
+                                    class="w-4 h-4 inline"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        d="M9 5l7 7-7 7"
+                                    />
+                                </svg>
+                            </div>
+                        </div>
+                        <div
+                            class="flex items-center space-x-3.5 justify-center md:justify-end"
+                        >
+                            <div
+                                class="w-7 h-7 rounded-full bg-[#eff2fe] text-[#4f46e5] flex items-center justify-center font-bold text-[12px]"
+                            >
+                                3
+                            </div>
+                            <div class="text-left">
+                                <p class="font-bold text-black">Download</p>
+                                <p class="text-gray-400 text-[12px]">
+                                    Klip siap viral
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+                </div>
+                <div id="page-history" class="hidden space-y-7">
+                    <section class="bg-white border border-[#e5e7eb] rounded-2xl p-7 shadow-sm min-h-[460px] flex flex-col gap-6">
+                        <div>
+                            <h2 class="text-[20px] font-bold text-black mb-0.5 tracking-tight">Riwayat Klip</h2>
+                            <p class="text-[13px] text-gray-500">Klip yang sudah dibuat dari folder output.</p>
+                        </div>
+                        <div id="history-panel" class="space-y-3"></div>
+                    </section>
+                </div>
+            </main>
+        </div>
+
+        <div
+            id="instruction-modal"
+            class="hidden fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 transition-opacity"
+        >
+            <div
+                class="bg-white border border-gray-100 w-full max-w-lg rounded-2xl shadow-xl overflow-hidden p-6 space-y-4"
+            >
+                <div class="flex items-center justify-between">
+                    <div
+                        class="flex items-center space-x-2 text-black font-bold text-[16px]"
+                    >
+                        <svg
+                            class="w-5 h-5 text-[#4f46e5]"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2.2"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"
+                            />
+                        </svg>
+                        <span
+                            >Arahkan klipnya
+                            <span class="text-gray-400 text-[13px] font-normal"
+                                >(opsional)</span
+                            ></span
+                        >
+                    </div>
+                    <button
+                        onclick="
+                            document
+                                .getElementById('instruction-modal')
+                                .classList.add('hidden')
+                        "
+                        class="text-gray-400 hover:text-black transition p-1"
+                    >
+                        <svg
+                            class="w-5 h-5"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2.5"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                d="M6 18L18 6M6 6l12 12"
+                            />
+                        </svg>
+                    </button>
+                </div>
+
+                <p class="text-[13px] text-gray-500 leading-relaxed">
+                    Berikan instruksi khusus kepada AI seperti durasi potongan
+                    tertentu, fokus pembahasan, atau sudut pandang yang ingin
+                    ditonjolkan.
+                </p>
+
+                <div class="relative">
+                    <textarea
+                        id="instruction"
+                        rows="4"
+                        placeholder="Masukkan instruksi khusus di sini..."
+                        class="w-full px-4 py-3.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-[14px] text-gray-700 bg-gray-50/50 placeholder-gray-400/90 resize-none"
+                    ></textarea>
+                    <div
+                        class="absolute bottom-3 right-4 text-[11px] font-medium text-gray-400 tracking-wider"
+                    >
+                        0/1000
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-end space-x-3 pt-2">
+                    <button
+                        onclick="
+                            document
+                                .getElementById('instruction-modal')
+                                .classList.add('hidden')
+                        "
+                        type="button"
+                        class="px-4 py-2 border border-gray-200 text-gray-700 text-[14px] font-semibold rounded-xl hover:bg-gray-50 transition"
+                    >
+                        Batal
+                    </button>
+                    <button
+                        onclick="
+                            document
+                                .getElementById('instruction-modal')
+                                .classList.add('hidden')
+                        "
+                        type="button"
+                        class="px-5 py-2 bg-[#4f46e5] text-white text-[14px] font-bold rounded-xl hover:bg-indigo-700 transition shadow-sm"
+                    >
+                        Simpan Arahan
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div
+            id="settings-modal"
+            class="hidden fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 transition-opacity"
+        >
+            <div
+                class="bg-white border border-gray-100 w-full max-w-lg rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]"
+            >
+                <div
+                    class="p-6 border-b border-gray-100 flex items-center justify-between"
+                >
+                    <div
+                        class="flex items-center space-x-2 text-black font-bold text-[17px]"
+                    >
+                        <svg
+                            class="w-5 h-5 text-gray-700"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2.2"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.43l-1.003.767c-.29.223-.443.601-.403.956.011.1.018.203.018.306s-.007.205-.018.306c-.04.355.114.733.403.956.011.1.018.203.018.306s-.007.205-.018.306c-.04.355.114.733.403.956l1.003.767a1.125 1.125 0 01-.26 1.43l-1.296 2.247a1.125 1.125 0 01-1.37.49l-1.216-.456c-.356-.133-.751-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.43l1.004-.767c.29-.223.443-.601.403-.956a6.4 6.4 0 01-.018-.306c0-.103.007-.205.018-.306.04-.355-.114-.733-.403-.956l-1.004-.767a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.49l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28z"
+                            />
+                        </svg>
+                        <span>Konfigurasi Pengaturan</span>
+                    </div>
+                    <button
+                        onclick="
+                            document
+                                .getElementById('settings-modal')
+                                .classList.add('hidden')
+                        "
+                        class="text-gray-400 hover:text-black transition p-1"
+                    >
+                        <svg
+                            class="w-5 h-5"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2.5"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                d="M6 18L18 6M6 6l12 12"
+                            />
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="p-6 space-y-4 overflow-y-auto flex-1">
+                    <div>
+                        <label
+                            class="block text-[14px] font-bold text-gray-800 mb-1.5"
+                            >Base URL / Provider</label
+                        >
+                        <input
+                            id="base-url"
+                            type="text"
+                            placeholder="https://generativelanguage.googleapis.com/v1beta/openai"
+                            class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-[14px] text-gray-700 bg-gray-50/30"
+                        />
+                    </div>
+
+                    <div>
+                        <label
+                            class="block text-[14px] font-bold text-gray-800 mb-1.5"
+                            >API Key</label
+                        >
+                        <input
+                            id="api-key"
+                            type="password"
+                            placeholder="Gemini API key"
+                            class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-[14px] text-gray-700 bg-gray-50/30 font-mono"
+                        />
+                    </div>
+
+                    <div>
+                        <label
+                            class="block text-[14px] font-bold text-gray-800 mb-1.5"
+                            >Model LLM / Pemrosesan</label
+                        >
+                        <input
+                            id="model"
+                            type="text"
+                            placeholder="gemini-2.0-flash"
+                            class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-[14px] text-gray-700 bg-gray-50/30"
+                        />
+                    </div>
+
+                    <div>
+                        <label
+                            class="block text-[14px] font-bold text-gray-800 mb-1.5"
+                            >Bahasa Subtitel (Subtitle Language)</label
+                        >
+                        <select
+                            id="subtitle-language"
+                            class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-[14px] text-gray-700 bg-white"
+                        >
+                            <option value="id">Bahasa Indonesia</option>
+                            <option value="en">English (Inggris)</option>
+                            <option value="ms">Bahasa Melayu</option>
+                            <option value="auto">
+                                Deteksi Otomatis (Auto-Detect)
+                            </option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between items-center mb-1.5">
+                            <label
+                                class="block text-[14px] font-bold text-gray-800"
+                                >Folder Penyimpanan Output</label
+                            >
+                            <span class="text-[12px] text-gray-400 font-normal"
+                                >opsional</span
+                            >
+                        </div>
+                        <input
+                            id="output-dir"
+                            type="text"
+                            placeholder="Contoh: /Downloads/KlipKlop-Output"
+                            class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-[14px] text-gray-700 bg-gray-50/30"
+                        />
+                    </div>
+                </div>
+
+                <div
+                    class="p-5 border-t border-gray-100 bg-gray-50/40 flex items-center justify-end space-x-3"
+                >
+                    <button
+                        onclick="
+                            document
+                                .getElementById('settings-modal')
+                                .classList.add('hidden')
+                        "
+                        type="button"
+                        class="px-4 py-2 border border-gray-200 text-gray-700 text-[14px] font-semibold rounded-xl hover:bg-gray-100 transition"
+                    >
+                        Batal
+                    </button>
+                    <button
+                        id="save-settings"
+                        type="button"
+                        class="px-5 py-2 bg-[#4f46e5] text-white text-[14px] font-bold rounded-xl hover:bg-indigo-700 transition shadow-sm"
+                    >
+                        Simpan Konfigurasi
+                    </button>
+                </div>
+            </div>
+        </div>
+    <script src="static/app.js"></script>
+    </body>
+</html>
