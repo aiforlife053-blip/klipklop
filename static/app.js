@@ -141,9 +141,9 @@ function setScreenSize(value) {
     const selected = card.dataset.screenCard === value;
     const title = card.querySelector('span:first-of-type');
     const subtitle = card.querySelector('span:last-of-type');
-    card.className = selected ? 'border border-indigo-600 bg-indigo-50/30 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer text-center transition' : 'border border-gray-200 hover:border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer text-center transition';
-    if (title) title.className = selected ? 'text-[14px] font-bold text-indigo-600 block' : 'text-[14px] font-bold text-gray-700 block';
-    if (subtitle) subtitle.className = selected ? 'text-[11px] text-indigo-500' : 'text-[11px] text-gray-400';
+    card.className = selected ? 'border border-orange-600 bg-orange-50/30 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer text-center transition' : 'border border-gray-200 hover:border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer text-center transition';
+    if (title) title.className = selected ? 'text-[14px] font-bold text-orange-600 block' : 'text-[14px] font-bold text-gray-700 block';
+    if (subtitle) subtitle.className = selected ? 'text-[11px] text-orange-500' : 'text-[11px] text-gray-400';
     const input = card.querySelector('input');
     if (input) input.checked = selected;
   });
@@ -335,16 +335,19 @@ async function saveOutput(path, oneClip) {
 function toggleSession(path) { document.querySelectorAll('[data-session-files]').forEach((el) => el.classList.toggle('hidden', el.dataset.sessionFiles !== path || !el.classList.contains('hidden'))); }
 function formatTime(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? (value || '') : date.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }); }
 function showPage(name) {
-  const home = $('page-home'); const history = $('page-history'); const consolePage = $('page-console');
-  if (!home || !history || !consolePage) return;
+  const home = $('page-home'); const history = $('page-history'); const consolePage = $('page-console'); const settings = $('page-settings');
+  if (!home || !history || !consolePage || !settings) return;
   home.classList.toggle('hidden', name !== 'home');
   history.classList.toggle('hidden', name !== 'history');
   consolePage.classList.toggle('hidden', name !== 'console');
+  settings.classList.toggle('hidden', name !== 'settings');
   setNavActive('nav-home', name === 'home');
   setNavActive('nav-history', name === 'history');
   setNavActive('nav-console', name === 'console');
+  setNavActive('nav-settings', name === 'settings');
   if (name === 'history') renderOutputs();
   if (name === 'console') refreshLogPanel();
+  if (name === 'settings') loadSettings();
 }
 
 function setNavActive(id, active) {
@@ -358,7 +361,7 @@ function escapeAttr(value) { return escapeHtml(value).replace(/`/g, '&#96;'); }
 function cssEscape(value) { return window.CSS && CSS.escape ? CSS.escape(value) : String(value).replace(/"/g, '\\"'); }
 
 document.addEventListener('DOMContentLoaded', () => {
-  const save = $('save-settings'); const showJson = $('show-json'); const jsonClose = $('json-close'); const clearKey = $('clear-api-key'); const start = $('process-button'); const navHome = $('nav-home'); const navHistory = $('nav-history'); const navConsole = $('nav-console'); const profile = $('profile-button'); const logClear = $('log-clear'); const instruction = $('instruction'); const instructionSave = $('instruction-save'); const instructionCancel = $('instruction-cancel'); const qualityMain = $('video-quality-main'); const qualitySettings = $('video-quality'); const blur = $('landscape-blur');
+  const save = $('save-settings'); const showJson = $('show-json'); const jsonClose = $('json-close'); const clearKey = $('clear-api-key'); const start = $('process-button'); const navHome = $('nav-home'); const navHistory = $('nav-history'); const navConsole = $('nav-console'); const navSettings = $('nav-settings'); const profile = $('profile-button'); const logClear = $('log-clear'); const instruction = $('instruction'); const instructionSave = $('instruction-save'); const instructionCancel = $('instruction-cancel'); const qualityMain = $('video-quality-main'); const qualitySettings = $('video-quality'); const blur = $('landscape-blur');
   if (save) save.addEventListener('click', saveSettings);
   if (showJson) showJson.addEventListener('click', showPayloadJson);
   if (jsonClose) jsonClose.addEventListener('click', () => $('json-modal')?.classList.add('hidden'));
@@ -391,6 +394,12 @@ document.addEventListener('DOMContentLoaded', () => {
   if (navHome) navHome.addEventListener('click', (event) => { event.preventDefault(); showPage('home'); });
   if (navHistory) navHistory.addEventListener('click', (event) => { event.preventDefault(); showPage('history'); });
   if (navConsole) navConsole.addEventListener('click', (event) => { event.preventDefault(); showPage('console'); });
+  if (navSettings) navSettings.addEventListener('click', (event) => { event.preventDefault(); showPage('settings'); });
+  const toggleNavbar = $('toggle-navbar');
+  const sidebar = $('sidebar');
+  if (toggleNavbar && sidebar) {
+    toggleNavbar.addEventListener('click', () => sidebar.classList.toggle('collapsed'));
+  }
   setScreenSize(getScreenSize());
   updateInstructionCount();
   loadSettings();
