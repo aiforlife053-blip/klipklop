@@ -690,21 +690,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if hasattr(transcript, 'words') and transcript.words:
             words = transcript.words
             
-            # Group words into chunks (3-4 words per line for readability)
-            chunk_size = 4
-            
-            for i in range(0, len(words), chunk_size):
-                chunk = words[i:i + chunk_size]
-                if not chunk:
-                    continue
-                
-                chunk_start = chunk[0].start + time_offset
-                chunk_end = chunk[-1].end + time_offset
-                text = " ".join(w.word.strip().upper() for w in chunk if w.word.strip())
-                if text and chunk_end > chunk_start:
+            for word in words:
+                text = str(getattr(word, 'word', '') or '').strip()
+                start = float(getattr(word, 'start', 0) or 0) + time_offset
+                end = float(getattr(word, 'end', start + 0.25) or start + 0.25) + time_offset
+                if text and end > start:
                     events.append({
-                        'start': self.format_time(chunk_start),
-                        'end': self.format_time(chunk_end),
+                        'start': self.format_time(start),
+                        'end': self.format_time(end),
                         'text': text
                     })
         
@@ -713,7 +706,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             for segment in transcript.segments:
                 start = segment.get('start', 0) + time_offset
                 end = segment.get('end', 0) + time_offset
-                text = segment.get('text', '').strip().upper()
+                text = segment.get('text', '').strip()
                 
                 if text:
                     events.append({
