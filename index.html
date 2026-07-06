@@ -133,7 +133,7 @@
                             <span class="block text-[11px] text-gray-400 font-normal">Local Mode</span>
                         </div>
                         <svg
-                            class="w-4 h-4 text-gray-400 shrink-0 profile-text"
+                            class="w-4 h-4 text-gray-400 hover:text-black shrink-0 transition-colors"
                             fill="none"
                             stroke="currentColor"
                             stroke-width="2"
@@ -142,15 +142,34 @@
                             <path
                                 stroke-linecap="round"
                                 stroke-linejoin="round"
-                                d="M19 9l-7 7-7-7"
+                                d="M6.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0z"
                             />
                         </svg>
                     </button>
                     <div
                         id="profile-menu"
-                        class="hidden absolute bottom-14 left-0 w-full bg-white border border-gray-100 rounded-xl shadow-lg p-3 text-[13px] text-gray-600 z-[60]"
+                        class="hidden absolute bottom-16 left-2 w-40 bg-white border border-gray-100 rounded-xl shadow-lg p-1.5 text-[13px] text-gray-600 z-[60]"
                     >
-                        Local web mode
+                        <button
+                            type="button"
+                            onclick="location.reload()"
+                            class="w-full flex items-center space-x-2 px-2.5 py-1.5 rounded-lg text-red-600 hover:bg-red-50 font-bold transition text-left focus:outline-none"
+                        >
+                            <svg
+                                class="w-4 h-4 text-red-500"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2.2"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"
+                                />
+                            </svg>
+                            <span>Keluar</span>
+                        </button>
                     </div>
                 </div>
             </aside>
@@ -265,13 +284,66 @@
 
                             <div>
                                 <label class="block text-[14px] font-bold text-black mb-1.5">Background Landscape</label>
-                                <label class="border border-gray-200 rounded-xl p-2.5 flex items-center justify-between cursor-pointer bg-white">
-                                    <span>
-                                        <b class="text-[13px] text-gray-800 block">Blur Bergerak</b>
-                                        <span class="block text-[10px] text-gray-400">Isi area kosong dengan blur</span>
-                                    </span>
-                                    <input id="landscape-blur" type="checkbox" class="w-4 h-4 accent-orange-600 shrink-0" />
-                                </label>
+                                <div
+                                    class="border border-gray-200 rounded-xl p-2.5 flex items-center justify-between bg-white"
+                                >
+                                    <div>
+                                        <span
+                                            class="text-[13px] font-bold text-gray-800 block"
+                                            >Blur Bergerak</span
+                                        >
+                                        <span class="text-[10px] text-gray-400 block"
+                                            >Isi area kosong dengan blur</span
+                                        >
+                                    </div>
+                                    <label
+                                        class="relative inline-flex items-center cursor-pointer"
+                                    >
+                                        <input
+                                            id="landscape-blur"
+                                            type="checkbox"
+                                            value=""
+                                            class="sr-only peer"
+                                        />
+                                        <div
+                                            class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#ea580c]"
+                                        ></div>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label
+                                    class="block text-[14px] font-bold text-black mb-1.5"
+                                    >Suntik Subtitel</label
+                                >
+                                <div
+                                    class="border border-gray-200 rounded-xl p-2.5 flex items-center justify-between bg-white"
+                                >
+                                    <div>
+                                        <span
+                                            class="text-[13px] font-bold text-gray-800 block"
+                                            >Generasikan Teks</span
+                                        >
+                                        <span class="text-[10px] text-gray-400 block"
+                                            >Captions video</span
+                                        >
+                                    </div>
+                                    <label
+                                        class="relative inline-flex items-center cursor-pointer"
+                                    >
+                                        <input
+                                            id="captions"
+                                            type="checkbox"
+                                            value=""
+                                            class="sr-only peer"
+                                            checked
+                                        />
+                                        <div
+                                            class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#ea580c]"
+                                        ></div>
+                                    </label>
+                                </div>
                             </div>
 
                             <div>
@@ -338,40 +410,6 @@
                                     </label>
                                 </div>
                             </div>
-
-                            <div>
-                                <label
-                                    class="block text-[14px] font-bold text-black mb-1.5"
-                                    >Suntik Subtitel</label
-                                >
-                                <div
-                                    class="border border-gray-200 rounded-xl p-2.5 flex items-center justify-between bg-white"
-                                >
-                                    <div>
-                                        <span
-                                            class="text-[13px] font-bold text-gray-800 block"
-                                            >Generasikan Teks</span
-                                        >
-                                        <span class="text-[10px] text-gray-400 block"
-                                            >Captions video</span
-                                        >
-                                    </div>
-                                    <label
-                                        class="relative inline-flex items-center cursor-pointer"
-                                    >
-                                        <input
-                                            id="captions"
-                                            type="checkbox"
-                                            value=""
-                                            class="sr-only peer"
-                                            checked
-                                        />
-                                        <div
-                                            class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#ea580c]"
-                                        ></div>
-                                    </label>
-                                </div>
-                            </div>
                         </div>
 
                         <div class="flex items-center">
@@ -400,8 +438,7 @@
                                 <span>Tambah Arahan (Opsional)</span>
                             </button>
                         </div>
-
-                        </div>
+                    </div>
 
                         <div class="space-y-2 pt-4 border-t border-gray-200/60">
                             <div class="flex gap-2">
@@ -442,142 +479,150 @@
                     </section>
                 </div>
                 <div id="page-settings" class="hidden p-6 space-y-7">
-                    <section class="bg-white border border-[#e5e7eb] rounded-2xl p-7 shadow-sm max-w-3xl">
+                    <section class="bg-white border border-[#e5e7eb] rounded-2xl p-7 shadow-sm w-full">
                         <div class="border-b border-gray-100 pb-5 mb-5">
                             <h2 class="text-[20px] font-bold text-black tracking-tight">Konfigurasi Pengaturan</h2>
                             <p class="text-[13px] text-gray-500 mt-0.5">Kelola API key, model pemrosesan, dan pengaturan subtitle.</p>
                         </div>
 
-                        <div class="space-y-5">
-                            <div>
-                                <label class="block text-[14px] font-bold text-gray-800 mb-1.5">Base URL / Provider</label>
-                                <input
-                                    id="base-url"
-                                    type="text"
-                                    placeholder="https://generativelanguage.googleapis.com/v1beta/openai"
-                                    class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[14px] text-gray-700 bg-gray-50/30"
-                                />
-                            </div>
-
-                            <div>
-                                <label class="block text-[14px] font-bold text-gray-800 mb-1.5">API Key</label>
-                                <input
-                                    id="api-key"
-                                    type="password"
-                                    placeholder="Gemini API key"
-                                    class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[14px] text-gray-700 bg-gray-50/30 font-mono"
-                                />
-                            </div>
-
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                            <!-- Left Column: LLM & Storage Config -->
+                            <div class="space-y-4">
                                 <div>
-                                    <label class="block text-[14px] font-bold text-gray-800 mb-1.5">Subtitle Engine</label>
-                                    <select id="subtitle-engine" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-white">
-                                        <option value="local">Local faster-whisper</option>
-                                        <option value="auto">Auto</option>
-                                        <option value="api">API Whisper</option>
-                                    </select>
+                                    <label class="block text-[13px] font-bold text-gray-800 mb-1">Base URL / Provider</label>
+                                    <input
+                                        id="base-url"
+                                        type="text"
+                                        placeholder="https://generativelanguage.googleapis.com/v1beta/openai"
+                                        class="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[13px] text-gray-700 bg-gray-50/30"
+                                    />
                                 </div>
+
                                 <div>
-                                    <label class="block text-[14px] font-bold text-gray-800 mb-1.5">Local Model</label>
-                                    <select id="local-whisper-model" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-white">
-                                        <option value="base">base</option>
-                                        <option value="small" selected>small</option>
-                                        <option value="medium">medium</option>
-                                    </select>
+                                    <label class="block text-[13px] font-bold text-gray-800 mb-1">API Key</label>
+                                    <input
+                                        id="api-key"
+                                        type="password"
+                                        placeholder="Gemini API key"
+                                        class="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[13px] text-gray-700 bg-gray-50/30 font-mono"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label class="block text-[13px] font-bold text-gray-800 mb-1">Model LLM / Pemrosesan</label>
+                                    <input
+                                        id="model"
+                                        type="text"
+                                        placeholder="gemini-2.5-flash"
+                                        class="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[13px] text-gray-700 bg-gray-50/30"
+                                    />
+                                </div>
+
+                                <div>
+                                    <div class="flex justify-between items-center mb-1">
+                                        <label class="block text-[13px] font-bold text-gray-800">Folder Penyimpanan Output</label>
+                                        <span class="text-[11px] text-gray-400 font-normal">opsional</span>
+                                    </div>
+                                    <input
+                                        id="output-dir"
+                                        type="text"
+                                        placeholder="Contoh: /Downloads/KlipKlop-Output"
+                                        class="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[13px] text-gray-700 bg-gray-50/30"
+                                    />
                                 </div>
                             </div>
 
-                            <div id="api-whisper-fields" class="hidden space-y-4">
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Right Column: Subtitles & Video Settings -->
+                            <div class="space-y-4">
+                                <div class="grid grid-cols-2 gap-3">
                                     <div>
-                                        <label class="block text-[14px] font-bold text-gray-800 mb-1.5">API Whisper URL</label>
-                                        <input id="caption-base-url" type="text" placeholder="https://api.openai.com/v1" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-gray-50/30" />
+                                        <label class="block text-[13px] font-bold text-gray-800 mb-1">Subtitle Engine</label>
+                                        <select id="subtitle-engine" class="w-full px-3 py-2 border border-gray-200 rounded-xl text-[13px] text-gray-700 bg-white">
+                                            <option value="local">Local faster-whisper</option>
+                                            <option value="auto">Auto</option>
+                                            <option value="api">API Whisper</option>
+                                        </select>
                                     </div>
                                     <div>
-                                        <label class="block text-[14px] font-bold text-gray-800 mb-1.5">API Whisper Model</label>
-                                        <input id="caption-model" type="text" placeholder="whisper-1" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-gray-50/30" />
+                                        <label class="block text-[13px] font-bold text-gray-800 mb-1">Local Model</label>
+                                        <select id="local-whisper-model" class="w-full px-3 py-2 border border-gray-200 rounded-xl text-[13px] text-gray-700 bg-white">
+                                            <option value="base">base</option>
+                                            <option value="small" selected>small</option>
+                                            <option value="medium">medium</option>
+                                        </select>
                                     </div>
                                 </div>
-                                <div>
-                                    <label class="block text-[14px] font-bold text-gray-800 mb-1.5">API Whisper Key</label>
-                                    <input id="caption-api-key" type="password" placeholder="Whisper/OpenAI API key" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-gray-50/30 font-mono" />
+
+                                <div id="api-whisper-fields" class="hidden space-y-3">
+                                    <div class="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label class="block text-[11px] font-bold text-gray-600 mb-1">API Whisper URL</label>
+                                            <input id="caption-base-url" type="text" placeholder="https://api.openai.com/v1" class="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-[12px] text-gray-700 bg-gray-50/30" />
+                                        </div>
+                                        <div>
+                                            <label class="block text-[11px] font-bold text-gray-600 mb-1">API Whisper Model</label>
+                                            <input id="caption-model" type="text" placeholder="whisper-1" class="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-[12px] text-gray-700 bg-gray-50/30" />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-[11px] font-bold text-gray-600 mb-1">API Whisper Key</label>
+                                        <input id="caption-api-key" type="password" placeholder="Whisper/OpenAI API key" class="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-[12px] text-gray-700 bg-gray-50/30 font-mono" />
+                                    </div>
+                                </div>
+
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="block text-[13px] font-bold text-gray-800 mb-1">Bahasa Subtitel</label>
+                                        <select
+                                            id="subtitle-language"
+                                            class="w-full px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[13px] text-gray-700 bg-white"
+                                        >
+                                            <option value="id">Bahasa Indonesia</option>
+                                            <option value="en">English (Inggris)</option>
+                                            <option value="ms">Bahasa Melayu</option>
+                                            <option value="auto">Deteksi Otomatis</option>
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-[13px] font-bold text-gray-800 mb-1">Kualitas Video</label>
+                                        <select
+                                            id="video-quality"
+                                            class="w-full px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[13px] text-gray-700 bg-white"
+                                        >
+                                            <option value="480">480p cepat</option>
+                                            <option value="720">720p default</option>
+                                            <option value="1080">1080p tinggi</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="grid grid-cols-4 gap-2">
+                                    <div>
+                                        <label class="block text-[11px] font-bold text-gray-700 mb-1 truncate" title="Font Subtitle">Font Sub</label>
+                                        <input id="subtitle-font" type="text" value="Plus Jakarta Sans" class="w-full px-2 py-2 border border-gray-200 rounded-lg text-[12px] text-gray-700 bg-gray-50/30" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-[11px] font-bold text-gray-700 mb-1">Ukuran</label>
+                                        <input id="subtitle-size" type="number" min="24" max="120" value="65" class="w-full px-2 py-2 border border-gray-200 rounded-lg text-[12px] text-gray-700 bg-gray-50/30" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-[11px] font-bold text-gray-700 mb-1">Posisi</label>
+                                        <select id="subtitle-position" class="w-full px-2 py-2 border border-gray-200 rounded-lg text-[12px] text-gray-700 bg-white">
+                                            <option value="auto">Auto</option>
+                                            <option value="top">Top</option>
+                                            <option value="middle">Middle</option>
+                                            <option value="bottom">Bottom</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-[11px] font-bold text-gray-700 mb-1 truncate" title="Posisi Bawah">Margin Bw</label>
+                                        <input id="subtitle-bottom-margin" type="number" min="40" max="900" value="400" class="w-full px-2 py-2 border border-gray-200 rounded-lg text-[12px] text-gray-700 bg-gray-50/30" />
+                                    </div>
                                 </div>
                             </div>
 
-                            <div>
-                                <label class="block text-[14px] font-bold text-gray-800 mb-1.5">Model LLM / Pemrosesan</label>
-                                <input
-                                    id="model"
-                                    type="text"
-                                    placeholder="gemini-2.5-flash"
-                                    class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[14px] text-gray-700 bg-gray-50/30"
-                                />
-                            </div>
-
-                            <div>
-                                <label class="block text-[14px] font-bold text-gray-800 mb-1.5">Bahasa Subtitel (Subtitle Language)</label>
-                                <select
-                                    id="subtitle-language"
-                                    class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[14px] text-gray-700 bg-white"
-                                >
-                                    <option value="id">Bahasa Indonesia</option>
-                                    <option value="en">English (Inggris)</option>
-                                    <option value="ms">Bahasa Melayu</option>
-                                    <option value="auto">Deteksi Otomatis (Auto-Detect)</option>
-                                </select>
-                            </div>
-
-                            <div>
-                                <label class="block text-[14px] font-bold text-gray-800 mb-1.5">Kualitas Video</label>
-                                <select
-                                    id="video-quality"
-                                    class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[14px] text-gray-700 bg-white"
-                                >
-                                    <option value="480">480p cepat</option>
-                                    <option value="720">720p default</option>
-                                    <option value="1080">1080p kualitas tinggi</option>
-                                </select>
-                            </div>
-
-                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                <div>
-                                    <label class="block text-[13px] font-bold text-gray-800 mb-1.5">Font Subtitle</label>
-                                    <input id="subtitle-font" type="text" value="Plus Jakarta Sans" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-gray-50/30" />
-                                </div>
-                                <div>
-                                    <label class="block text-[13px] font-bold text-gray-800 mb-1.5">Ukuran</label>
-                                    <input id="subtitle-size" type="number" min="24" max="120" value="65" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-gray-50/30" />
-                                </div>
-                                <div>
-                                    <label class="block text-[13px] font-bold text-gray-800 mb-1.5">Posisi</label>
-                                    <select id="subtitle-position" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-white">
-                                        <option value="auto">Auto</option>
-                                        <option value="top">Top</option>
-                                        <option value="middle">Middle</option>
-                                        <option value="bottom">Bottom</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="block text-[13px] font-bold text-gray-800 mb-1.5">Posisi Bawah</label>
-                                    <input id="subtitle-bottom-margin" type="number" min="40" max="900" value="400" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-gray-50/30" />
-                                </div>
-                            </div>
-
-                            <div>
-                                <div class="flex justify-between items-center mb-1.5">
-                                    <label class="block text-[14px] font-bold text-gray-800">Folder Penyimpanan Output</label>
-                                    <span class="text-[12px] text-gray-400 font-normal">opsional</span>
-                                </div>
-                                <input
-                                    id="output-dir"
-                                    type="text"
-                                    placeholder="Contoh: /Downloads/KlipKlop-Output"
-                                    class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[14px] text-gray-700 bg-gray-50/30"
-                                />
-                            </div>
-
-                            <p id="settings-status" class="text-[13px] text-gray-500"></p>
+                            <p id="settings-status" class="text-[13px] text-gray-500 col-span-1 md:col-span-2"></p>
                         </div>
 
                         <div class="border-t border-gray-100 pt-6 mt-6 flex items-center justify-end space-x-3">

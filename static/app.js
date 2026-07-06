@@ -429,6 +429,15 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+  document.addEventListener('click', (e) => {
+    const profileMenu = $('profile-menu');
+    const profileButton = $('profile-button');
+    if (profileMenu && profileButton && !profileMenu.classList.contains('hidden')) {
+      if (!profileButton.contains(e.target) && !profileMenu.contains(e.target)) {
+        profileMenu.classList.add('hidden');
+      }
+    }
+  });
   setScreenSize(getScreenSize());
   updateInstructionCount();
   loadSettings();
