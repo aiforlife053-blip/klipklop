@@ -5,6 +5,7 @@ let pendingConfirm = null;
 let smoothProgress = 0;
 let smoothProgressTarget = 0;
 let smoothProgressTimer = null;
+let processingActive = false;
 
 async function api(path, options = {}) {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...options });
@@ -300,6 +301,8 @@ async function startProcessing() {
   clearInterval(pollTimer);
   smoothProgress = 0;
   setProgressTarget(0);
+  processingActive = true;
+  await renderOutputs();
   try {
     const captionsOn = getChecked('captions', true);
     await saveSettings();
@@ -309,46 +312,77 @@ async function startProcessing() {
     pollTimer = setInterval(pollStatus, 800);
     pollStatus();
   } catch (error) {
+    processingActive = false;
     if (button) button.disabled = false;
     showError(error.message);
     setText('status-text', 'Gagal memproses');
+    await renderOutputs();
   }
 }
 
 async function pollStatus() {
   try {
     const data = await api('/api/status');
+    const progressPct = Math.round((data.progress || 0) * 100);
     if (data.status === 'error') {
+      processingActive = false;
       showError(data.error || data.message || 'Terjadi kesalahan');
       setText('status-text', 'Gagal');
       updateCompactStatus('Gagal');
     } else {
-      const message = cleanStatusText(data.message || data.status);
-      setText('status-text', message);
+      processingActive = (data.status === 'started' || data.status === 'processing');
+      const rawMsg = data.error || data.message || data.status;
+      const message = cleanStatusText(rawMsg);
+      
+      let displayMsg = message;
+      if (processingActive) {
+        displayMsg = `${message} (${progressPct}%)`;
+      }
+      setText('status-text', displayMsg);
       updateCompactStatus(message);
+
+      if (processingActive) {
+        const homePanel = $('home-results-panel');
+        if (homePanel) {
+          const loaderPct = homePanel.querySelector('.loader-percentage');
+          if (!loaderPct) {
+            homePanel.className = 'flex flex-col items-center justify-center py-10 text-center max-w-xl mx-auto w-full';
+            homePanel.innerHTML = renderProcessingLoader(data.progress || 0, message);
+          } else {
+            loaderPct.textContent = `${progressPct}%`;
+            const loaderMsg = $('loading-status-text');
+            if (loaderMsg) loaderMsg.textContent = message;
+          }
+        }
+      }
     }
     updateLogPanel(data);
     setProgressTarget(data.progress || 0);
     if (data.status === 'complete' || data.status === 'error') {
+      processingActive = false;
       clearInterval(pollTimer);
       $('process-button').disabled = false;
       await renderOutputs();
     }
   } catch (error) {
+    processingActive = false;
     clearInterval(pollTimer);
     $('process-button').disabled = false;
     showError(error.message);
     setText('status-text', 'Error koneksi');
+    await renderOutputs();
   }
 }
 
 function cleanStatusText(message) {
   const text = String(message || '');
+  if (/api_key|config|using api/i.test(text)) return 'Menyiapkan AI...';
   if (/ffmpeg\.exe|-progress pipe|^"[A-Z]:\\/i.test(text)) return 'Memproses video...';
   if (/subtitle|caption/i.test(text)) return 'Menambahkan subtitle...';
   if (/portrait|crop|blur/i.test(text)) return 'Membuat portrait...';
   if (/cut|trim|clip/i.test(text)) return 'Memotong video...';
   if (/final/i.test(text)) return 'Finalizing...';
+  if (/started|processing/i.test(text)) return 'Memproses...';
   return text;
 }
 
@@ -402,6 +436,18 @@ async function clearLogPanel() {
   try { await api('/api/logs/clear', { method: 'POST', body: '{}' }); } catch (error) { try { await api('/api/clear-logs', { method: 'POST', body: '{}' }); } catch (inner) {} }
 }
 
+function renderProcessingLoader(progress = 0, message = 'Menyiapkan AI...') {
+  const pct = Math.round(progress * 100);
+  return `<div class="w-14 h-14 relative mb-5 mx-auto flex items-center justify-center">
+    <div class="absolute inset-0 rounded-full border-[3.5px] border-orange-100 border-t-orange-600 animate-spin"></div>
+    <span class="text-[11px] font-semibold text-orange-600 loader-percentage">${pct}%</span>
+  </div>
+  <h3 class="text-[19px] font-semibold text-black mb-2.5 tracking-tight animate-pulse">AI Sedang Memproses</h3>
+  <p class="text-[13px] text-gray-500 leading-relaxed max-w-md mx-auto" id="loading-status-text">
+    ${escapeHtml(message)}
+  </p>`;
+}
+
 async function renderOutputs() {
   const historyPanel = $('history-panel');
   const homePanel = $('home-results-panel');
@@ -410,12 +456,19 @@ async function renderOutputs() {
   const savedGroups = groups.filter((group) => group.saved);
   if (historyPanel) historyPanel.innerHTML = savedGroups.length ? savedGroups.map(renderSessionRow).join('') : '<p class="text-[13px] text-gray-500">Belum ada riwayat tersimpan.</p>';
   if (!homePanel) return;
+  
+  if (processingActive) {
+    homePanel.className = 'flex flex-1 flex-col items-center justify-center text-center max-w-xl mx-auto w-full';
+    homePanel.innerHTML = renderProcessingLoader(0, 'Menyiapkan AI...');
+    return;
+  }
+  
   const pendingGroups = groups.map(withPendingClips).filter((group) => group.clips.length);
   if (pendingGroups.length) {
-    homePanel.className = 'space-y-5 py-10 w-full';
+    homePanel.className = 'space-y-5 w-full';
     homePanel.innerHTML = pendingGroups.map(renderExportSession).join('');
   } else {
-    homePanel.className = 'flex flex-col items-center justify-center py-10 text-center max-w-xl mx-auto w-full';
+    homePanel.className = 'flex flex-1 flex-col items-center justify-center text-center max-w-xl mx-auto w-full';
     homePanel.innerHTML = renderEmptyHome();
   }
 }
@@ -440,46 +493,47 @@ function renderSessionRow(group) {
   const saved = new Set(group.saved_clips || []);
   const allClips = group.clips && group.clips.length ? group.clips : group.files || [];
   const clips = saved.size ? allClips.filter((clip) => saved.has(clip.path)) : allClips;
-  return `<article class="border border-gray-200 rounded-2xl p-4 hover:bg-gray-50 transition-colors mb-3"><div class="flex items-start gap-4"><button class="text-left flex-1 min-w-0" type="button" data-session-toggle="${escapeAttr(group.path)}"><h3 class="font-semibold text-[16px] text-black truncate">${escapeHtml(group.title)}</h3><p class="text-[12px] text-gray-400">${clips.length} klip tersimpan | ${escapeHtml(group.video_quality || '720')}p | ${formatTime(group.timestamp)}</p></button><button class="rounded-xl border border-red-100 px-3 py-2 text-[12px] font-semibold text-red-600 hover:bg-red-50" type="button" data-delete-output="${escapeAttr(group.path)}" data-delete-kind="session">Hapus Session</button></div><div class="hidden mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" data-session-files="${escapeAttr(group.path)}">${clips.map(renderFileLink).join('')}</div></article>`;
+  return `<article class="border border-gray-200 rounded-2xl p-4 hover:bg-gray-50 transition-colors mb-3"><div class="flex items-start gap-4"><button class="text-left flex-1 min-w-0" type="button" data-session-toggle="${escapeAttr(group.path)}"><h3 class="font-semibold text-[16px] text-black truncate">${escapeHtml(group.title)}</h3><p class="text-[12px] text-gray-400">${clips.length} klip tersimpan | ${escapeHtml(group.video_quality || '720')}p | ${formatTime(group.timestamp)}</p></button><button class="rounded-xl bg-white border border-gray-200 px-3 py-2 text-[12px] font-semibold text-gray-900 hover:bg-gray-50" type="button" data-delete-output="${escapeAttr(group.path)}" data-delete-kind="session">Hapus Session</button></div><div class="hidden mt-4 flex flex-wrap gap-4 justify-center" data-session-files="${escapeAttr(group.path)}">${clips.map(renderFileLink).join('')}</div></article>`;
 }
 
 function renderFileLink(file) {
   const href = `/api/download?path=${encodeURIComponent(file.path)}`;
-  return `<div class="border border-gray-100 rounded-xl p-3 bg-white flex flex-col justify-between h-full">
+  return `<div class="border border-gray-100 rounded-xl p-3 bg-white flex flex-col justify-between h-full w-[280px] shrink-0">
     <div class="relative bg-gray-100 rounded-lg aspect-[9/16] overflow-hidden mb-3">
       <video class="w-full h-full object-cover" src="${href}" controls preload="metadata"></video>
     </div>
     <div class="flex flex-col flex-1">
       <div class="font-semibold text-[14px] text-black truncate pr-3 mb-1">${escapeHtml(file.title || file.name)}</div>
       <div class="text-[12px] text-gray-400 mb-3">${clipDuration(file)}</div>
-      <a class="flex items-center justify-center rounded-xl bg-gray-950 hover:bg-black text-white py-2 text-[12px] font-semibold mt-auto transition text-center" href="${href}">Download</a>
+      <a class="flex items-center justify-center rounded-xl bg-[#ea580c] hover:bg-[#c2410c] text-white py-2 text-[12px] font-semibold mt-auto transition text-center" href="${href}">Download</a>
     </div>
   </div>`;
 }
 
 function renderExportSession(group) {
   const clips = group.clips || [];
-  return `<section class="border border-gray-200 rounded-2xl p-5 bg-white"><div class="flex items-start justify-between gap-4 mb-4"><div class="min-w-0"><h3 class="font-semibold text-[20px] leading-tight text-gray-950 truncate">${escapeHtml(group.title)}</h3><p class="text-[13px] text-gray-500">${escapeHtml(metaLine(group, clips.length))}</p></div><div class="flex gap-2 shrink-0"><button class="rounded-xl bg-gray-950 text-white px-4 py-3 text-[13px] font-semibold" type="button" data-save-output="${escapeAttr(group.path)}">Simpan yang dipilih</button><button class="rounded-xl border border-red-100 px-4 py-3 text-[13px] font-semibold text-red-600 hover:bg-red-50" type="button" data-delete-output="${escapeAttr(group.path)}" data-delete-kind="session">Hapus Session</button></div></div><div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">${clips.map((clip, index) => renderExportCard(group, clip, index)).join('')}</div></section>`;
+  const status = $('compact-status')?.innerHTML || 'Status: Idle<br>Clip: - | Quality: 480p | Mode: Blur';
+  return `<section class="border border-gray-200 p-4 bg-white w-full max-w-full min-h-[calc(100vh-85px)] overflow-hidden flex flex-col"><div class="mb-6"><h2 class="text-[20px] font-semibold text-black mb-0.5 tracking-tight">Hasil Klip</h2><p class="text-[13px] text-gray-500">Lihat klip yang sudah jadi dan pantau progress yang sedang diproses.</p></div><div class="flex flex-col gap-3 mb-4"><div class="min-w-0"><h3 class="font-semibold text-[16px] leading-snug text-gray-950 whitespace-normal break-words max-w-4xl">${escapeHtml(group.title)}</h3><p class="text-[12px] text-gray-500 whitespace-normal break-words mt-1">${escapeHtml(metaLine(group, clips.length))}</p></div><div class="flex flex-wrap gap-2"><button class="rounded-lg bg-[#ea580c] text-white px-3 py-2 text-[12px] font-semibold hover:bg-[#c2410c]" type="button" data-save-output="${escapeAttr(group.path)}">Simpan yang dipilih</button><button class="rounded-lg bg-white border border-gray-200 text-gray-900 px-3 py-2 text-[12px] font-semibold hover:bg-gray-50" type="button" data-delete-output="${escapeAttr(group.path)}" data-delete-kind="session">Hapus Session</button></div></div><div class="flex flex-wrap gap-4 justify-center">${clips.map((clip, index) => renderExportCard(group, clip, index)).join('')}</div><div class="text-[13px] text-gray-500 mt-auto pt-6">${status}</div></section>`;
 }
 
 function renderExportCard(group, clip, index = 0) {
   if (!clip || !clip.path) return '';
   const href = `/api/download?path=${encodeURIComponent(clip.path)}`;
-  return `<article class="bg-white border border-gray-200 rounded-2xl p-4 flex flex-col h-full">
-    <div class="relative bg-gray-100 rounded-xl aspect-[9/16] overflow-hidden mb-3">
-      <video class="w-full h-full object-cover" src="${href}" controls preload="metadata"></video>
-    </div>
-    <div class="flex flex-col flex-1">
-      <label class="flex items-center gap-2 text-[12px] font-semibold text-gray-600 mb-2.5">
+  return `<article class="bg-white border border-gray-200 rounded-xl p-3 flex flex-col w-[260px] shrink-0 overflow-hidden">
+    <button type="button" class="relative bg-gray-100 rounded-lg aspect-[4/3] overflow-hidden mb-2 cursor-zoom-in" data-video-open="${escapeAttr(href)}">
+      <video class="w-full h-full object-cover pointer-events-none" src="${href}" muted preload="metadata"></video>
+    </button>
+    <div class="flex flex-col flex-1 min-h-0">
+      <label class="flex items-center gap-2 text-[11px] font-semibold text-gray-600 mb-2">
         <input type="checkbox" class="clip-select" data-clip-path="${escapeAttr(clip.path)}" data-session-path="${escapeAttr(group.path)}" checked> Pilih klip ${index + 1}
       </label>
-      <h3 class="font-semibold text-[15px] leading-snug text-gray-950 mb-1 line-clamp-2">${escapeHtml(clip.title || `Klip ${index + 1}`)}</h3>
-      <p class="text-[13px] text-gray-500 mb-2 line-clamp-2 leading-relaxed">${escapeHtml(clip.description || group.caption)}</p>
-      <p class="text-[12px] text-gray-400 mb-4 mt-auto">${clipDuration(clip)}</p>
-      <div class="grid grid-cols-3 gap-2">
-        <a class="flex items-center justify-center rounded-xl bg-gray-950 hover:bg-black text-white py-2.5 text-[12px] font-semibold transition text-center" href="${href}">Download</a>
-        <button class="rounded-xl border border-gray-200 py-2.5 text-[12px] font-semibold text-gray-700 hover:bg-gray-50 transition" type="button" data-save-output="${escapeAttr(group.path)}" data-save-one="${escapeAttr(clip.path)}">Simpan</button>
-        <button class="rounded-xl border border-red-100 py-2.5 text-[12px] font-semibold text-red-600 hover:bg-red-50 transition" type="button" data-delete-output="${escapeAttr(clip.path)}" data-delete-kind="clip">Hapus</button>
+      <h3 class="font-semibold text-[13px] leading-snug text-gray-950 mb-1 whitespace-normal break-words">${escapeHtml(clip.title || `Klip ${index + 1}`)}</h3>
+      <p class="text-[12px] text-gray-500 mb-2 leading-relaxed whitespace-normal break-words overflow-hidden" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${escapeHtml(clip.description || group.caption)}</p>
+      <p class="text-[11px] text-gray-400 mb-3 mt-auto">${clipDuration(clip)}</p>
+      <div class="grid grid-cols-3 gap-1.5">
+        <a class="flex items-center justify-center rounded-lg bg-[#ea580c] hover:bg-[#c2410c] text-white py-2 text-[10px] font-semibold transition text-center" href="${href}">Download</a>
+        <button class="rounded-lg bg-white border border-gray-200 py-2 text-[10px] font-semibold text-gray-900 hover:bg-gray-50 transition" type="button" data-save-output="${escapeAttr(group.path)}" data-save-one="${escapeAttr(clip.path)}">Simpan</button>
+        <button class="rounded-lg bg-white border border-gray-200 py-2 text-[10px] font-semibold text-gray-900 hover:bg-gray-50 transition" type="button" data-delete-output="${escapeAttr(clip.path)}" data-delete-kind="clip">Hapus</button>
       </div>
     </div>
   </article>`;
@@ -538,18 +592,35 @@ function setNavActive(id, active) {
   const isSubmenu = id === 'nav-history' || id === 'nav-console';
   if (isSubmenu) {
     el.className = active 
-      ? 'flex items-center space-x-3 px-3 py-2 rounded-lg bg-orange-50 text-[#ea580c] font-bold text-[11px] transition' 
-      : 'flex items-center space-x-3 px-3 py-2 rounded-lg text-gray-500 hover:bg-gray-50 hover:text-gray-900 font-medium text-[11px] transition';
+      ? 'flex items-center space-x-3 px-3 py-2 rounded-lg bg-orange-50 text-[#ea580c] font-bold text-[14px] transition' 
+      : 'flex items-center space-x-3 px-3 py-2 rounded-lg text-gray-500 hover:bg-gray-50 hover:text-gray-900 font-medium text-[14px] transition';
   } else {
     el.className = active 
-      ? 'flex items-center justify-between w-full px-3 py-2 rounded-xl bg-orange-50 text-[#ea580c] font-bold text-[13px] transition' 
-      : 'flex items-center justify-between w-full px-3 py-2 rounded-xl text-gray-500 hover:text-gray-900 hover:bg-gray-50 font-medium text-[13px] transition';
+      ? 'flex items-center justify-between w-full px-3 py-2 rounded-xl bg-orange-50 text-[#ea580c] font-bold text-[14px] transition' 
+      : 'flex items-center justify-between w-full px-3 py-2 rounded-xl text-gray-500 hover:text-gray-900 hover:bg-gray-50 font-medium text-[14px] transition';
   }
 }
 
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
 function escapeAttr(value) { return escapeHtml(value).replace(/`/g, '&#96;'); }
 function cssEscape(value) { return window.CSS && CSS.escape ? CSS.escape(value) : String(value).replace(/"/g, '\\"'); }
+function openVideoModal(src) {
+  const modal = $('video-modal');
+  const player = $('video-modal-player');
+  if (!modal || !player) return;
+  player.src = src;
+  modal.classList.remove('hidden');
+  player.play().catch(() => {});
+}
+function closeVideoModal() {
+  const modal = $('video-modal');
+  const player = $('video-modal-player');
+  if (!modal || !player) return;
+  player.pause();
+  player.removeAttribute('src');
+  player.load();
+  modal.classList.add('hidden');
+}
 function closeModal(id) {
   const modal = $(id);
   if (!modal) return;
@@ -558,10 +629,11 @@ function closeModal(id) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  const save = $('save-settings'); const showJson = $('show-json'); const jsonClose = $('json-close'); const clearKey = $('clear-api-key'); const start = $('process-button'); const navHome = $('nav-home'); const navHistory = $('nav-history'); const navConsole = $('nav-console'); const navSettings = $('nav-settings'); const profile = $('profile-button'); const logClear = $('log-clear'); const instruction = $('instruction'); const instructionSave = $('instruction-save'); const instructionCancel = $('instruction-cancel'); const qualityMain = $('video-quality-main'); const qualitySettings = $('video-quality'); const blur = $('landscape-blur');
+  const save = $('save-settings'); const showJson = $('show-json'); const jsonClose = $('json-close'); const videoClose = $('video-modal-close'); const clearKey = $('clear-api-key'); const start = $('process-button'); const navHome = $('nav-home'); const navHistory = $('nav-history'); const navConsole = $('nav-console'); const navSettings = $('nav-settings'); const profile = $('profile-button'); const logClear = $('log-clear'); const instruction = $('instruction'); const instructionSave = $('instruction-save'); const instructionCancel = $('instruction-cancel'); const qualityMain = $('video-quality-main'); const qualitySettings = $('video-quality'); const blur = $('landscape-blur');
   if (save) save.addEventListener('click', saveSettings);
   if (showJson) showJson.addEventListener('click', showPayloadJson);
   if (jsonClose) jsonClose.addEventListener('click', () => $('json-modal')?.classList.add('hidden'));
+  if (videoClose) videoClose.addEventListener('click', closeVideoModal);
   if (clearKey) clearKey.addEventListener('click', clearApiKey);
   if (start) start.addEventListener('click', startProcessing);
   if (profile) profile.addEventListener('click', toggleProfileMenu);
@@ -581,10 +653,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const modal = $(id);
     if (modal) modal.addEventListener('click', (event) => { if (event.target === modal) closeModal(id); });
   });
+  $('video-modal')?.addEventListener('click', (event) => { if (event.target === $('video-modal')) closeVideoModal(); });
   document.addEventListener('click', (event) => {
+    const videoButton = event.target.closest('[data-video-open]');
     const deleteButton = event.target.closest('[data-delete-output]');
     const saveButton = event.target.closest('[data-save-output]');
     const sessionButton = event.target.closest('[data-session-toggle]');
+    if (videoButton) openVideoModal(videoButton.dataset.videoOpen);
     if (deleteButton) deleteOutput(deleteButton.dataset.deleteOutput, deleteButton.dataset.deleteKind);
     if (saveButton) saveOutput(saveButton.dataset.saveOutput, saveButton.dataset.saveOne);
     if (sessionButton) toggleSession(sessionButton.dataset.sessionToggle);
