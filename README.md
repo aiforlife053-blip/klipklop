@@ -14,7 +14,7 @@ Buka `http://127.0.0.1:8765` jika browser tidak terbuka otomatis.
 ## Settings
 
 - Default Base URL Gemini-compatible: `https://generativelanguage.googleapis.com/v1beta/openai`
-- Default model: `gemini-2.0-flash`
+- Default model: `gemini-2.5-flash`
 - API key disimpan di `config.json` lokal.
 - Buat/isi `cookie.txt` di folder ini, atau paste lewat modal Pengaturan.
 - Output mengikuti folder output di konfigurasi.

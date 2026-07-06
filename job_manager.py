@@ -1,7 +1,11 @@
+import json
+import re
+import shutil
 import sys
 import threading
+from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -13,7 +17,7 @@ from utils.helpers import get_app_dir, get_ffmpeg_path, get_ytdlp_path
 
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
-GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 
 class WebJobManager:
@@ -24,113 +28,226 @@ class WebJobManager:
         self.cookie_file = self.app_dir / "cookie.txt"
         self.core_cookie_file = self.app_dir / "cookies.txt"
         self.thread = None
+        self._lock = threading.Lock()
         self._status = "idle"
         self._message = "Idle"
         self._progress = 0.0
         self._error = ""
 
     def start(self, payload):
-        url = str(payload.get("url", "")).strip()
+        url = str(payload.get("url", payload.get("youtube_url", ""))).strip()
         if not self._is_url(url):
-            return {"status": "error", "message": "URL YouTube wajib diisi"}
-        if self.thread and self.thread.is_alive():
-            return {"status": "busy", "message": "Processing is already running"}
-
-        num_clips = int(payload.get("num_clips", 3) or 3)
-        add_captions = bool(payload.get("add_captions", True))
-        add_hook = bool(payload.get("add_hook", False))
+            return {"status": "error", "message": "YouTube URL validation error: empty or invalid URL"}
+        with self._lock:
+            if self.thread and self.thread.is_alive():
+                return {"status": "busy", "message": "Processing is already running"}
+        try:
+            num_clips = int(payload.get("num_clips", 3) or 3)
+        except (TypeError, ValueError):
+            num_clips = 3
+        num_clips = max(1, min(10, num_clips))
+        add_captions = self._as_bool(payload.get("enable_captions", payload.get("add_captions", True)), True)
+        add_hook = self._as_bool(payload.get("add_hook", False), False)
         subtitle_language = str(payload.get("subtitle_language", "id") or "id")
-        instruction = str(payload.get("instruction", "")).strip()
+        instruction = str(payload.get("instruction", "")).strip()[:1000]
+        screen_size = str(payload.get("screen_size", "9:16") or "9:16")
+        if screen_size != "9:16":
+            return {"status": "error", "message": "Unsupported screen size: only 9:16 is supported"}
+        cfg = self._config().config
+        caption_key = cfg.get("ai_providers", {}).get("caption_maker", {}).get("api_key")
+        hook_key = cfg.get("ai_providers", {}).get("hook_maker", {}).get("api_key")
+        if add_captions and not caption_key:
+            return {"status": "error", "message": "Suntik Subtitel butuh Caption Maker/Whisper API key. Matikan subtitel dulu atau isi key Caption Maker."}
+        if add_hook and not hook_key:
+            return {"status": "error", "message": "Hook butuh Hook Maker/TTS API key."}
 
-        self._status = "running"
-        self._message = "Starting"
-        self._progress = 0.0
-        self._error = ""
-        self.thread = threading.Thread(
-            target=self._run,
-            args=(url, num_clips, add_captions, add_hook, subtitle_language, instruction),
-            daemon=True,
-        )
-        self.thread.start()
+        with self._lock:
+            if self.thread and self.thread.is_alive():
+                return {"status": "busy", "message": "Processing is already running"}
+            self._status = "running"
+            self._message = "Starting"
+            self._progress = 0.0
+            self._error = ""
+            args = (url, num_clips, add_captions, add_hook, subtitle_language, instruction, self._make_run_dir(url))
+            if self._run.__code__.co_argcount == 7:
+                args = args[:-1]
+            self.thread = threading.Thread(
+                target=self._run,
+                args=args,
+                daemon=True,
+            )
+            self.thread.start()
         return {"status": "started"}
 
     def status(self):
         return {
             "status": self._status,
-            "message": self._message,
+            "message": self._public_text(self._message),
             "progress": self._progress,
-            "error": self._error,
+            "error": self._public_text(self._error),
         }
 
     def get_settings(self):
         cfg = self._config().config
         provider = cfg.get("ai_providers", {}).get("highlight_finder", {})
+        key_saved = bool(provider.get("api_key") or cfg.get("api_key"))
+        caption_key_saved = bool(cfg.get("ai_providers", {}).get("caption_maker", {}).get("api_key"))
+        hook_key_saved = bool(cfg.get("ai_providers", {}).get("hook_maker", {}).get("api_key"))
+        base_url = provider.get("base_url", cfg.get("base_url", GEMINI_BASE_URL))
+        model = provider.get("model", cfg.get("model", GEMINI_MODEL))
+        cookies = self.cookie_status()
         return {
-            "base_url": provider.get("base_url", cfg.get("base_url", GEMINI_BASE_URL)),
+            "base_url": base_url,
             "api_key": "",
-            "model": provider.get("model", cfg.get("model", GEMINI_MODEL)),
+            "api_key_saved": key_saved,
+            "caption_key_saved": caption_key_saved,
+            "hook_key_saved": hook_key_saved,
+            "model": model,
+            "provider": {"base_url": base_url, "api_key": "", "model": model},
             "subtitle_language": cfg.get("subtitle_language", "id"),
             "output_dir": cfg.get("output_dir", str(self.output_dir)),
-            "cookies": self.cookie_status(),
+            "cookie_exists": cookies["exists"],
+            "cookie_path": cookies["path"],
+            "cookies_path": cookies["path"],
+            "cookies": cookies,
         }
 
     def save_settings(self, payload):
+        if not isinstance(payload, dict):
+            return {"status": "error", "message": "Invalid settings payload"}
         cfg_mgr = self._config()
-        base_url = str(payload.get("base_url", GEMINI_BASE_URL)).strip() or GEMINI_BASE_URL
-        api_key = str(payload.get("api_key", "")).strip()
-        model = str(payload.get("model", GEMINI_MODEL)).strip() or GEMINI_MODEL
+        provider_payload = payload.get("provider", {}) if isinstance(payload.get("provider", {}), dict) else {}
+        base_url = str(payload.get("base_url", provider_payload.get("base_url", GEMINI_BASE_URL))).strip() or GEMINI_BASE_URL
+        api_key = str(payload.get("api_key", provider_payload.get("api_key", ""))).strip()
+        clear_api_key = bool(payload.get("clear_api_key", False))
+        model = str(payload.get("model", provider_payload.get("model", GEMINI_MODEL))).strip() or GEMINI_MODEL
         output_dir = str(payload.get("output_dir", cfg_mgr.config.get("output_dir", str(self.output_dir)))).strip() or str(self.output_dir)
         subtitle_language = str(payload.get("subtitle_language", "id") or "id")
         providers = cfg_mgr.config.setdefault("ai_providers", {})
-        highlight = providers.setdefault("highlight_finder", {})
-        highlight["base_url"] = base_url
-        if api_key:
-            highlight["api_key"] = api_key
-        highlight["model"] = model
+        for name in ("highlight_finder", "youtube_title_maker"):
+            current = providers.setdefault(name, {})
+            current["base_url"] = base_url
+            current["model"] = model
+            if clear_api_key:
+                current["api_key"] = ""
+            elif api_key:
+                current["api_key"] = api_key
         cfg_mgr.config["base_url"] = base_url
-        if api_key:
-            cfg_mgr.config["api_key"] = api_key
         cfg_mgr.config["model"] = model
+        if clear_api_key:
+            cfg_mgr.config["api_key"] = ""
+        elif api_key:
+            cfg_mgr.config["api_key"] = api_key
         cfg_mgr.config["subtitle_language"] = subtitle_language
         cfg_mgr.config["output_dir"] = output_dir
         cfg_mgr.save()
-        return {"status": "saved"}
+        settings = self.get_settings()
+        return {"status": "saved", "settings": settings, "local_ai_provider": settings["provider"], "provider": settings["provider"]}
 
     def save_cookies(self, content):
-        text = str(content or "").strip()
+        text = self._normalize_cookie_text(str(content or ""))
         if not text:
-            return {"status": "error", "message": "cookie.txt kosong"}
+            return {"status": "error", "message": "Login file kosong"}
         self.cookie_file.write_text(text + "\n", encoding="utf-8")
         self._sync_core_cookie_file()
-        return {"status": "saved", "cookies": self.cookie_status()}
+        return {"status": "saved", "success": True, "message": "login file saved", "cookies": self.cookie_status()}
 
     def cookie_status(self):
         return {"exists": self.cookie_file.exists(), "path": str(self.cookie_file)}
+
+    def _normalize_cookie_text(self, text):
+        text = text.strip()
+        if not text:
+            return ""
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if any(line.startswith("# Netscape HTTP Cookie File") or line.count("\t") >= 6 for line in lines):
+            return "\n".join(lines)
+        ignored = {"path", "domain", "expires", "max-age", "secure", "httponly", "samesite"}
+        rows = ["# Netscape HTTP Cookie File"]
+        for part in re.split(r";\s*", " ; ".join(lines)):
+            if "=" not in part:
+                continue
+            name, value = part.split("=", 1)
+            name = name.strip()
+            if not name or name.lower() in ignored:
+                continue
+            rows.append(f".youtube.com\tTRUE\t/\tTRUE\t0\t{name}\t{value.strip()}")
+        return "\n".join(rows) if len(rows) > 1 else ""
 
     def _sync_core_cookie_file(self):
         if self.cookie_file.exists():
             self.core_cookie_file.write_text(self.cookie_file.read_text(encoding="utf-8"), encoding="utf-8")
 
     def list_outputs(self):
-        output_value = str(self._config().config.get("output_dir", str(self.output_dir))).strip() or str(self.output_dir)
-        output_dir = Path(output_value)
+        output_dir = self._output_root()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        allowed = {".mp4", ".webm", ".mkv", ".mov", ".avi", ".mp3", ".wav", ".json", ".srt", ".ass", ".txt", ".vtt"}
         files = []
-        if output_dir.exists():
-            for path in sorted(output_dir.rglob("*"), key=lambda p: p.stat().st_mtime, reverse=True):
-                if path.is_file() and path.suffix.lower() in {".mp4", ".json", ".srt", ".ass", ".txt"}:
-                    files.append({"name": path.name, "path": str(path), "size": path.stat().st_size})
-        return {"files": files[:50]}
+        groups = []
+        for folder in sorted((p for p in output_dir.iterdir() if p.is_dir() and p.name != "_temp"), key=lambda p: p.stat().st_mtime, reverse=True):
+            group_files = [self._file_item(path) for path in sorted(folder.rglob("*"), key=lambda p: p.stat().st_mtime, reverse=True) if path.is_file() and path.suffix.lower() in allowed and "_temp" not in path.parts and not path.name.startswith("temp_")]
+            clips = [file for file in group_files if file["name"].lower() == "master.mp4"]
+            if clips:
+                meta = self._read_json(folder / "run.json")
+                clip_meta = [self._read_json(Path(file["path"]).with_name("data.json")) for file in clips]
+                title = next((item.get("source_title") for item in clip_meta if item.get("source_title")), "")
+                description = next((item.get("source_description") for item in clip_meta if item.get("source_description")), "")
+                items = [dict(file, title=(clip_meta[i].get("title") or file["name"]), description=(clip_meta[i].get("description") or "")) for i, file in enumerate(clips)]
+                groups.append({
+                    "name": folder.name,
+                    "path": str(folder),
+                    "title": title or meta.get("title") or folder.name,
+                    "caption": description or meta.get("caption") or meta.get("url") or f"{len(clips)} klip",
+                    "timestamp": meta.get("timestamp") or datetime.fromtimestamp(folder.stat().st_mtime).isoformat(timespec="seconds"),
+                    "thumbnail": self._thumbnail(clips),
+                    "saved": bool(meta.get("saved")),
+                    "saved_clips": meta.get("saved_clips", []),
+                    "clips": items,
+                    "files": items,
+                })
+                files.extend(clips)
+        for path in sorted((p for p in output_dir.iterdir() if p.is_file()), key=lambda p: p.stat().st_mtime, reverse=True):
+            if path.suffix.lower() in allowed:
+                files.append(self._file_item(path))
+        files = files[:50]
+        return {"files": files, "outputs": files, "groups": groups[:50], "output_dir": str(output_dir)}
 
-    def _run(self, url, num_clips, add_captions, add_hook, subtitle_language, instruction):
+    def delete_output(self, payload):
+        target = Path(str(payload.get("path", ""))).resolve()
+        output_root = self._output_root().resolve()
+        if not target.exists() or output_root not in target.parents:
+            return {"status": "error", "message": "Output tidak ditemukan"}
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+        return {"status": "deleted"}
+
+    def save_output(self, payload):
+        target = Path(str(payload.get("path", ""))).resolve()
+        output_root = self._output_root().resolve()
+        if not target.exists() or not target.is_dir() or output_root not in target.parents:
+            return {"status": "error", "message": "Session tidak ditemukan"}
+        meta_path = target / "run.json"
+        meta = self._read_json(meta_path)
+        meta["saved"] = True
+        keep = set(str(path) for path in payload.get("clips", []) if path)
+        meta["saved_clips"] = sorted(keep)
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"status": "saved"}
+
+    def _run(self, url, num_clips, add_captions, add_hook, subtitle_language, instruction, run_dir):
         try:
             self._sync_core_cookie_file()
             cfg = self._config().config
             prompt = self._with_indonesian_instruction(cfg.get("system_prompt"), instruction)
+            run_dir.mkdir(parents=True, exist_ok=True)
+            self._write_run_meta(run_dir, url)
             core = AutoClipperCore(
                 client=None,
                 ffmpeg_path=get_ffmpeg_path(),
                 ytdlp_path=get_ytdlp_path(),
-                output_dir=str(cfg.get("output_dir", str(self.output_dir))).strip() or str(self.output_dir),
+                output_dir=str(run_dir),
                 model=cfg.get("model", GEMINI_MODEL),
                 tts_model=cfg.get("tts_model", "tts-1"),
                 temperature=cfg.get("temperature", 1.0),
@@ -148,6 +265,7 @@ class WebJobManager:
             if cfg.get("gpu_acceleration", {}).get("enabled", False):
                 core.enable_gpu_acceleration(True)
             core.process(url, num_clips=num_clips, add_captions=add_captions, add_hook=add_hook)
+            self._write_run_meta(run_dir, url, self._summarize_run(run_dir))
             self._status = "complete"
             self._message = "Complete"
             self._progress = 1.0
@@ -161,6 +279,10 @@ class WebJobManager:
     def _config(self):
         return ConfigManager(self.config_file, self.output_dir)
 
+    def _output_root(self):
+        output_value = str(self._config().config.get("output_dir", str(self.output_dir))).strip() or str(self.output_dir)
+        return Path(output_value)
+
     def _set_message(self, message):
         self._message = str(message)
 
@@ -171,6 +293,42 @@ class WebJobManager:
         except (TypeError, ValueError):
             self._progress = 0.0
 
+    def _make_run_dir(self, url):
+        parsed = urlparse(url)
+        video_id = parse_qs(parsed.query).get("v", [""])[0] if parsed.query else ""
+        slug = re.sub(r"[^a-zA-Z0-9]+", "-", video_id or parsed.path.strip("/") or parsed.netloc).strip("-").lower() or "youtube"
+        return self._output_root() / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{slug[:40]}"
+
+    def _file_item(self, path):
+        path_value = str(path)
+        return {"name": path.name, "filename": path.name, "file": path_value, "output": path_value, "path": path_value, "size": path.stat().st_size, "modified": datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")}
+
+    def _read_json(self, path):
+        try:
+            return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def _write_run_meta(self, run_dir, url, extra=None):
+        data = {"url": url, "title": "YouTube export", "caption": url, "timestamp": datetime.now().isoformat(timespec="seconds")}
+        data.update(extra or {})
+        (run_dir / "run.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _summarize_run(self, run_dir):
+        clips = [self._read_json(path) for path in sorted(run_dir.rglob("data.json"))]
+        source_title = next((clip.get("source_title") for clip in clips if clip.get("source_title")), "")
+        source_description = next((clip.get("source_description") for clip in clips if clip.get("source_description")), "")
+        return {"title": source_title or run_dir.name, "caption": source_description or f"{len(clips)} klip diekspor", "saved": False}
+
+    def _thumbnail(self, files):
+        video = next((file for file in files if file["name"].lower().endswith(".mp4")), None)
+        return video["path"] if video else ""
+
+    def _public_text(self, value):
+        text = str(value or "")
+        text = re.sub("cookie|cookies", "login file", text, flags=re.IGNORECASE)
+        return text.replace(str(self.cookie_file), "local login file").replace(str(self.core_cookie_file), "local login file")
+
     def _with_indonesian_instruction(self, prompt, instruction):
         viral = (
             "\n\nTarget user: penonton Indonesia. Pilih momen paling seru dan berpotensi viral: "
@@ -179,6 +337,15 @@ class WebJobManager:
         )
         user = f"\nArahan pengguna: {instruction}" if instruction else ""
         return f"{prompt or AutoClipperCore.get_default_prompt()}{viral}{user}"
+
+    def _as_bool(self, value, default=False):
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return default
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
 
     def _is_url(self, value):
         parsed = urlparse(value)

@@ -9,3 +9,5 @@ __pycache__/
 .env
 bin/
 ffmpeg/
+
+testsprite_tests\tmp\config.json

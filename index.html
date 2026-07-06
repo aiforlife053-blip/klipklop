@@ -40,7 +40,7 @@
                 <span class="text-black">KlipKlop</span>
             </div>
 
-            <div class="flex items-center space-x-5">
+            <div class="relative flex items-center space-x-5">
                 <button
                     onclick="
                         document
@@ -71,6 +71,7 @@
                 </button>
 
                 <button
+                    id="profile-button"
                     class="flex items-center space-x-2.5 text-[14px] font-bold text-gray-800 hover:text-black focus:outline-none"
                 >
                     <div
@@ -93,6 +94,9 @@
                         />
                     </svg>
                 </button>
+                <div id="profile-menu" class="hidden absolute right-8 top-14 bg-white border border-gray-100 rounded-xl shadow-lg p-3 text-[13px] text-gray-600 z-[60]">
+                    Local web mode
+                </div>
             </div>
         </header>
 
@@ -174,11 +178,13 @@
                                 >
                                 <div class="grid grid-cols-3 gap-3">
                                     <label
+                                        data-screen-card="9:16"
                                         class="border border-indigo-600 bg-indigo-50/30 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer text-center transition"
                                     >
                                         <input
                                             type="radio"
                                             name="screen_size"
+                                            value="9:16"
                                             class="sr-only"
                                             checked
                                         />
@@ -192,11 +198,13 @@
                                         >
                                     </label>
                                     <label
+                                        data-screen-card="1:1"
                                         class="border border-gray-200 hover:border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer text-center transition"
                                     >
                                         <input
                                             type="radio"
                                             name="screen_size"
+                                            value="1:1"
                                             class="sr-only"
                                         />
                                         <span
@@ -208,11 +216,13 @@
                                         >
                                     </label>
                                     <label
+                                        data-screen-card="16:9"
                                         class="border border-gray-200 hover:border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer text-center transition"
                                     >
                                         <input
                                             type="radio"
                                             name="screen_size"
+                                            value="16:9"
                                             class="sr-only"
                                         />
                                         <span
@@ -294,6 +304,10 @@
                         >
                             Proses Klip
                         </button>
+                        <div class="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div id="progress-bar" class="h-full w-0 bg-[#4f46e5]"></div>
+                        </div>
+                        <div id="status-text" class="text-[13px] text-gray-500">Idle</div>
                     </div>
                 </section>
 
@@ -313,6 +327,7 @@
                     </div>
 
                     <div
+                        id="home-results-panel"
                         class="flex flex-col items-center justify-center py-10 text-center max-w-xl mx-auto"
                     >
                         <div
@@ -509,10 +524,12 @@
                     <textarea
                         id="instruction"
                         rows="4"
+                        maxlength="1000"
                         placeholder="Masukkan instruksi khusus di sini..."
                         class="w-full px-4 py-3.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-[14px] text-gray-700 bg-gray-50/50 placeholder-gray-400/90 resize-none"
                     ></textarea>
                     <div
+                        id="instruction-count"
                         class="absolute bottom-3 right-4 text-[11px] font-medium text-gray-400 tracking-wider"
                     >
                         0/1000
@@ -521,22 +538,14 @@
 
                 <div class="flex items-center justify-end space-x-3 pt-2">
                     <button
-                        onclick="
-                            document
-                                .getElementById('instruction-modal')
-                                .classList.add('hidden')
-                        "
+                        id="instruction-cancel"
                         type="button"
                         class="px-4 py-2 border border-gray-200 text-gray-700 text-[14px] font-semibold rounded-xl hover:bg-gray-50 transition"
                     >
                         Batal
                     </button>
                     <button
-                        onclick="
-                            document
-                                .getElementById('instruction-modal')
-                                .classList.add('hidden')
-                        "
+                        id="instruction-save"
                         type="button"
                         class="px-5 py-2 bg-[#4f46e5] text-white text-[14px] font-bold rounded-xl hover:bg-indigo-700 transition shadow-sm"
                     >
@@ -633,7 +642,7 @@
                         <input
                             id="model"
                             type="text"
-                            placeholder="gemini-2.0-flash"
+                            placeholder="gemini-2.5-flash"
                             class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-[14px] text-gray-700 bg-gray-50/30"
                         />
                     </div>
@@ -673,6 +682,8 @@
                             class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-[14px] text-gray-700 bg-gray-50/30"
                         />
                     </div>
+
+                    <p id="settings-status" class="text-[13px] text-gray-500"></p>
                 </div>
 
                 <div
@@ -688,6 +699,13 @@
                         class="px-4 py-2 border border-gray-200 text-gray-700 text-[14px] font-semibold rounded-xl hover:bg-gray-100 transition"
                     >
                         Batal
+                    </button>
+                    <button
+                        id="clear-api-key"
+                        type="button"
+                        class="px-4 py-2 border border-gray-200 text-gray-700 text-[14px] font-semibold rounded-xl hover:bg-gray-100 transition"
+                    >
+                        Hapus API Key
                     </button>
                     <button
                         id="save-settings"

@@ -32,12 +32,22 @@ class WebKlipHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         payload = self._payload()
+        if payload is None:
+            self._json({"status": "error", "message": "Invalid JSON"}, 400)
+            return
         if self.path == "/api/settings":
             self._json(MANAGER.save_settings(payload))
         elif self.path == "/api/cookies":
-            self._json(MANAGER.save_cookies(payload.get("content", "")))
+            self._json(MANAGER.save_cookies(payload.get("content", payload.get("cookie_text", ""))))
         elif self.path == "/api/start":
-            self._json(MANAGER.start(payload))
+            result = MANAGER.start(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
+        elif self.path == "/api/delete":
+            result = MANAGER.delete_output(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
+        elif self.path == "/api/save":
+            result = MANAGER.save_output(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
         else:
             self._json({"status": "error", "message": "Not found"}, 404)
 
@@ -45,16 +55,19 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         return
 
     def _payload(self):
-        size = int(self.headers.get("content-length", "0") or 0)
+        try:
+            size = int(self.headers.get("content-length", "0") or 0)
+        except ValueError:
+            return None
         if size <= 0:
             return {}
         try:
             return json.loads(self.rfile.read(size).decode("utf-8"))
         except json.JSONDecodeError:
-            return {}
+            return None
 
     def _json(self, data, status=200):
-        raw = json.dumps(data).encode("utf-8")
+        raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
@@ -78,10 +91,13 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def _download(self, query):
-        path = parse_qs(query).get("path", [""])[0]
+        path = parse_qs(query, keep_blank_values=True).get("path", [""])[0]
+        if not path:
+            self._json({"status": "error", "message": "Missing path"}, 400)
+            return
         target = Path(path).resolve()
         output_root = Path(MANAGER.get_settings()["output_dir"] or str(MANAGER.output_dir)).resolve()
-        allowed = {".mp4", ".json", ".srt", ".ass", ".txt"}
+        allowed = {".mp4", ".webm", ".mkv", ".mov", ".avi", ".mp3", ".wav", ".json", ".srt", ".ass", ".txt", ".vtt"}
         if not target.exists() or output_root not in target.parents or target.suffix.lower() not in allowed:
             self._json({"status": "error", "message": "File not found"}, 404)
             return
