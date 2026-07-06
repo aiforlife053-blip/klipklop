@@ -278,12 +278,25 @@ async function renderOutputs() {
   if (historyPanel) historyPanel.innerHTML = savedGroups.length ? savedGroups.map(renderSessionRow).join('') : '<p class="text-[13px] text-gray-500">Belum ada riwayat tersimpan.</p>';
   if (!homePanel) return;
   const pendingGroups = groups.map(withPendingClips).filter((group) => group.clips.length);
-  homePanel.className = 'space-y-5 py-10 w-full';
-  homePanel.innerHTML = pendingGroups.length ? pendingGroups.map(renderExportSession).join('') : renderEmptyHome();
+  if (pendingGroups.length) {
+    homePanel.className = 'space-y-5 py-10 w-full';
+    homePanel.innerHTML = pendingGroups.map(renderExportSession).join('');
+  } else {
+    homePanel.className = 'flex flex-col items-center justify-center py-10 text-center max-w-xl mx-auto w-full';
+    homePanel.innerHTML = renderEmptyHome();
+  }
 }
 
 function renderEmptyHome() {
-  return `<div class="text-left max-w-md mx-auto text-[13px] text-gray-500 leading-relaxed"><h3 class="text-[18px] font-bold text-black mb-2">Belum ada hasil klip.</h3><p>Paste link YouTube di sebelah kiri dan mulai proses.</p><div class="mt-4 font-bold text-black">Tips:</div><ul class="list-disc pl-5 mt-1 space-y-1"><li>Video 5-60 menit paling optimal</li><li>Subtitle harus tersedia (Indonesia atau Inggris)</li><li>Gunakan Blur untuk video landscape</li></ul></div>`;
+  return `<div class="w-14 h-14 bg-[#fff7ed] text-[#ea580c] rounded-2xl flex items-center justify-center mb-5 mx-auto">
+    <svg class="w-6 h-6 text-[#ea580c]" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+    </svg>
+  </div>
+  <h3 class="text-[19px] font-bold text-black mb-2.5 tracking-tight">Siap Membuat Klip Viral Pertamamu?</h3>
+  <p class="text-[13px] text-gray-500 leading-relaxed max-w-md mx-auto">
+    Tempel link YouTube di atas, dan biarkan AI kami menemukan 3 momen emas terbaik dari videomu. Proses otomatis, hasil profesional.
+  </p>`;
 }
 
 function withPendingClips(group) { const saved = new Set(group.saved_clips || []); return { ...group, clips: (group.clips || []).filter((clip) => !saved.has(clip.path)) }; }

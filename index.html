@@ -38,20 +38,25 @@
             aside.collapsed #toggle-icon {
                 transform: rotate(180deg);
             }
+            .bg-dots {
+                background-image: radial-gradient(rgba(0, 0, 0, 0.05) 1.5px, transparent 1.5px);
+                background-size: 20px 20px;
+                background-position: 10px 10px;
+            }
         </style>
     </head>
     <body
         class="bg-[#fcfcfc] text-[#111827] min-h-screen flex flex-col antialiased"
     >
         <header
-            class="bg-white border-b border-[#efefef] px-8 py-2.5 flex items-center justify-center sticky top-0 z-50"
+            class="bg-white border-b border-[#efefef] px-8 py-3 flex items-center justify-center sticky top-0 z-50"
         >
             <div
                 class="flex items-center space-x-2 text-black font-extrabold text-[16px] tracking-tight"
             >
                 <img
-                    src="/logo%20klipklop.png?v=2"
-                    class="h-6 w-auto rounded-md object-contain"
+                    src="/logo%20klipklop.png?v=3"
+                    class="h-7 w-auto rounded-md object-contain"
                     alt="KlipKlop Logo"
                 />
                 <span class="text-black">KlipKlop</span>
@@ -61,7 +66,7 @@
         <div class="flex flex-1">
             <aside
                 id="sidebar"
-                class="w-[240px] bg-[#f9fafb] border-r border-[#eeeeee] p-5 flex flex-col justify-between hidden md:flex min-h-[calc(100vh-45px)] sticky top-[45px] transition-all duration-300 relative"
+                class="w-[240px] bg-white border-r border-[#eeeeee] p-5 flex flex-col justify-between hidden md:flex min-h-[calc(100vh-53px)] sticky top-[53px] transition-all duration-300 relative"
             >
                 <button
                     id="toggle-navbar"
@@ -200,7 +205,7 @@
                 <div id="page-home" class="flex flex-col lg:flex-row w-full flex-1 items-stretch">
                     <!-- Middle Panel: Hasil Klip -->
                     <section
-                        class="flex-1 bg-white p-6 min-h-[calc(100vh-45px)] flex flex-col justify-between w-full"
+                        class="flex-1 bg-[#f9fafb] bg-dots p-6 min-h-[calc(100vh-53px)] flex flex-col justify-between w-full"
                     >
                         <div>
                             <h2
@@ -219,10 +224,10 @@
                             class="flex flex-col items-center justify-center py-10 text-center max-w-xl mx-auto w-full"
                         >
                             <div
-                                class="w-20 h-20 bg-[#fff7ed] text-[#ea580c] rounded-3xl flex items-center justify-center mb-6 shadow-sm"
+                                class="w-14 h-14 bg-[#fff7ed] text-[#ea580c] rounded-2xl flex items-center justify-center mb-5"
                             >
                                 <svg
-                                    class="w-9 h-9 text-[#ea580c]"
+                                    class="w-6 h-6 text-[#ea580c]"
                                     fill="none"
                                     stroke="currentColor"
                                     stroke-width="2.2"
@@ -252,7 +257,7 @@
 
                         <div
                             id="compact-status"
-                            class="border-t border-gray-100/70 pt-5 text-[13px] text-gray-500 w-full"
+                            class="text-[13px] text-gray-500 w-full"
                         >
                             Status: Idle<br />Clip: - | Quality: 720p | Mode: Crop
                         </div>
@@ -260,7 +265,7 @@
 
                     <!-- Right Panel: Settings & Creation Form -->
                     <aside
-                        class="w-full lg:w-[360px] shrink-0 bg-[#f9fafb] border-l border-[#eeeeee] p-6 sticky top-[45px] min-h-[calc(100vh-45px)] flex flex-col justify-between"
+                        class="w-full lg:w-[360px] shrink-0 bg-white border-l border-[#eeeeee] p-6 sticky top-[53px] min-h-[calc(100vh-53px)] flex flex-col justify-between"
                     >
                         <div class="space-y-5">
                             <div>
