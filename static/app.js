@@ -366,7 +366,7 @@ function showPage(name) {
 function setNavActive(id, active) {
   const el = $(id);
   if (!el) return;
-  el.className = active ? 'flex items-center space-x-3.5 px-4 py-3 rounded-xl bg-[#eaeaea] text-black font-bold text-[15px]' : 'flex items-center space-x-3.5 px-4 py-3 rounded-xl text-gray-600 hover:bg-gray-100 hover:text-black font-semibold text-[15px] transition-colors';
+  el.className = active ? 'flex items-center space-x-3 px-4 py-2.5 rounded-xl bg-[#ea580c] text-white font-bold text-[14px]' : 'flex items-center space-x-3 px-4 py-2.5 rounded-xl text-gray-600 hover:bg-gray-50 hover:text-black font-semibold text-[14px] transition-colors';
 }
 
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
@@ -408,10 +408,26 @@ document.addEventListener('DOMContentLoaded', () => {
   if (navHistory) navHistory.addEventListener('click', (event) => { event.preventDefault(); showPage('history'); });
   if (navConsole) navConsole.addEventListener('click', (event) => { event.preventDefault(); showPage('console'); });
   if (navSettings) navSettings.addEventListener('click', (event) => { event.preventDefault(); showPage('settings'); });
-  const toggleNavbar = $('toggle-navbar');
-  const sidebar = $('sidebar');
-  if (toggleNavbar && sidebar) {
-    toggleNavbar.addEventListener('click', () => sidebar.classList.toggle('collapsed'));
+  const instructionModal = $('instruction-modal');
+  if (instructionModal) {
+    instructionModal.addEventListener('click', (e) => {
+      if (e.target === instructionModal) cancelInstruction();
+    });
+  }
+  const jsonModal = $('json-modal');
+  if (jsonModal) {
+    jsonModal.addEventListener('click', (e) => {
+      if (e.target === jsonModal) jsonModal.classList.add('hidden');
+    });
+  }
+  const confirmModal = $('confirm-modal');
+  if (confirmModal) {
+    confirmModal.addEventListener('click', (e) => {
+      if (e.target === confirmModal) {
+        confirmModal.classList.add('hidden');
+        if (pendingConfirm) pendingConfirm(false);
+      }
+    });
   }
   setScreenSize(getScreenSize());
   updateInstructionCount();

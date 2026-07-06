@@ -13,31 +13,6 @@
             body {
                 font-family: "Plus Jakarta Sans", sans-serif;
             }
-            /* Collapsible sidebar styles */
-            aside.collapsed {
-                width: 76px !important;
-                padding-left: 0.75rem !important;
-                padding-right: 0.75rem !important;
-            }
-            aside.collapsed .space-y-1 a span {
-                display: none;
-            }
-            aside.collapsed .space-y-1 a {
-                justify-content: center;
-                padding-left: 0 !important;
-                padding-right: 0 !important;
-            }
-            aside.collapsed .profile-text {
-                display: none !important;
-            }
-            aside.collapsed #profile-button {
-                justify-content: center;
-                padding-left: 0 !important;
-                padding-right: 0 !important;
-            }
-            aside.collapsed #toggle-icon {
-                transform: rotate(180deg);
-            }
             .bg-dots {
                 background-image: radial-gradient(rgba(0, 0, 0, 0.05) 1.5px, transparent 1.5px);
                 background-size: 20px 20px;
@@ -66,38 +41,17 @@
         <div class="flex flex-1">
             <aside
                 id="sidebar"
-                class="w-[240px] bg-white border-r border-[#eeeeee] p-5 flex flex-col justify-between hidden md:flex min-h-[calc(100vh-53px)] sticky top-[53px] transition-all duration-300 relative"
+                class="w-[200px] bg-white border-r border-[#eeeeee] p-4 flex flex-col justify-between hidden md:flex min-h-[calc(100vh-53px)] sticky top-[53px] relative"
             >
-                <button
-                    id="toggle-navbar"
-                    class="absolute -right-3.5 top-6 z-40 bg-white border border-[#eeeeee] hover:border-gray-300 rounded-full w-7 h-7 flex items-center justify-center shadow-sm text-gray-500 hover:text-black transition-all focus:outline-none"
-                    title="Collapse Sidebar"
-                >
-                    <svg
-                        id="toggle-icon"
-                        class="w-4 h-4 transition-transform duration-300"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2.5"
-                        viewBox="0 0 24 24"
-                    >
-                        <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            d="M15.75 19.5L8.25 12l7.5-7.5"
-                        />
-                    </svg>
-                </button>
-
                 <div class="space-y-1">
                     <a
                         href="#"
                         id="nav-home"
                         data-page="home"
-                        class="flex items-center space-x-3.5 px-4 py-3 rounded-xl bg-[#eaeaea] text-black font-bold text-[15px]"
+                        class="flex items-center space-x-3 px-4 py-2.5 rounded-xl bg-[#ea580c] text-white font-bold text-[14px]"
                     >
                         <svg
-                            class="w-5 h-5 text-gray-700 shrink-0"
+                            class="w-5 h-5 text-current shrink-0"
                             fill="none"
                             stroke="currentColor"
                             stroke-width="2"
@@ -115,10 +69,10 @@
                         href="#"
                         id="nav-history"
                         data-page="history"
-                        class="flex items-center space-x-3.5 px-4 py-3 rounded-xl text-gray-600 hover:bg-gray-100 hover:text-black font-semibold text-[15px] transition-colors"
+                        class="flex items-center space-x-3 px-4 py-2.5 rounded-xl text-gray-600 hover:bg-gray-50 hover:text-black font-semibold text-[14px] transition-colors"
                     >
                         <svg
-                            class="w-5 h-5 text-gray-400 shrink-0"
+                            class="w-5 h-5 text-current shrink-0"
                             fill="none"
                             stroke="currentColor"
                             stroke-width="2"
@@ -136,19 +90,19 @@
                         href="#"
                         id="nav-console"
                         data-page="console"
-                        class="flex items-center space-x-3.5 px-4 py-3 rounded-xl text-gray-600 hover:bg-gray-100 hover:text-black font-semibold text-[15px] transition-colors"
+                        class="flex items-center space-x-3 px-4 py-2.5 rounded-xl text-gray-600 hover:bg-gray-50 hover:text-black font-semibold text-[14px] transition-colors"
                     >
-                        <span class="w-5 h-5 text-gray-400 font-mono shrink-0">&gt;_</span>
+                        <span class="w-5 h-5 text-current font-mono shrink-0">&gt;_</span>
                         <span>Konsol</span>
                     </a>
                     <a
                         href="#"
                         id="nav-settings"
                         data-page="settings"
-                        class="flex items-center space-x-3.5 px-4 py-3 rounded-xl text-gray-600 hover:bg-gray-100 hover:text-black font-semibold text-[15px] transition-colors"
+                        class="flex items-center space-x-3 px-4 py-2.5 rounded-xl text-gray-600 hover:bg-gray-50 hover:text-black font-semibold text-[14px] transition-colors"
                     >
                         <svg
-                            class="w-5 h-5 text-gray-400 shrink-0"
+                            class="w-5 h-5 text-current shrink-0"
                             fill="none"
                             stroke="currentColor"
                             stroke-width="2"
@@ -656,7 +610,7 @@
 
         <div
             id="instruction-modal"
-            class="hidden fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 transition-opacity"
+            class="hidden fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4 transition-opacity"
         >
             <div
                 class="bg-white border border-gray-100 w-full max-w-lg rounded-2xl shadow-xl overflow-hidden p-6 space-y-4"
@@ -751,7 +705,7 @@
         </div>
 
 
-        <div id="json-modal" class="hidden fixed inset-0 z-[110] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+        <div id="json-modal" class="hidden fixed inset-0 z-[110] bg-black/50 flex items-center justify-center p-4">
             <div class="bg-white border border-gray-100 w-full max-w-2xl rounded-2xl shadow-xl overflow-hidden">
                 <div class="flex items-center justify-between border-b border-gray-100 p-4">
                     <h2 class="text-[16px] font-bold text-black">Payload JSON</h2>
@@ -760,7 +714,7 @@
                 <pre id="payload-json" class="max-h-[70vh] overflow-auto bg-gray-950 p-4 text-[12px] leading-relaxed text-gray-100"></pre>
             </div>
         </div>
-        <div id="confirm-modal" class="hidden fixed inset-0 z-[110] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+        <div id="confirm-modal" class="hidden fixed inset-0 z-[110] bg-black/50 flex items-center justify-center p-4">
             <div class="bg-white border border-gray-100 w-full max-w-sm rounded-2xl shadow-xl p-6 space-y-4">
                 <div>
                     <h2 class="text-[18px] font-bold text-black">Hapus permanen?</h2>
