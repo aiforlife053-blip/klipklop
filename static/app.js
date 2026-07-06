@@ -372,6 +372,12 @@ function setNavActive(id, active) {
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
 function escapeAttr(value) { return escapeHtml(value).replace(/`/g, '&#96;'); }
 function cssEscape(value) { return window.CSS && CSS.escape ? CSS.escape(value) : String(value).replace(/"/g, '\\"'); }
+function closeModal(id) {
+  const modal = $(id);
+  if (!modal) return;
+  modal.classList.add('hidden');
+  if (id === 'confirm-modal' && pendingConfirm) pendingConfirm(false);
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   const save = $('save-settings'); const showJson = $('show-json'); const jsonClose = $('json-close'); const clearKey = $('clear-api-key'); const start = $('process-button'); const navHome = $('nav-home'); const navHistory = $('nav-history'); const navConsole = $('nav-console'); const navSettings = $('nav-settings'); const profile = $('profile-button'); const logClear = $('log-clear'); const instruction = $('instruction'); const instructionSave = $('instruction-save'); const instructionCancel = $('instruction-cancel'); const qualityMain = $('video-quality-main'); const qualitySettings = $('video-quality'); const blur = $('landscape-blur');
@@ -393,6 +399,10 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('[data-screen-card]').forEach((card) => card.addEventListener('click', () => setScreenSize(card.dataset.screenCard)));
   document.addEventListener('input', updatePayloadJson);
   document.addEventListener('change', updatePayloadJson);
+  ['instruction-modal', 'settings-modal', 'json-modal', 'confirm-modal'].forEach((id) => {
+    const modal = $(id);
+    if (modal) modal.addEventListener('click', (event) => { if (event.target === modal) closeModal(id); });
+  });
   document.addEventListener('click', (event) => {
     const deleteButton = event.target.closest('[data-delete-output]');
     const saveButton = event.target.closest('[data-save-output]');
