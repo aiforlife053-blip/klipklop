@@ -52,6 +52,9 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         mediapipe_settings: dict = None,
         ai_providers: dict = None,
         subtitle_language: str = "id",
+        video_quality: str = "720",
+        landscape_blur: bool = False,
+        subtitle_style: dict = None,
         log_callback=None,
         progress_callback=None,
         token_callback=None,
@@ -105,6 +108,10 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
             "center_weight": 0.3,
         }
         self.subtitle_language = subtitle_language
+        self.video_quality = str(video_quality or "720")
+        self.landscape_blur = bool(landscape_blur)
+        self.subtitle_style = subtitle_style or {"font": "Arial Black", "size": 65, "bottom_margin": 400}
+        self.output_resolution = {"480": "540:960", "720": "720:1280", "1080": "1080:1920"}.get(self.video_quality, "720:1280")
         self.log = log_callback or print
         self.set_progress = progress_callback or (lambda s, p: None)
         self.report_tokens = token_callback or (lambda gi, go, w, t: None)
@@ -136,13 +143,13 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
             return
         if not highlights:
             raise Exception("No valid highlights found!")
+        self.set_progress("Downloading source video/audio once...", 0.32)
+        source_path = self.download_video_only(url)
         total_clips = len(highlights)
         for i, highlight in enumerate(highlights, 1):
             if self.is_cancelled():
                 return
-            section_file = self.temp_dir / f"section_{i:02d}.mp4"
-            video_path = self.download_video_section(url, highlight["start_time"], highlight["end_time"], str(section_file))
-            self.process_clip(video_path, highlight, i, total_clips, add_captions=add_captions, add_hook=add_hook, pre_cut=True)
+            self.process_clip(source_path, highlight, i, total_clips, add_captions=add_captions, add_hook=add_hook, pre_cut=False)
         self.set_progress("Cleaning up...", 0.95)
         self.cleanup()
         self.set_progress("Complete!", 1.0)

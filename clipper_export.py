@@ -112,8 +112,9 @@ class ExportMixin:
             
             cmd = [
                 self.ffmpeg_path, "-y",
+                "-ss", start,
                 "-i", video_path,
-                "-ss", start, "-to", end,
+                "-t", str(duration),
                 *encoder_args,
                 "-c:a", "aac", "-b:a", "192k",
                 "-progress", "pipe:1",
@@ -626,7 +627,11 @@ class ExportMixin:
         
         # Create ASS subtitle file with time offset for hook
         ass_file = tempfile.NamedTemporaryFile(mode='w', suffix='.ass', delete=False, encoding='utf-8').name
-        self.create_ass_subtitle_capcut(transcript, ass_file, time_offset)
+        event_count = self.create_ass_subtitle_capcut(transcript, ass_file, time_offset)
+        self.log(f"  ASS events: {event_count}")
+        if event_count <= 0:
+            os.unlink(ass_file)
+            raise Exception("Subtitle transcription produced 0 ASS events")
         
         # Burn subtitles into video using GPU/CPU encoder
         # Escape path for FFmpeg on Windows
@@ -647,15 +652,18 @@ class ExportMixin:
         os.unlink(ass_file)
         
         if result.returncode != 0:
-            self.log(f"  Warning: Caption burn failed, copying without captions")
-            import shutil
-            shutil.copy(input_path, output_path)
+            raise Exception(f"Caption burn failed: {result.stderr}")
+        self.log("  Subtitle burn OK")
 
     def create_ass_subtitle_capcut(self, transcript, output_path: str, time_offset: float = 0):
         """Create ASS subtitle file with CapCut-style word-by-word highlighting"""
         
+        style = getattr(self, "subtitle_style", {}) or {}
+        font = str(style.get("font") or "Arial Black").replace(",", " ")
+        size = int(style.get("size") or 65)
+        bottom_margin = int(style.get("bottom_margin") or 400)
         # ASS header - CapCut style: white text, yellow highlight, black outline
-        ass_content = """[Script Info]
+        ass_content = f"""[Script Info]
 Title: Auto-generated captions
 ScriptType: v4.00+
 WrapStyle: 0
@@ -665,7 +673,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial Black,65,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,2,2,50,50,400,1
+Style: Default,{font},{size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,2,2,50,50,{bottom_margin},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -685,27 +693,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 if not chunk:
                     continue
                 
-                # For each word in the chunk, create a subtitle event with that word highlighted
-                for j, current_word in enumerate(chunk):
-                    # Add time_offset to account for hook duration
-                    word_start = current_word.start + time_offset
-                    word_end = current_word.end + time_offset
-                    
-                    # Build text with current word highlighted in yellow
-                    text_parts = []
-                    for k, w in enumerate(chunk):
-                        word_text = w.word.strip().upper()
-                        if k == j:
-                            # Highlight current word (yellow: &H00FFFF in BGR)
-                            text_parts.append(f"{{\\c&H00FFFF&}}{word_text}{{\\c&HFFFFFF&}}")
-                        else:
-                            text_parts.append(word_text)
-                    
-                    text = " ".join(text_parts)
-                    
+                chunk_start = chunk[0].start + time_offset
+                chunk_end = chunk[-1].end + time_offset
+                text = " ".join(w.word.strip().upper() for w in chunk if w.word.strip())
+                if text and chunk_end > chunk_start:
                     events.append({
-                        'start': self.format_time(word_start),
-                        'end': self.format_time(word_end),
+                        'start': self.format_time(chunk_start),
+                        'end': self.format_time(chunk_end),
                         'text': text
                     })
         
@@ -729,6 +723,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(ass_content)
+        return len(events)
 
     def add_hook_with_progress(self, input_path: str, hook_text: str, output_path: str, progress_callback) -> float:
         """Add hook scene at the beginning with progress tracking"""
@@ -1158,7 +1153,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         
         # Create ASS subtitle file
         ass_file = tempfile.NamedTemporaryFile(mode='w', suffix='.ass', delete=False, encoding='utf-8').name
-        self.create_ass_subtitle_capcut(transcript, ass_file, time_offset)
+        event_count = self.create_ass_subtitle_capcut(transcript, ass_file, time_offset)
+        self.log(f"  ASS events: {event_count}")
+        if event_count <= 0:
+            os.unlink(ass_file)
+            raise Exception("Subtitle transcription produced 0 ASS events")
         
         if progress_callback:
             progress_callback(0.6)
@@ -1191,6 +1190,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         # Caption burn is 60-100%
         self.run_ffmpeg_with_progress(cmd, video_duration,
             lambda p: progress_callback(0.6 + p * 0.4) if progress_callback else None)
+        self.log("  Subtitle burn OK")
         
         os.unlink(ass_file)
 

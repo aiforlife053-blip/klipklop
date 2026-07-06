@@ -64,12 +64,12 @@ Jika harus memilih, utamakan EMOSI & KONFLIK dibanding edukasi netral.
 ATURAN DURASI (KRITIS – TIDAK BOLEH DILANGGAR)
 ==============================================
 
-* Setiap clip HARUS 60–120 detik.
-* Target ideal: 85–95 detik.
+* Setiap clip mengikuti konteks cerita, tidak wajib 60 detik.
+* Maksimum durasi: 120 detik.
 * Hitung durasi dari timestamp transcript.
 * JANGAN estimasi berdasarkan panjang teks.
 
-Jika durasi < 60 detik:
+Jika durasi < 10 detik:
 → PERPANJANG dengan konteks sebelum atau sesudahnya.
 
 Jika durasi > 120 detik:
@@ -84,11 +84,11 @@ Lakukan salah satu atau kombinasi berikut:
 1. Gabungkan beberapa bagian berurutan yang masih satu topik.
 2. Tambahkan setup sebelum punchline agar dramatis.
 3. Tambahkan payoff setelah cerita agar terasa lengkap.
-4. Pangkas filler tapi jaga minimal 60 detik.
+4. Pangkas filler tapi jaga alur cerita tetap utuh.
 
 DILARANG:
 
-* Menghasilkan clip < 60 detik
+* Menghasilkan clip < 10 detik
 * Mengurangi jumlah clip
 * Mengabaikan timestamp asli
 * Mengarang timestamp
@@ -177,7 +177,7 @@ SELF-VALIDATION (WAJIB SEBELUM RETURN)
 Periksa:
 
 1. Jumlah segment = {num_clips} ?
-2. Semua durasi 60–120 detik ?
+2. Semua durasi 10–120 detik ?
 3. Semua punya tepat 6 field ?
 4. virality_score berupa integer 1–10 ?
 5. Tidak ada field lain ?
@@ -306,7 +306,7 @@ Transcript:
             self.log(f"\n💡 Error position: line {e.lineno}, column {e.colno}")
             raise Exception(f"Failed to parse GPT response as JSON: {e}\n\nFull response logged above.")
         
-        # Filter by duration (min 58s, max 120s)
+        # Filter by duration (target around 60s)
         valid = []
         for h in highlights:
             # Fallback: convert "reason" to "description" if exists
@@ -327,13 +327,16 @@ Transcript:
                 h["description"] = h.get("title", "No description")
                 self.log(f"  ⚠ Missing description for '{h.get('title', 'Unknown')}', using title")
             
-            if 58 <= duration <= 120:
+            if duration > 120:
+                h["end_time"] = self.format_timestamp(self.parse_timestamp(h["start_time"]) + 120)
+                h["duration_seconds"] = 120
+                valid.append(h)
+                self.log(f"  ✓ {h['title']} ({duration:.0f}s → 120s) trimmed")
+            elif duration >= 10:
                 valid.append(h)
                 virality = h.get("virality_score", 5)
-                self.log(f"  ✓ {h['title']} ({duration:.0f}s) [🔥 {virality}/10]")
-            elif duration > 120:
-                self.log(f"  ✗ {h['title']} ({duration:.0f}s) - Too long, skipped")
-            elif duration < 58:
+                self.log(f"  ✓ {h['title']} ({duration:.0f}s) [{virality}/10]")
+            else:
                 self.log(f"  ✗ {h['title']} ({duration:.0f}s) - Too short, skipped")
             
             if len(valid) >= num_clips:
@@ -342,10 +345,16 @@ Transcript:
         # If we don't have enough valid clips, warn user
         if len(valid) < num_clips:
             self.log(f"\n⚠️ WARNING: Only found {len(valid)} valid clips out of {num_clips} requested!")
-            self.log(f"   AI returned many segments that were too short (< 58s).")
-            self.log(f"   Consider using a better AI model or adjusting the prompt.")
+            self.log(f"   AI returned too few segments within 10–120s.")
+            self.log(f"   Consider adding user instruction with the desired topic.")
         
         return valid[:num_clips]
+
+    def format_timestamp(self, seconds: float) -> str:
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = seconds % 60
+        return f"{hours:02d}:{minutes:02d}:{secs:06.3f}".replace(".", ",")
 
     def find_highlights_with_transcription(self, video_path: str, video_info: dict, 
                                             num_clips: int, session_dir: str = None) -> dict:

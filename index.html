@@ -146,6 +146,15 @@
                     </svg>
                     <span>Riwayat</span>
                 </a>
+                <a
+                    href="#"
+                    id="nav-console"
+                    data-page="console"
+                    class="flex items-center space-x-3.5 px-4 py-3 rounded-xl text-gray-600 hover:bg-gray-100 hover:text-black font-semibold text-[15px] transition-colors"
+                >
+                    <span class="w-5 h-5 text-gray-400 font-mono">&gt;_</span>
+                    <span>Konsol</span>
+                </a>
             </aside>
 
             <main class="flex-1 p-8 max-w-6xl space-y-7 w-full">
@@ -171,6 +180,29 @@
                         </div>
 
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+                            <div>
+                                <label class="block text-[15px] font-bold text-black mb-2">Jumlah Klip</label>
+                                <select id="num-clips" class="w-full px-3.5 py-3 border border-gray-200 rounded-xl text-[14px] bg-white">
+                                    <option value="1">1 klip</option>
+                                    <option value="3" selected>3 klip</option>
+                                    <option value="5">5 klip</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-[15px] font-bold text-black mb-2">Kualitas Video</label>
+                                <select id="video-quality-main" class="w-full px-3.5 py-3 border border-gray-200 rounded-xl text-[14px] bg-white">
+                                    <option value="480">480p</option>
+                                    <option value="720" selected>720p</option>
+                                    <option value="1080">1080p</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-[15px] font-bold text-black mb-2">Background Landscape</label>
+                                <label class="border border-gray-200 rounded-xl p-3 flex items-center justify-between cursor-pointer">
+                                    <span><b class="text-[14px] text-gray-800">Blur Bergerak</b><span class="block text-[11px] text-gray-400">Isi area kosong dengan blur dari video yang sama</span></span>
+                                    <input id="landscape-blur" type="checkbox" class="w-5 h-5 accent-indigo-600" />
+                                </label>
+                            </div>
                             <div class="md:col-span-2">
                                 <label
                                     class="block text-[15px] font-bold text-black mb-2"
@@ -298,16 +330,21 @@
                             </button>
                         </div>
 
-                        <button
-                            id="process-button"
-                            class="w-full bg-[#9da1f3] hover:bg-[#8b90f0] text-white font-bold py-3.5 rounded-xl text-[15px] transition shadow-sm"
-                        >
-                            Proses Klip
-                        </button>
+                        <div class="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-3">
+                            <button
+                                id="process-button"
+                                class="bg-[#9da1f3] hover:bg-[#8b90f0] text-white font-bold py-3.5 rounded-xl text-[15px] transition shadow-sm"
+                            >
+                                Proses Klip
+                            </button>
+                            <button id="save-form" type="button" class="border border-gray-200 px-5 py-3.5 rounded-xl text-[14px] font-bold text-gray-700 hover:bg-gray-50">Save</button>
+                            <button id="show-json" type="button" class="border border-gray-200 px-5 py-3.5 rounded-xl text-[14px] font-bold text-gray-700 hover:bg-gray-50">JSON</button>
+                        </div>
                         <div class="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
                             <div id="progress-bar" class="h-full w-0 bg-[#4f46e5]"></div>
                         </div>
                         <div id="status-text" class="text-[13px] text-gray-500">Idle</div>
+                        <pre id="payload-json" class="hidden max-h-[260px] overflow-auto rounded-2xl bg-gray-950 p-4 text-[12px] leading-relaxed text-gray-100"></pre>
                     </div>
                 </section>
 
@@ -363,87 +400,10 @@
                     </div>
 
                     <div
-                        class="border-t border-gray-100/70 pt-6 grid grid-cols-1 md:grid-cols-3 gap-6 text-[13px]"
+                        id="compact-status"
+                        class="border-t border-gray-100/70 pt-5 text-[13px] text-gray-500"
                     >
-                        <div
-                            class="flex items-center space-x-3.5 justify-center md:justify-start"
-                        >
-                            <div
-                                class="w-7 h-7 rounded-full bg-[#eff2fe] text-[#4f46e5] flex items-center justify-center font-bold text-[12px]"
-                            >
-                                1
-                            </div>
-                            <div>
-                                <p class="font-bold text-black">Paste Link</p>
-                                <p class="text-gray-400 text-[12px]">
-                                    Tempel URL YouTube
-                                </p>
-                            </div>
-                            <div
-                                class="hidden md:block flex-1 text-right text-gray-300 pl-4"
-                            >
-                                <svg
-                                    class="w-4 h-4 inline"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <path
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                        d="M9 5l7 7-7 7"
-                                    />
-                                </svg>
-                            </div>
-                        </div>
-                        <div
-                            class="flex items-center space-x-3.5 justify-center"
-                        >
-                            <div
-                                class="w-7 h-7 rounded-full bg-[#eff2fe] text-[#4f46e5] flex items-center justify-center font-bold text-[12px]"
-                            >
-                                2
-                            </div>
-                            <div>
-                                <p class="font-bold text-black">AI Bekerja</p>
-                                <p class="text-gray-400 text-[12px]">
-                                    Otomatis pilih 5 klip
-                                </p>
-                            </div>
-                            <div
-                                class="hidden md:block flex-1 text-right text-gray-300 pl-4"
-                            >
-                                <svg
-                                    class="w-4 h-4 inline"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <path
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                        d="M9 5l7 7-7 7"
-                                    />
-                                </svg>
-                            </div>
-                        </div>
-                        <div
-                            class="flex items-center space-x-3.5 justify-center md:justify-end"
-                        >
-                            <div
-                                class="w-7 h-7 rounded-full bg-[#eff2fe] text-[#4f46e5] flex items-center justify-center font-bold text-[12px]"
-                            >
-                                3
-                            </div>
-                            <div class="text-left">
-                                <p class="font-bold text-black">Download</p>
-                                <p class="text-gray-400 text-[12px]">
-                                    Klip siap viral
-                                </p>
-                            </div>
-                        </div>
+                        Status: Idle<br />Clip: - | Quality: 720p | Mode: Crop
                     </div>
                 </section>
                 </div>
@@ -454,6 +414,18 @@
                             <p class="text-[13px] text-gray-500">Klip yang sudah dibuat dari folder output.</p>
                         </div>
                         <div id="history-panel" class="space-y-3"></div>
+                    </section>
+                </div>
+                <div id="page-console" class="hidden space-y-7">
+                    <section class="bg-white border border-[#e5e7eb] rounded-2xl p-7 shadow-sm min-h-[460px] flex flex-col gap-5">
+                        <div class="flex items-start justify-between gap-4">
+                            <div>
+                                <h2 class="text-[20px] font-bold text-black mb-0.5 tracking-tight">Konsol</h2>
+                                <p id="log-summary" class="text-[13px] text-gray-500">Belum ada proses.</p>
+                            </div>
+                            <button id="log-clear" type="button" class="rounded-xl border border-gray-200 px-4 py-2 text-[13px] font-bold text-gray-700 hover:bg-gray-50">Clear</button>
+                        </div>
+                        <div id="log-lines" class="min-h-[360px] max-h-[70vh] overflow-auto rounded-2xl bg-gray-950 p-4 font-mono text-[12px] leading-relaxed text-gray-200"></div>
                     </section>
                 </div>
             </main>
@@ -634,6 +606,22 @@
                         />
                     </div>
 
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-[14px] font-bold text-gray-800 mb-1.5">Caption Maker URL</label>
+                            <input id="caption-base-url" type="text" placeholder="https://api.openai.com/v1" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-gray-50/30" />
+                        </div>
+                        <div>
+                            <label class="block text-[14px] font-bold text-gray-800 mb-1.5">Caption Model</label>
+                            <input id="caption-model" type="text" placeholder="whisper-1" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-gray-50/30" />
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-[14px] font-bold text-gray-800 mb-1.5">Caption Maker API Key</label>
+                        <input id="caption-api-key" type="password" placeholder="Whisper/OpenAI API key" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-gray-50/30 font-mono" />
+                    </div>
+
                     <div>
                         <label
                             class="block text-[14px] font-bold text-gray-800 mb-1.5"
@@ -663,6 +651,36 @@
                                 Deteksi Otomatis (Auto-Detect)
                             </option>
                         </select>
+                    </div>
+
+                    <div>
+                        <label
+                            class="block text-[14px] font-bold text-gray-800 mb-1.5"
+                            >Kualitas Video</label
+                        >
+                        <select
+                            id="video-quality"
+                            class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-[14px] text-gray-700 bg-white"
+                        >
+                            <option value="480">480p cepat</option>
+                            <option value="720">720p default</option>
+                            <option value="1080">1080p kualitas tinggi</option>
+                        </select>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div>
+                            <label class="block text-[14px] font-bold text-gray-800 mb-1.5">Font Subtitle</label>
+                            <input id="subtitle-font" type="text" value="Arial Black" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-gray-50/30" />
+                        </div>
+                        <div>
+                            <label class="block text-[14px] font-bold text-gray-800 mb-1.5">Ukuran</label>
+                            <input id="subtitle-size" type="number" min="24" max="120" value="65" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-gray-50/30" />
+                        </div>
+                        <div>
+                            <label class="block text-[14px] font-bold text-gray-800 mb-1.5">Posisi Bawah</label>
+                            <input id="subtitle-bottom-margin" type="number" min="40" max="900" value="400" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-gray-50/30" />
+                        </div>
                     </div>
 
                     <div>
@@ -714,6 +732,18 @@
                     >
                         Simpan Konfigurasi
                     </button>
+                </div>
+            </div>
+        </div>
+        <div id="confirm-modal" class="hidden fixed inset-0 z-[110] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+            <div class="bg-white border border-gray-100 w-full max-w-sm rounded-2xl shadow-xl p-6 space-y-4">
+                <div>
+                    <h2 class="text-[18px] font-bold text-black">Hapus permanen?</h2>
+                    <p id="confirm-message" class="text-[13px] text-gray-500 mt-1">Data akan dihapus permanen.</p>
+                </div>
+                <div class="flex justify-end gap-3">
+                    <button id="confirm-cancel" type="button" class="px-4 py-2 border border-gray-200 rounded-xl text-[14px] font-semibold">Batal</button>
+                    <button id="confirm-ok" type="button" class="px-4 py-2 bg-red-600 text-white rounded-xl text-[14px] font-bold">Ya, Hapus</button>
                 </div>
             </div>
         </div>

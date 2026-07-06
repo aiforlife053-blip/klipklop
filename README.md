@@ -6,7 +6,7 @@ Web lokal untuk KlipKlop. Folder ini dibuat self-contained agar nanti bisa dipin
 
 ```powershell
 pip install -r requirements.txt
-python server.py
+py -3.12 server.py
 ```
 
 Buka `http://127.0.0.1:8765` jika browser tidak terbuka otomatis.

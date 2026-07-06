@@ -1,5 +1,7 @@
 import json
 import mimetypes
+import os
+import subprocess
 import sys
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -9,6 +11,13 @@ from urllib.parse import parse_qs, unquote, urlparse
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+if sys.version_info < (3, 11) and os.name == "nt" and os.environ.get("KLIPKLOP_PY_REEXEC") != "1":
+    env = dict(os.environ, KLIPKLOP_PY_REEXEC="1")
+    try:
+        raise SystemExit(subprocess.call(["py", "-3.12", str(Path(__file__).resolve())], env=env))
+    except FileNotFoundError:
+        raise SystemExit("Python 3.11+ required. Run: py -3.12 server.py")
 
 from job_manager import WebJobManager
 
@@ -48,6 +57,8 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         elif self.path == "/api/save":
             result = MANAGER.save_output(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
+        elif self.path in {"/api/logs/clear", "/api/clear-logs", "/api/clear_logs"}:
+            self._json(MANAGER.clear_logs())
         else:
             self._json({"status": "error", "message": "Not found"}, 404)
 

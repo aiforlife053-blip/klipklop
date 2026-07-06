@@ -19,6 +19,64 @@ from utils.logger import debug_log
 
 
 class DownloadMixin:
+    def _format_selector(self):
+        quality = str(getattr(self, "video_quality", "720") or "720")
+        max_height = {"480": 480, "720": 720, "1080": 1080}.get(quality, 720)
+        return f"bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]/best"
+
+    def download_video_only(self, url: str) -> str:
+        self.log(f"  Downloading source video once ({getattr(self, 'video_quality', '720')}p max)...")
+        if not (YTDLP_MODULE_AVAILABLE and self.ytdlp_path == "yt_dlp_module"):
+            return self._download_video_only_subprocess(url)
+        return self._download_video_only_module(url)
+
+    def _download_video_only_module(self, url: str) -> str:
+        ffmpeg_path = get_ffmpeg_path()
+        deno_path = get_deno_path()
+        def progress_hook(d):
+            if self.is_cancelled():
+                raise Exception("Cancelled by user")
+            if d.get('status') == 'downloading':
+                match = re.search(r'(\d+\.?\d*)%', d.get('_percent_str', '0%').strip())
+                if match:
+                    percent = float(match.group(1))
+                    self.set_progress(f"Downloading source video/audio... {percent:.1f}%", 0.32 + percent / 100 * 0.08)
+        ydl_opts = {
+            'format': self._format_selector(),
+            'merge_output_format': 'mp4',
+            'outtmpl': str(self.temp_dir / 'source.%(ext)s'),
+            'progress_hooks': [progress_hook],
+            'quiet': True,
+            'no_warnings': False,
+            'extract_flat': False,
+        }
+        if deno_path and Path(deno_path).exists():
+            ydl_opts['js_runtimes'] = {'deno': {'path': deno_path}}
+            ydl_opts['remote_components'] = ['ejs:github']
+        if ffmpeg_path and Path(ffmpeg_path).exists():
+            ydl_opts['ffmpeg_location'] = str(Path(ffmpeg_path).parent)
+        from utils.helpers import get_app_dir
+        cookies_path = next((loc for loc in [Path("cookies.txt"), get_app_dir() / "cookies.txt"] if loc.exists()), None)
+        if cookies_path:
+            ydl_opts['cookiefile'] = str(cookies_path)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        for candidate in self.temp_dir.glob("source.*"):
+            if candidate.suffix.lower() in {".mp4", ".mkv", ".webm"}:
+                self.log(f"  ✓ Source video ready: {candidate.name}")
+                return str(candidate)
+        raise Exception("Source video download failed: output file not found")
+
+    def _download_video_only_subprocess(self, url: str) -> str:
+        cmd = [self.ytdlp_path, "-f", self._format_selector(), "--merge-output-format", "mp4", "-o", str(self.temp_dir / "source.%(ext)s"), url]
+        result = subprocess.run(cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
+        if result.returncode != 0:
+            raise Exception(f"Source video download failed:\n{result.stderr}")
+        for candidate in self.temp_dir.glob("source.*"):
+            if candidate.suffix.lower() in {".mp4", ".mkv", ".webm"}:
+                return str(candidate)
+        raise Exception("Source video download failed: output file not found")
+
     def download_video(self, url: str) -> tuple:
         """Download video and subtitle with progress using yt-dlp module or executable"""
         self.log("[1/4] Downloading video & subtitle...")
@@ -72,7 +130,7 @@ class DownloadMixin:
                 self.set_progress("Processing downloaded file...", 0.25)
         
         # High-quality format selector
-        format_selector = "bestvideo[height>=720][height<=2160]+bestaudio/best[height>=720][height<=2160]/bestvideo+bestaudio/best"
+        format_selector = self._format_selector()
         
         # Base yt-dlp options
         ydl_opts = {
@@ -322,7 +380,7 @@ class DownloadMixin:
         ]
         
         # High-quality format selector (prioritize 720p+ with fallback)
-        format_selector = "bestvideo[height>=720][height<=2160]+bestaudio/best[height>=720][height<=2160]/bestvideo+bestaudio/best"
+        format_selector = self._format_selector()
         
         last_error = None
         for strategy in download_strategies:
@@ -1029,7 +1087,7 @@ class DownloadMixin:
                 self.log("  Section download finished, processing...")
         
         # Format selector
-        format_selector = "bestvideo[height>=720][height<=2160]+bestaudio/best[height>=720][height<=2160]/bestvideo+bestaudio/best"
+        format_selector = self._format_selector()
         
         ydl_opts = {
             'format': format_selector,
@@ -1108,7 +1166,7 @@ class DownloadMixin:
         # Build section string for yt-dlp
         section_str = f"*{start_time}-{end_time}"
         
-        format_selector = "bestvideo[height>=720][height<=2160]+bestaudio/best[height>=720][height<=2160]/bestvideo+bestaudio/best"
+        format_selector = self._format_selector()
         
         cmd = [
             self.ytdlp_path,

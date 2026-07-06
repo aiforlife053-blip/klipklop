@@ -33,6 +33,7 @@ class WebJobManager:
         self._message = "Idle"
         self._progress = 0.0
         self._error = ""
+        self._logs = []
 
     def start(self, payload):
         url = str(payload.get("url", payload.get("youtube_url", ""))).strip()
@@ -50,6 +51,7 @@ class WebJobManager:
         add_hook = self._as_bool(payload.get("add_hook", False), False)
         subtitle_language = str(payload.get("subtitle_language", "id") or "id")
         instruction = str(payload.get("instruction", "")).strip()[:1000]
+        landscape_blur = self._as_bool(payload.get("landscape_blur", self._config().config.get("landscape_blur", False)), False)
         screen_size = str(payload.get("screen_size", "9:16") or "9:16")
         if screen_size != "9:16":
             return {"status": "error", "message": "Unsupported screen size: only 9:16 is supported"}
@@ -68,9 +70,16 @@ class WebJobManager:
             self._message = "Starting"
             self._progress = 0.0
             self._error = ""
-            args = (url, num_clips, add_captions, add_hook, subtitle_language, instruction, self._make_run_dir(url))
+            self._add_log(f"Task {datetime.now().strftime('%d %b %Y %H:%M:%S')} | {url}", "Task")
+            self._add_log("Job started")
+            self._add_log(f"URL accepted: {url}")
+            self._add_log(f"Requested clips: {num_clips}, subtitles: {'on' if add_captions else 'off'}, language: {subtitle_language}, blur: {'on' if landscape_blur else 'off'}")
+            self._add_log(f"Subtitles: {'ON' if add_captions else 'OFF'}")
+            args = (url, num_clips, add_captions, add_hook, subtitle_language, instruction, landscape_blur, self._make_run_dir(url))
             if self._run.__code__.co_argcount == 7:
-                args = args[:-1]
+                args = args[:6]
+            elif self._run.__code__.co_argcount == 8:
+                args = args[:6] + args[7:]
             self.thread = threading.Thread(
                 target=self._run,
                 args=args,
@@ -85,7 +94,12 @@ class WebJobManager:
             "message": self._public_text(self._message),
             "progress": self._progress,
             "error": self._public_text(self._error),
+            "logs": self._logs[-500:],
         }
+
+    def clear_logs(self):
+        self._logs = []
+        return {"status": "cleared"}
 
     def get_settings(self):
         cfg = self._config().config
@@ -96,15 +110,21 @@ class WebJobManager:
         base_url = provider.get("base_url", cfg.get("base_url", GEMINI_BASE_URL))
         model = provider.get("model", cfg.get("model", GEMINI_MODEL))
         cookies = self.cookie_status()
+        caption_provider = cfg.get("ai_providers", {}).get("caption_maker", {})
         return {
             "base_url": base_url,
             "api_key": "",
             "api_key_saved": key_saved,
             "caption_key_saved": caption_key_saved,
+            "caption_base_url": caption_provider.get("base_url", "https://api.openai.com/v1"),
+            "caption_model": caption_provider.get("model", "whisper-1"),
             "hook_key_saved": hook_key_saved,
             "model": model,
             "provider": {"base_url": base_url, "api_key": "", "model": model},
             "subtitle_language": cfg.get("subtitle_language", "id"),
+            "video_quality": str(cfg.get("video_quality", "720")),
+            "landscape_blur": bool(cfg.get("landscape_blur", False)),
+            "subtitle_style": cfg.get("subtitle_style", {"font": "Arial Black", "size": 65, "bottom_margin": 400}),
             "output_dir": cfg.get("output_dir", str(self.output_dir)),
             "cookie_exists": cookies["exists"],
             "cookie_path": cookies["path"],
@@ -121,8 +141,21 @@ class WebJobManager:
         api_key = str(payload.get("api_key", provider_payload.get("api_key", ""))).strip()
         clear_api_key = bool(payload.get("clear_api_key", False))
         model = str(payload.get("model", provider_payload.get("model", GEMINI_MODEL))).strip() or GEMINI_MODEL
+        caption_base_url = str(payload.get("caption_base_url", cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("base_url", "https://api.openai.com/v1"))).strip() or "https://api.openai.com/v1"
+        caption_api_key = str(payload.get("caption_api_key", "")).strip()
+        caption_model = str(payload.get("caption_model", cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("model", "whisper-1"))).strip() or "whisper-1"
         output_dir = str(payload.get("output_dir", cfg_mgr.config.get("output_dir", str(self.output_dir)))).strip() or str(self.output_dir)
         subtitle_language = str(payload.get("subtitle_language", "id") or "id")
+        video_quality = str(payload.get("video_quality", cfg_mgr.config.get("video_quality", "720")) or "720")
+        landscape_blur = self._as_bool(payload.get("landscape_blur", cfg_mgr.config.get("landscape_blur", False)), False)
+        if video_quality not in {"480", "720", "1080"}:
+            video_quality = "720"
+        subtitle_style = cfg_mgr.config.get("subtitle_style", {"font": "Arial Black", "size": 65, "bottom_margin": 400})
+        if isinstance(payload.get("subtitle_style"), dict):
+            subtitle_style = {**subtitle_style, **payload["subtitle_style"]}
+        subtitle_style["font"] = str(subtitle_style.get("font") or "Arial Black")[:80]
+        subtitle_style["size"] = max(24, min(120, self._as_int(subtitle_style.get("size"), 65)))
+        subtitle_style["bottom_margin"] = max(40, min(900, self._as_int(subtitle_style.get("bottom_margin"), 400)))
         providers = cfg_mgr.config.setdefault("ai_providers", {})
         for name in ("highlight_finder", "youtube_title_maker"):
             current = providers.setdefault(name, {})
@@ -132,6 +165,13 @@ class WebJobManager:
                 current["api_key"] = ""
             elif api_key:
                 current["api_key"] = api_key
+        caption_current = providers.setdefault("caption_maker", {})
+        caption_current["base_url"] = caption_base_url
+        caption_current["model"] = caption_model
+        if clear_api_key:
+            caption_current["api_key"] = ""
+        elif caption_api_key:
+            caption_current["api_key"] = caption_api_key
         cfg_mgr.config["base_url"] = base_url
         cfg_mgr.config["model"] = model
         if clear_api_key:
@@ -139,6 +179,9 @@ class WebJobManager:
         elif api_key:
             cfg_mgr.config["api_key"] = api_key
         cfg_mgr.config["subtitle_language"] = subtitle_language
+        cfg_mgr.config["video_quality"] = video_quality
+        cfg_mgr.config["landscape_blur"] = landscape_blur
+        cfg_mgr.config["subtitle_style"] = subtitle_style
         cfg_mgr.config["output_dir"] = output_dir
         cfg_mgr.save()
         settings = self.get_settings()
@@ -192,13 +235,15 @@ class WebJobManager:
                 clip_meta = [self._read_json(Path(file["path"]).with_name("data.json")) for file in clips]
                 title = next((item.get("source_title") for item in clip_meta if item.get("source_title")), "")
                 description = next((item.get("source_description") for item in clip_meta if item.get("source_description")), "")
-                items = [dict(file, title=(clip_meta[i].get("title") or file["name"]), description=(clip_meta[i].get("description") or "")) for i, file in enumerate(clips)]
+                items = [dict(file, title=(clip_meta[i].get("title") or file["name"]), description=(clip_meta[i].get("description") or ""), duration_seconds=clip_meta[i].get("duration_seconds")) for i, file in enumerate(clips)]
                 groups.append({
                     "name": folder.name,
                     "path": str(folder),
                     "title": title or meta.get("title") or folder.name,
                     "caption": description or meta.get("caption") or meta.get("url") or f"{len(clips)} klip",
                     "timestamp": meta.get("timestamp") or datetime.fromtimestamp(folder.stat().st_mtime).isoformat(timespec="seconds"),
+                    "video_quality": str(meta.get("video_quality", "720")),
+                    "landscape_blur": bool(meta.get("landscape_blur", False)),
                     "thumbnail": self._thumbnail(clips),
                     "saved": bool(meta.get("saved")),
                     "saved_clips": meta.get("saved_clips", []),
@@ -217,7 +262,9 @@ class WebJobManager:
         output_root = self._output_root().resolve()
         if not target.exists() or output_root not in target.parents:
             return {"status": "error", "message": "Output tidak ditemukan"}
-        if target.is_dir():
+        if target.is_file() and target.name.lower() == "master.mp4":
+            shutil.rmtree(target.parent)
+        elif target.is_dir():
             shutil.rmtree(target)
         else:
             target.unlink()
@@ -231,18 +278,20 @@ class WebJobManager:
         meta_path = target / "run.json"
         meta = self._read_json(meta_path)
         meta["saved"] = True
-        keep = set(str(path) for path in payload.get("clips", []) if path)
+        keep = set(meta.get("saved_clips", [])) | {str(path) for path in payload.get("clips", []) if path}
         meta["saved_clips"] = sorted(keep)
         meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
         return {"status": "saved"}
 
-    def _run(self, url, num_clips, add_captions, add_hook, subtitle_language, instruction, run_dir):
+    def _run(self, url, num_clips, add_captions, add_hook, subtitle_language, instruction, landscape_blur, run_dir):
         try:
             self._sync_core_cookie_file()
             cfg = self._config().config
             prompt = self._with_indonesian_instruction(cfg.get("system_prompt"), instruction)
             run_dir.mkdir(parents=True, exist_ok=True)
-            self._write_run_meta(run_dir, url)
+            self._write_run_meta(run_dir, url, {"video_quality": str(cfg.get("video_quality", "720")), "landscape_blur": landscape_blur})
+            self._add_log(f"Output folder: {run_dir}")
+            self._add_log("Preparing AI/video processor")
             core = AutoClipperCore(
                 client=None,
                 ffmpeg_path=get_ffmpeg_path(),
@@ -255,24 +304,36 @@ class WebJobManager:
                 watermark_settings=cfg.get("watermark", {"enabled": False}),
                 credit_watermark_settings=cfg.get("credit_watermark", {"enabled": False}),
                 hook_style_settings=cfg.get("hook_style", {}),
-                face_tracking_mode=cfg.get("face_tracking_mode", "opencv"),
+                face_tracking_mode=cfg.get("face_tracking_mode", "center"),
                 mediapipe_settings=cfg.get("mediapipe_settings", {}),
                 ai_providers=cfg.get("ai_providers"),
                 subtitle_language=subtitle_language,
+                video_quality=str(cfg.get("video_quality", "720")),
+                landscape_blur=landscape_blur,
+                subtitle_style=cfg.get("subtitle_style", {"font": "Arial Black", "size": 65, "bottom_margin": 400}),
                 log_callback=self._set_message,
                 progress_callback=self._set_progress,
             )
             if cfg.get("gpu_acceleration", {}).get("enabled", False):
+                self._add_log("GPU acceleration requested")
                 core.enable_gpu_acceleration(True)
+            quality = str(cfg.get("video_quality", "720"))
+            resolution = {"480": "540x960", "720": "720x1280", "1080": "1080x1920"}.get(quality, "720x1280")
+            self._add_log(f"Video quality: {quality}p")
+            self._add_log(f"Output resolution: {resolution}")
+            self._add_log(f"Landscape blur: {'on' if landscape_blur else 'off'}")
+            self._add_log("Processor started")
             core.process(url, num_clips=num_clips, add_captions=add_captions, add_hook=add_hook)
-            self._write_run_meta(run_dir, url, self._summarize_run(run_dir))
+            self._write_run_meta(run_dir, url, {**self._summarize_run(run_dir), "video_quality": quality, "landscape_blur": landscape_blur})
             self._status = "complete"
             self._message = "Complete"
             self._progress = 1.0
+            self._add_log("Complete", "Done")
         except Exception as exc:
             self._status = "error"
             self._message = "Processing failed"
             self._error = str(exc)
+            self._add_log(str(exc), "Error")
         finally:
             self.thread = None
 
@@ -285,8 +346,26 @@ class WebJobManager:
 
     def _set_message(self, message):
         self._message = str(message)
+        self._add_log(message)
+
+    def _format_log(self, level, message):
+        text = self._public_text(message).strip()
+        return f"{datetime.now().strftime('%H:%M:%S')} [{level}] {text}"
+
+    def _add_log(self, message, level=None):
+        text = self._public_text(message).strip()
+        if not text:
+            return
+        level = level or ("Error" if any(token in text.lower() for token in ("error", "failed", "gagal", "no subtitle", "exception")) else "Running")
+        line = self._format_log(level, text)
+        if not self._logs or self._logs[-1].split('] ', 1)[-1] != text:
+            self._logs.append(line)
+        self._logs = self._logs[-120:]
 
     def _set_progress(self, stage, progress=None):
+        if isinstance(stage, str):
+            self._message = stage
+            self._add_log(stage)
         value = progress if progress is not None else stage
         try:
             self._progress = max(0.0, min(1.0, float(value)))
@@ -337,6 +416,12 @@ class WebJobManager:
         )
         user = f"\nArahan pengguna: {instruction}" if instruction else ""
         return f"{prompt or AutoClipperCore.get_default_prompt()}{viral}{user}"
+
+    def _as_int(self, value, default=0):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
 
     def _as_bool(self, value, default=False):
         if isinstance(value, bool):

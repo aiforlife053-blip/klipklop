@@ -455,6 +455,9 @@ class PortraitMixin:
     def convert_to_portrait_with_progress(self, input_path: str, output_path: str, progress_callback):
         """Convert landscape to 9:16 portrait with speaker tracking and progress (router method)"""
         try:
+            if getattr(self, "landscape_blur", False) and self._is_landscape(input_path):
+                self.log("  Using moving blur background")
+                return self.convert_to_portrait_blur_with_progress(input_path, output_path, progress_callback)
             if self.face_tracking_mode == "mediapipe":
                 self.log("  Using MediaPipe (Active Speaker Detection)")
                 return self.convert_to_portrait_mediapipe_with_progress(input_path, output_path, progress_callback)
@@ -472,12 +475,43 @@ class PortraitMixin:
             else:
                 raise
 
+    def _is_landscape(self, input_path: str) -> bool:
+        cap = cv2.VideoCapture(input_path)
+        try:
+            return int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) > int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        finally:
+            cap.release()
+
+    def convert_to_portrait_blur_with_progress(self, input_path: str, output_path: str, progress_callback):
+        width, height = (int(part) for part in getattr(self, "output_resolution", "720:1280").split(":"))
+        filter_complex = (
+            f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},boxblur=30:3[bg];"
+            f"[0:v]scale={width}:-2[fg];"
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2"
+        )
+        cmd = [
+            self.ffmpeg_path,
+            "-y",
+            "-i", input_path,
+            "-filter_complex", filter_complex,
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "23",
+            "-c:a", "copy",
+            output_path,
+        ]
+        result = self._run_ffmpeg_subprocess(cmd)
+        if result.returncode != 0:
+            raise Exception(f"Blur portrait failed: {result.stderr}")
+        progress_callback(1.0)
+
     def convert_to_portrait_center(self, input_path: str, output_path: str, progress_callback):
         cmd = [
             self.ffmpeg_path,
             "-y",
             "-i", input_path,
-            "-vf", "crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=1080:1920",
+            "-vf", f"crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale={getattr(self, 'output_resolution', '720:1280')}",
             "-c:v", "libx264",
             "-preset", "veryfast",
             "-crf", "23",

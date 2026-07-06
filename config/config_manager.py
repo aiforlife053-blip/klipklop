@@ -38,6 +38,9 @@ class ConfigManager:
                 "tts_model": "tts-1",
                 "installation_id": str(uuid.uuid4()),
                 "face_tracking_mode": "center",
+                "video_quality": "720",
+                "landscape_blur": False,
+                "subtitle_style": {"font": "Arial Black", "size": 65, "bottom_margin": 400},
                 "mediapipe_settings": {
                     "lip_activity_threshold": 0.15,
                     "switch_threshold": 0.3,
@@ -85,6 +88,9 @@ class ConfigManager:
                 "scale": 0.15
             },
             "face_tracking_mode": "center",
+            "video_quality": "720",
+            "landscape_blur": False,
+            "subtitle_style": {"font": "Arial Black", "size": 65, "bottom_margin": 400},
             "mediapipe_settings": {
                 "lip_activity_threshold": 0.15,
                 "switch_threshold": 0.3,
