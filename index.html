@@ -54,100 +54,123 @@
                         href="#"
                         id="nav-home"
                         data-page="home"
-                        class="flex items-center space-x-3 px-4 py-2.5 rounded-xl bg-[#ea580c] text-white font-bold text-[14px] transition"
+                        class="flex items-center justify-between w-full px-3 py-2 rounded-xl bg-orange-50 text-[#ea580c] font-bold text-[13px] transition"
                     >
-                        <svg
-                            class="w-[18px] h-[18px] text-current shrink-0"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2.2"
-                            viewBox="0 0 24 24"
-                        >
-                            <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"
-                            />
-                        </svg>
-                        <span>Beranda</span>
+                        <div class="flex items-center space-x-3">
+                            <svg
+                                class="w-[18px] h-[18px] text-current shrink-0"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2.2"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25A2.25 2.25 0 0 1 13.5 8.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"
+                                />
+                            </svg>
+                            <span>Dashboard</span>
+                        </div>
                     </a>
-                    <a
-                        href="#"
-                        id="nav-history"
-                        data-page="history"
-                        class="flex items-center space-x-3 px-4 py-2.5 rounded-xl text-gray-500 hover:bg-orange-50/50 hover:text-[#ea580c] font-bold text-[14px] transition"
-                    >
-                        <svg
-                            class="w-[18px] h-[18px] text-current shrink-0"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2.2"
-                            viewBox="0 0 24 24"
+
+                    <div>
+                        <button
+                            id="nav-content-toggle"
+                            type="button"
+                            class="flex items-center justify-between w-full px-3 py-2 rounded-xl text-gray-700 hover:text-black hover:bg-gray-50 font-medium text-[13px] transition focus:outline-none"
                         >
-                            <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-                            />
-                        </svg>
-                        <span>Riwayat</span>
-                    </a>
-                    <a
-                        href="#"
-                        id="nav-console"
-                        data-page="console"
-                        class="flex items-center space-x-3 px-4 py-2.5 rounded-xl text-gray-500 hover:bg-orange-50/50 hover:text-[#ea580c] font-bold text-[14px] transition"
-                    >
-                        <svg
-                            class="w-[18px] h-[18px] text-current shrink-0"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2.2"
-                            viewBox="0 0 24 24"
+                            <div class="flex items-center space-x-3">
+                                <svg
+                                    class="w-[18px] h-[18px] text-gray-500 shrink-0"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.2"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75c.621 0 1.125.504 1.125 1.125v1.875c0 .621-.504 1.125-1.125 1.125H5.625A1.125 1.125 0 0 1 4.5 7.5V5.625c0-.621.504-1.125 1.125-1.125Z"
+                                    />
+                                </svg>
+                                <span>Content</span>
+                            </div>
+                            <svg
+                                class="w-4 h-4 text-gray-400 transition-transform duration-200 submenu-arrow"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2.5"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    d="M19 9l-7 7-7-7"
+                                />
+                            </svg>
+                        </button>
+                        
+                        <div
+                            id="nav-content-submenu"
+                            class="pl-4 ml-[21px] border-l border-gray-200 space-y-1 mt-1 transition-all"
                         >
-                            <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                            />
-                        </svg>
-                        <span>Konsol</span>
-                    </a>
+                            <a
+                                href="#"
+                                id="nav-history"
+                                data-page="history"
+                                class="flex items-center space-x-3 px-3 py-2 rounded-lg text-gray-500 hover:bg-gray-50 hover:text-gray-900 font-medium text-[11px] transition"
+                            >
+                                <span>Riwayat</span>
+                            </a>
+                            <a
+                                href="#"
+                                id="nav-console"
+                                data-page="console"
+                                class="flex items-center space-x-3 px-3 py-2 rounded-lg text-gray-500 hover:bg-gray-50 hover:text-gray-900 font-medium text-[11px] transition"
+                            >
+                                <span>Konsol</span>
+                            </a>
+                        </div>
+                    </div>
+
                     <a
                         href="#"
                         id="nav-settings"
                         data-page="settings"
-                        class="flex items-center space-x-3 px-4 py-2.5 rounded-xl text-gray-500 hover:bg-orange-50/50 hover:text-[#ea580c] font-bold text-[14px] transition"
+                        class="flex items-center justify-between w-full px-3 py-2 rounded-xl text-gray-500 hover:text-gray-900 hover:bg-gray-50 font-medium text-[13px] transition"
                     >
-                        <svg
-                            class="w-[18px] h-[18px] text-current shrink-0"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2.2"
-                            viewBox="0 0 24 24"
-                        >
-                            <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.43l-1.003.767c-.29.223-.443.601-.403.956.011.1.018.203.018.306s-.007.205-.018.306c-.04.355.114.733.403.956.011.1.018.203.018.306s-.007.205-.018.306c-.04.355.114.733.403.956l1.003.767a1.125 1.125 0 01-.26 1.43l-1.296 2.247a1.125 1.125 0 01-1.37.49l-1.216-.456c-.356-.133-.751-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.43l1.004-.767c.29-.223.443-.601.403-.956a6.4 6.4 0 01-.018-.306c0-.103.007-.205.018-.306.04-.355-.114-.733-.403-.956l-1.004-.767a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.49l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28z"
-                            />
-                        </svg>
-                        <span>Pengaturan</span>
+                        <div class="flex items-center space-x-3">
+                            <svg
+                                class="w-[18px] h-[18px] text-current shrink-0"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2.2"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.43l-1.003.767c-.29.223-.443.601-.403.956.011.1.018.203.018.306s-.007.205-.018.306c-.04.355.114.733.403.956.011.1.018.203.018.306s-.007.205-.018.306c-.04.355.114.733.403.956l1.003.767a1.125 1.125 0 01-.26 1.43l-1.296 2.247a1.125 1.125 0 01-1.37.49l-1.216-.456c-.356-.133-.751-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.43l1.004-.767c.29-.223.443-.601.403-.956a6.4 6.4 0 01-.018-.306c0-.103.007-.205.018-.306.04-.355-.114-.733-.403-.956l-1.004-.767a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.49l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28z"
+                                />
+                            </svg>
+                            <span>Pengaturan</span>
+                        </div>
                     </a>
                 </div>
 
                 <div class="border-t border-gray-200 pt-4 mt-auto relative">
                     <button
                         id="profile-button"
-                        class="w-full flex items-center space-x-2.5 text-[14px] font-bold text-gray-800 hover:text-black focus:outline-none p-2 rounded-xl hover:bg-gray-100 transition"
+                        class="w-full flex items-center space-x-2.5 text-[14px] font-semibold text-gray-800 hover:text-black focus:outline-none p-2 rounded-xl hover:bg-gray-100 transition"
                     >
                         <div
-                            class="w-8 h-8 rounded-lg bg-[#6d28d9] text-white flex items-center justify-center font-bold text-[14px] shrink-0"
+                            class="w-8 h-8 rounded-lg bg-[#6d28d9] text-white flex items-center justify-center font-semibold text-[14px] shrink-0"
                         >
                             a
                         </div>
                         <div class="flex-1 text-left min-w-0 profile-text">
-                            <span class="block text-[14px] font-bold text-gray-800 truncate">aiforlife</span>
+                            <span class="block text-[14px] font-semibold text-gray-800 truncate">aiforlife</span>
                             <span class="block text-[11px] text-gray-400 font-normal">Local Mode</span>
                         </div>
                         <svg
@@ -171,7 +194,7 @@
                         <button
                             type="button"
                             onclick="location.reload()"
-                            class="w-full flex items-center space-x-2 px-2.5 py-1.5 rounded-lg text-red-600 hover:bg-red-50 font-bold transition text-left focus:outline-none"
+                            class="w-full flex items-center space-x-2 px-2.5 py-1.5 rounded-lg text-red-600 hover:bg-red-50 font-semibold transition text-left focus:outline-none"
                         >
                             <svg
                                 class="w-4 h-4 text-red-500"
@@ -200,7 +223,7 @@
                     >
                         <div>
                             <h2
-                                class="text-[20px] font-bold text-black mb-0.5 tracking-tight"
+                                class="text-[20px] font-semibold text-black mb-0.5 tracking-tight"
                             >
                                 Hasil Klip
                             </h2>
@@ -233,7 +256,7 @@
                             </div>
 
                             <h3
-                                class="text-[19px] font-bold text-black mb-2.5 tracking-tight"
+                                class="text-[19px] font-semibold text-black mb-2.5 tracking-tight"
                             >
                                 Siap Membuat Klip Viral Pertamamu?
                             </h3>
@@ -260,14 +283,14 @@
                     >
                         <div class="space-y-5">
                             <div>
-                                <h2 class="text-[18px] font-bold text-black tracking-tight">Buat Klip Baru</h2>
+                                <h2 class="text-[18px] font-semibold text-black tracking-tight">Buat Klip Baru</h2>
                                 <p class="text-[12px] text-gray-500">Sesuaikan parameter pembuatan klip video.</p>
                             </div>
 
                         <div class="space-y-4">
                             <div>
                                 <label
-                                    class="block text-[14px] font-bold text-black mb-1"
+                                    class="block text-[14px] font-semibold text-black mb-1"
                                     >Link YouTube</label
                                 >
                                 <input
@@ -283,7 +306,7 @@
 
                             <div class="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label class="block text-[14px] font-bold text-black mb-1.5">Jumlah Klip</label>
+                                    <label class="block text-[14px] font-semibold text-black mb-1.5">Jumlah Klip</label>
                                     <select id="num-clips" class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-[13px] bg-white">
                                         <option value="1">1 klip</option>
                                         <option value="3" selected>3 klip</option>
@@ -291,7 +314,7 @@
                                     </select>
                                 </div>
                                 <div>
-                                    <label class="block text-[14px] font-bold text-black mb-1.5">Kualitas Video</label>
+                                    <label class="block text-[14px] font-semibold text-black mb-1.5">Kualitas Video</label>
                                     <select id="video-quality-main" class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-[13px] bg-white">
                                         <option value="480">480p</option>
                                         <option value="720" selected>720p</option>
@@ -301,13 +324,13 @@
                             </div>
 
                             <div>
-                                <label class="block text-[14px] font-bold text-black mb-1.5">Background Landscape</label>
+                                <label class="block text-[14px] font-semibold text-black mb-1.5">Background</label>
                                 <div
                                     class="border border-gray-200 rounded-xl p-2.5 flex items-center justify-between bg-white"
                                 >
                                     <div>
                                         <span
-                                            class="text-[13px] font-bold text-gray-800 block"
+                                            class="text-[13px] font-semibold text-gray-800 block"
                                             >Blur Bergerak</span
                                         >
                                         <span class="text-[10px] text-gray-400 block"
@@ -332,15 +355,15 @@
 
                             <div>
                                 <label
-                                    class="block text-[14px] font-bold text-black mb-1.5"
-                                    >Suntik Subtitel</label
+                                    class="block text-[14px] font-semibold text-black mb-1.5"
+                                    >Subtitel</label
                                 >
                                 <div
                                     class="border border-gray-200 rounded-xl p-2.5 flex items-center justify-between bg-white"
                                 >
                                     <div>
                                         <span
-                                            class="text-[13px] font-bold text-gray-800 block"
+                                            class="text-[13px] font-semibold text-gray-800 block"
                                             >Generasikan Teks</span
                                         >
                                         <span class="text-[10px] text-gray-400 block"
@@ -366,7 +389,7 @@
 
                             <div>
                                 <label
-                                    class="block text-[14px] font-bold text-black mb-1.5"
+                                    class="block text-[14px] font-semibold text-black mb-1.5"
                                     >Ukuran Layar</label
                                 >
                                 <div class="grid grid-cols-3 gap-2">
@@ -382,7 +405,7 @@
                                             checked
                                         />
                                         <span
-                                            class="text-[13px] font-bold text-orange-600 block"
+                                            class="text-[13px] font-semibold text-orange-600 block"
                                             >9:16</span
                                         >
                                         <span
@@ -401,7 +424,7 @@
                                             class="sr-only"
                                         />
                                         <span
-                                            class="text-[13px] font-bold text-gray-700 block"
+                                            class="text-[13px] font-semibold text-gray-700 block"
                                             >1:1</span
                                         >
                                         <span class="text-[10px] text-gray-400"
@@ -419,7 +442,7 @@
                                             class="sr-only"
                                         />
                                         <span
-                                            class="text-[13px] font-bold text-gray-700 block"
+                                            class="text-[13px] font-semibold text-gray-700 block"
                                             >16:9</span
                                         >
                                         <span class="text-[10px] text-gray-400"
@@ -438,7 +461,7 @@
                                         .classList.remove('hidden')
                                 "
                                 type="button"
-                                class="text-[12px] text-[#ea580c] font-bold hover:text-orange-700 flex items-center space-x-1.5 transition"
+                                class="text-[12px] text-[#ea580c] font-semibold hover:text-orange-700 flex items-center space-x-1.5 transition"
                             >
                                 <svg
                                     class="w-4 h-4"
@@ -462,11 +485,11 @@
                             <div class="flex gap-2">
                                 <button
                                     id="process-button"
-                                    class="flex-1 bg-[#ea580c] hover:bg-orange-700 text-white font-bold py-2.5 rounded-xl text-[14px] transition shadow-sm"
+                                    class="flex-1 bg-[#ea580c] hover:bg-orange-700 text-white font-semibold py-2.5 rounded-xl text-[14px] transition shadow-sm"
                                 >
                                     Proses Klip
                                 </button>
-                                <button id="show-json" type="button" class="border border-gray-200 px-3.5 py-2.5 rounded-xl text-[13px] font-bold text-gray-700 hover:bg-gray-50 bg-white">JSON</button>
+                                <button id="show-json" type="button" class="border border-gray-200 px-3.5 py-2.5 rounded-xl text-[13px] font-semibold text-gray-700 hover:bg-gray-50 bg-white">JSON</button>
                             </div>
                             <div class="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
                                 <div id="progress-bar" class="h-full w-0 bg-[#ea580c] transition-[width] duration-300 ease-out"></div>
@@ -478,7 +501,7 @@
                 <div id="page-history" class="hidden p-6 space-y-7 bg-[#f9fafb] bg-dots flex-1 min-h-[calc(100vh-53px)]">
                     <section class="bg-white border border-[#e5e7eb] rounded-2xl p-7 shadow-sm min-h-[460px] flex flex-col gap-6 w-full">
                         <div>
-                            <h2 class="text-[20px] font-bold text-black mb-0.5 tracking-tight">Riwayat Klip</h2>
+                            <h2 class="text-[20px] font-semibold text-black mb-0.5 tracking-tight">Riwayat Klip</h2>
                             <p class="text-[13px] text-gray-500">Klip yang sudah dibuat dari folder output.</p>
                         </div>
                         <div id="history-panel" class="space-y-3"></div>
@@ -488,10 +511,10 @@
                     <section class="bg-white border border-[#e5e7eb] rounded-2xl p-7 shadow-sm min-h-[460px] flex flex-col gap-5 w-full">
                         <div class="flex items-start justify-between gap-4">
                             <div>
-                                <h2 class="text-[20px] font-bold text-black mb-0.5 tracking-tight">Konsol</h2>
+                                <h2 class="text-[20px] font-semibold text-black mb-0.5 tracking-tight">Konsol</h2>
                                 <p id="log-summary" class="text-[13px] text-gray-500">Belum ada proses.</p>
                             </div>
-                            <button id="log-clear" type="button" class="rounded-xl border border-gray-200 px-4 py-2 text-[13px] font-bold text-gray-700 hover:bg-gray-50">Clear</button>
+                            <button id="log-clear" type="button" class="rounded-xl border border-gray-200 px-4 py-2 text-[13px] font-semibold text-gray-700 hover:bg-gray-50">Clear</button>
                         </div>
                         <div id="log-lines" class="min-h-[360px] max-h-[70vh] overflow-auto rounded-2xl bg-gray-950 p-4 font-mono text-[12px] leading-relaxed text-gray-200"></div>
                     </section>
@@ -499,7 +522,7 @@
                 <div id="page-settings" class="hidden p-6 space-y-7 bg-[#f9fafb] bg-dots flex-1 min-h-[calc(100vh-53px)]">
                     <section class="bg-white border border-[#e5e7eb] rounded-2xl p-7 shadow-sm w-full">
                         <div class="border-b border-gray-100 pb-5 mb-5">
-                            <h2 class="text-[20px] font-bold text-black tracking-tight">Konfigurasi Pengaturan</h2>
+                            <h2 class="text-[20px] font-semibold text-black tracking-tight">Konfigurasi Pengaturan</h2>
                             <p class="text-[13px] text-gray-500 mt-0.5">Kelola API key, model pemrosesan, dan pengaturan subtitle.</p>
                         </div>
 
@@ -507,7 +530,7 @@
                             <!-- Left Column: LLM & Storage Config -->
                             <div class="space-y-4">
                                 <div>
-                                    <label class="block text-[13px] font-bold text-gray-800 mb-1">Base URL / Provider</label>
+                                    <label class="block text-[13px] font-semibold text-gray-800 mb-1">Base URL / Provider</label>
                                     <input
                                         id="base-url"
                                         type="text"
@@ -517,7 +540,7 @@
                                 </div>
 
                                 <div>
-                                    <label class="block text-[13px] font-bold text-gray-800 mb-1">API Key</label>
+                                    <label class="block text-[13px] font-semibold text-gray-800 mb-1">API Key</label>
                                     <input
                                         id="api-key"
                                         type="password"
@@ -527,7 +550,7 @@
                                 </div>
 
                                 <div>
-                                    <label class="block text-[13px] font-bold text-gray-800 mb-1">Model LLM / Pemrosesan</label>
+                                    <label class="block text-[13px] font-semibold text-gray-800 mb-1">Model LLM / Pemrosesan</label>
                                     <input
                                         id="model"
                                         type="text"
@@ -538,7 +561,7 @@
 
                                 <div>
                                     <div class="flex justify-between items-center mb-1">
-                                        <label class="block text-[13px] font-bold text-gray-800">Folder Penyimpanan Output</label>
+                                        <label class="block text-[13px] font-semibold text-gray-800">Folder Penyimpanan Output</label>
                                         <span class="text-[11px] text-gray-400 font-normal">opsional</span>
                                     </div>
                                     <input
@@ -554,7 +577,7 @@
                             <div class="space-y-4">
                                 <div class="grid grid-cols-2 gap-3">
                                     <div>
-                                        <label class="block text-[13px] font-bold text-gray-800 mb-1">Subtitle Engine</label>
+                                        <label class="block text-[13px] font-semibold text-gray-800 mb-1">Subtitle Engine</label>
                                         <select id="subtitle-engine" class="w-full px-3 py-2 border border-gray-200 rounded-xl text-[13px] text-gray-700 bg-white">
                                             <option value="local">Local faster-whisper</option>
                                             <option value="auto">Auto</option>
@@ -562,7 +585,7 @@
                                         </select>
                                     </div>
                                     <div>
-                                        <label class="block text-[13px] font-bold text-gray-800 mb-1">Local Model</label>
+                                        <label class="block text-[13px] font-semibold text-gray-800 mb-1">Local Model</label>
                                         <select id="local-whisper-model" class="w-full px-3 py-2 border border-gray-200 rounded-xl text-[13px] text-gray-700 bg-white">
                                             <option value="base">base</option>
                                             <option value="small" selected>small</option>
@@ -574,23 +597,23 @@
                                 <div id="api-whisper-fields" class="hidden space-y-3">
                                     <div class="grid grid-cols-2 gap-3">
                                         <div>
-                                            <label class="block text-[11px] font-bold text-gray-600 mb-1">API Whisper URL</label>
+                                            <label class="block text-[11px] font-semibold text-gray-600 mb-1">API Whisper URL</label>
                                             <input id="caption-base-url" type="text" placeholder="https://api.openai.com/v1" class="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-[12px] text-gray-700 bg-gray-50/30" />
                                         </div>
                                         <div>
-                                            <label class="block text-[11px] font-bold text-gray-600 mb-1">API Whisper Model</label>
+                                            <label class="block text-[11px] font-semibold text-gray-600 mb-1">API Whisper Model</label>
                                             <input id="caption-model" type="text" placeholder="whisper-1" class="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-[12px] text-gray-700 bg-gray-50/30" />
                                         </div>
                                     </div>
                                     <div>
-                                        <label class="block text-[11px] font-bold text-gray-600 mb-1">API Whisper Key</label>
+                                        <label class="block text-[11px] font-semibold text-gray-600 mb-1">API Whisper Key</label>
                                         <input id="caption-api-key" type="password" placeholder="Whisper/OpenAI API key" class="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-[12px] text-gray-700 bg-gray-50/30 font-mono" />
                                     </div>
                                 </div>
 
                                 <div class="grid grid-cols-2 gap-3">
                                     <div>
-                                        <label class="block text-[13px] font-bold text-gray-800 mb-1">Bahasa Subtitel</label>
+                                        <label class="block text-[13px] font-semibold text-gray-800 mb-1">Bahasa Subtitel</label>
                                         <select
                                             id="subtitle-language"
                                             class="w-full px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[13px] text-gray-700 bg-white"
@@ -603,7 +626,7 @@
                                     </div>
 
                                     <div>
-                                        <label class="block text-[13px] font-bold text-gray-800 mb-1">Kualitas Video</label>
+                                        <label class="block text-[13px] font-semibold text-gray-800 mb-1">Kualitas Video</label>
                                         <select
                                             id="video-quality"
                                             class="w-full px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[13px] text-gray-700 bg-white"
@@ -617,15 +640,15 @@
 
                                 <div class="grid grid-cols-4 gap-2">
                                     <div>
-                                        <label class="block text-[11px] font-bold text-gray-700 mb-1 truncate" title="Font Subtitle">Font Sub</label>
+                                        <label class="block text-[11px] font-semibold text-gray-700 mb-1 truncate" title="Font Subtitle">Font Sub</label>
                                         <input id="subtitle-font" type="text" value="Plus Jakarta Sans" class="w-full px-2 py-2 border border-gray-200 rounded-lg text-[12px] text-gray-700 bg-gray-50/30" />
                                     </div>
                                     <div>
-                                        <label class="block text-[11px] font-bold text-gray-700 mb-1">Ukuran</label>
+                                        <label class="block text-[11px] font-semibold text-gray-700 mb-1">Ukuran</label>
                                         <input id="subtitle-size" type="number" min="24" max="120" value="65" class="w-full px-2 py-2 border border-gray-200 rounded-lg text-[12px] text-gray-700 bg-gray-50/30" />
                                     </div>
                                     <div>
-                                        <label class="block text-[11px] font-bold text-gray-700 mb-1">Posisi</label>
+                                        <label class="block text-[11px] font-semibold text-gray-700 mb-1">Posisi</label>
                                         <select id="subtitle-position" class="w-full px-2 py-2 border border-gray-200 rounded-lg text-[12px] text-gray-700 bg-white">
                                             <option value="auto">Auto</option>
                                             <option value="top">Top</option>
@@ -634,7 +657,7 @@
                                         </select>
                                     </div>
                                     <div>
-                                        <label class="block text-[11px] font-bold text-gray-700 mb-1 truncate" title="Posisi Bawah">Margin Bw</label>
+                                        <label class="block text-[11px] font-semibold text-gray-700 mb-1 truncate" title="Posisi Bawah">Margin Bw</label>
                                         <input id="subtitle-bottom-margin" type="number" min="40" max="900" value="400" class="w-full px-2 py-2 border border-gray-200 rounded-lg text-[12px] text-gray-700 bg-gray-50/30" />
                                     </div>
                                 </div>
@@ -661,7 +684,7 @@
                             <button
                                 id="save-settings"
                                 type="button"
-                                class="px-5 py-2 bg-[#ea580c] text-white text-[14px] font-bold rounded-xl hover:bg-orange-700 transition shadow-sm"
+                                class="px-5 py-2 bg-[#ea580c] text-white text-[14px] font-semibold rounded-xl hover:bg-orange-700 transition shadow-sm"
                             >
                                 Simpan Konfigurasi
                             </button>
@@ -673,14 +696,14 @@
 
         <div
             id="instruction-modal"
-            class="hidden fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 transition-opacity"
+            class="hidden fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4 transition-opacity"
         >
             <div
                 class="bg-white border border-gray-100 w-full max-w-lg rounded-2xl shadow-xl overflow-hidden p-6 space-y-4"
             >
                 <div class="flex items-center justify-between">
                     <div
-                        class="flex items-center space-x-2 text-black font-bold text-[16px]"
+                        class="flex items-center space-x-2 text-black font-semibold text-[16px]"
                     >
                         <svg
                             class="w-5 h-5 text-[#ea580c]"
@@ -759,7 +782,7 @@
                     <button
                         id="instruction-save"
                         type="button"
-                        class="px-5 py-2 bg-[#ea580c] text-white text-[14px] font-bold rounded-xl hover:bg-orange-700 transition shadow-sm"
+                        class="px-5 py-2 bg-[#ea580c] text-white text-[14px] font-semibold rounded-xl hover:bg-orange-700 transition shadow-sm"
                     >
                         Simpan Arahan
                     </button>
@@ -769,7 +792,7 @@
 
         <div
             id="settings-modal"
-            class="hidden fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 transition-opacity"
+            class="hidden fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4 transition-opacity"
         >
             <div
                 class="bg-white border border-gray-100 w-full max-w-lg rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]"
@@ -778,7 +801,7 @@
                     class="p-6 border-b border-gray-100 flex items-center justify-between"
                 >
                     <div
-                        class="flex items-center space-x-2 text-black font-bold text-[17px]"
+                        class="flex items-center space-x-2 text-black font-semibold text-[17px]"
                     >
                         <svg
                             class="w-5 h-5 text-gray-700"
@@ -822,7 +845,7 @@
                 <div class="p-6 space-y-4 overflow-y-auto flex-1">
                     <div>
                         <label
-                            class="block text-[14px] font-bold text-gray-800 mb-1.5"
+                            class="block text-[14px] font-semibold text-gray-800 mb-1.5"
                             >Base URL / Provider</label
                         >
                         <input
@@ -835,7 +858,7 @@
 
                     <div>
                         <label
-                            class="block text-[14px] font-bold text-gray-800 mb-1.5"
+                            class="block text-[14px] font-semibold text-gray-800 mb-1.5"
                             >API Key</label
                         >
                         <input
@@ -848,7 +871,7 @@
 
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <div>
-                            <label class="block text-[14px] font-bold text-gray-800 mb-1.5">Subtitle Engine</label>
+                            <label class="block text-[14px] font-semibold text-gray-800 mb-1.5">Subtitle Engine</label>
                             <select id="subtitle-engine" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-white">
                                 <option value="local">Local faster-whisper</option>
                                 <option value="auto">Auto</option>
@@ -856,7 +879,7 @@
                             </select>
                         </div>
                         <div>
-                            <label class="block text-[14px] font-bold text-gray-800 mb-1.5">Local Model</label>
+                            <label class="block text-[14px] font-semibold text-gray-800 mb-1.5">Local Model</label>
                             <select id="local-whisper-model" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-white">
                                 <option value="base">base</option>
                                 <option value="small" selected>small</option>
@@ -868,23 +891,23 @@
                     <div id="api-whisper-fields" class="hidden space-y-3">
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <div>
-                                <label class="block text-[14px] font-bold text-gray-800 mb-1.5">API Whisper URL</label>
+                                <label class="block text-[14px] font-semibold text-gray-800 mb-1.5">API Whisper URL</label>
                                 <input id="caption-base-url" type="text" placeholder="https://api.openai.com/v1" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-gray-50/30" />
                             </div>
                             <div>
-                                <label class="block text-[14px] font-bold text-gray-800 mb-1.5">API Whisper Model</label>
+                                <label class="block text-[14px] font-semibold text-gray-800 mb-1.5">API Whisper Model</label>
                                 <input id="caption-model" type="text" placeholder="whisper-1" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-gray-50/30" />
                             </div>
                         </div>
                         <div>
-                            <label class="block text-[14px] font-bold text-gray-800 mb-1.5">API Whisper Key</label>
+                            <label class="block text-[14px] font-semibold text-gray-800 mb-1.5">API Whisper Key</label>
                             <input id="caption-api-key" type="password" placeholder="Whisper/OpenAI API key" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-gray-50/30 font-mono" />
                         </div>
                     </div>
 
                     <div>
                         <label
-                            class="block text-[14px] font-bold text-gray-800 mb-1.5"
+                            class="block text-[14px] font-semibold text-gray-800 mb-1.5"
                             >Model LLM / Pemrosesan</label
                         >
                         <input
@@ -897,7 +920,7 @@
 
                     <div>
                         <label
-                            class="block text-[14px] font-bold text-gray-800 mb-1.5"
+                            class="block text-[14px] font-semibold text-gray-800 mb-1.5"
                             >Bahasa Subtitel (Subtitle Language)</label
                         >
                         <select
@@ -915,7 +938,7 @@
 
                     <div>
                         <label
-                            class="block text-[14px] font-bold text-gray-800 mb-1.5"
+                            class="block text-[14px] font-semibold text-gray-800 mb-1.5"
                             >Kualitas Video</label
                         >
                         <select
@@ -930,19 +953,19 @@
 
                     <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
                         <div>
-                            <label class="block text-[14px] font-bold text-gray-800 mb-1.5">Font Subtitle</label>
+                            <label class="block text-[14px] font-semibold text-gray-800 mb-1.5">Font Subtitle</label>
                             <input id="subtitle-font" type="text" value="Plus Jakarta Sans" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-gray-50/30" />
                         </div>
                         <div>
-                            <label class="block text-[14px] font-bold text-gray-800 mb-1.5">Ukuran</label>
+                            <label class="block text-[14px] font-semibold text-gray-800 mb-1.5">Ukuran</label>
                             <input id="subtitle-size" type="number" min="24" max="120" value="65" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-gray-50/30" />
                         </div>
                         <div>
-                            <label class="block text-[14px] font-bold text-gray-800 mb-1.5">Posisi</label>
+                            <label class="block text-[14px] font-semibold text-gray-800 mb-1.5">Posisi</label>
                             <select id="subtitle-position" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-white"><option value="auto">Auto</option><option value="top">Top</option><option value="middle">Middle</option><option value="bottom">Bottom</option></select>
                         </div>
                         <div>
-                            <label class="block text-[14px] font-bold text-gray-800 mb-1.5">Posisi Bawah</label>
+                            <label class="block text-[14px] font-semibold text-gray-800 mb-1.5">Posisi Bawah</label>
                             <input id="subtitle-bottom-margin" type="number" min="40" max="900" value="400" class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-[14px] text-gray-700 bg-gray-50/30" />
                         </div>
                     </div>
@@ -950,7 +973,7 @@
                     <div>
                         <div class="flex justify-between items-center mb-1.5">
                             <label
-                                class="block text-[14px] font-bold text-gray-800"
+                                class="block text-[14px] font-semibold text-gray-800"
                                 >Folder Penyimpanan Output</label
                             >
                             <span class="text-[12px] text-gray-400 font-normal"
@@ -992,31 +1015,31 @@
                     <button
                         id="save-settings"
                         type="button"
-                        class="px-5 py-2 bg-[#4f46e5] text-white text-[14px] font-bold rounded-xl hover:bg-indigo-700 transition shadow-sm"
+                        class="px-5 py-2 bg-[#4f46e5] text-white text-[14px] font-semibold rounded-xl hover:bg-indigo-700 transition shadow-sm"
                     >
                         Simpan Konfigurasi
                     </button>
                 </div>
             </div>
         </div>
-        <div id="json-modal" class="hidden fixed inset-0 z-[110] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+        <div id="json-modal" class="hidden fixed inset-0 z-[110] bg-black/50 flex items-center justify-center p-4">
             <div class="bg-white border border-gray-100 w-full max-w-2xl rounded-2xl shadow-xl overflow-hidden">
                 <div class="flex items-center justify-between border-b border-gray-100 p-4">
-                    <h2 class="text-[16px] font-bold text-black">Payload JSON</h2>
+                    <h2 class="text-[16px] font-semibold text-black">Payload JSON</h2>
                     <button id="json-close" type="button" class="text-gray-400 hover:text-black text-[20px] leading-none">×</button>
                 </div>
-                <pre id="payload-json" class="max-h-[70vh] overflow-auto bg-gray-950 p-4 text-[12px] leading-relaxed text-gray-100"></pre>
+                <pre id="payload-json" class="bg-gray-950 p-4 text-[12px] leading-relaxed text-gray-100 overflow-hidden whitespace-pre-wrap break-all"></pre>
             </div>
         </div>
-        <div id="confirm-modal" class="hidden fixed inset-0 z-[110] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+        <div id="confirm-modal" class="hidden fixed inset-0 z-[110] bg-black/50 flex items-center justify-center p-4">
             <div class="bg-white border border-gray-100 w-full max-w-sm rounded-2xl shadow-xl p-6 space-y-4">
                 <div>
-                    <h2 class="text-[18px] font-bold text-black">Hapus permanen?</h2>
+                    <h2 class="text-[18px] font-semibold text-black">Hapus permanen?</h2>
                     <p id="confirm-message" class="text-[13px] text-gray-500 mt-1">Data akan dihapus permanen.</p>
                 </div>
                 <div class="flex justify-end gap-3">
                     <button id="confirm-cancel" type="button" class="px-4 py-2 border border-gray-200 rounded-xl text-[14px] font-semibold">Batal</button>
-                    <button id="confirm-ok" type="button" class="px-4 py-2 bg-red-600 text-white rounded-xl text-[14px] font-bold">Ya, Hapus</button>
+                    <button id="confirm-ok" type="button" class="px-4 py-2 bg-red-600 text-white rounded-xl text-[14px] font-semibold">Ya, Hapus</button>
                 </div>
             </div>
         </div>

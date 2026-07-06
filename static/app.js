@@ -129,7 +129,7 @@ function showError(message) {
     <svg class="w-[18px] h-[18px] text-red-500 shrink-0" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
     </svg>
-    <span class="text-[13px] font-bold leading-normal">${escapeHtml(message)}</span>
+    <span class="text-[13px] font-semibold leading-normal">${escapeHtml(message)}</span>
   `;
   container.appendChild(toast);
   requestAnimationFrame(() => {
@@ -267,7 +267,7 @@ function setScreenSize(value) {
     const title = card.querySelector('span:first-of-type');
     const subtitle = card.querySelector('span:last-of-type');
     card.className = selected ? 'border border-orange-600 bg-orange-50/30 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer text-center transition' : 'border border-gray-200 hover:border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer text-center transition';
-    if (title) title.className = selected ? 'text-[14px] font-bold text-orange-600 block' : 'text-[14px] font-bold text-gray-700 block';
+    if (title) title.className = selected ? 'text-[14px] font-semibold text-orange-600 block' : 'text-[14px] font-semibold text-gray-700 block';
     if (subtitle) subtitle.className = selected ? 'text-[11px] text-orange-500' : 'text-[11px] text-gray-400';
     const input = card.querySelector('input');
     if (input) input.checked = selected;
@@ -426,7 +426,7 @@ function renderEmptyHome() {
       <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
     </svg>
   </div>
-  <h3 class="text-[19px] font-bold text-black mb-2.5 tracking-tight">Siap Membuat Klip Viral Pertamamu?</h3>
+  <h3 class="text-[19px] font-semibold text-black mb-2.5 tracking-tight">Siap Membuat Klip Viral Pertamamu?</h3>
   <p class="text-[13px] text-gray-500 leading-relaxed max-w-md mx-auto">
     Tempel link YouTube di atas, dan biarkan AI kami menemukan 3 momen emas terbaik dari videomu. Proses otomatis, hasil profesional.
   </p>`;
@@ -440,22 +440,49 @@ function renderSessionRow(group) {
   const saved = new Set(group.saved_clips || []);
   const allClips = group.clips && group.clips.length ? group.clips : group.files || [];
   const clips = saved.size ? allClips.filter((clip) => saved.has(clip.path)) : allClips;
-  return `<article class="border border-gray-200 rounded-2xl p-4 hover:bg-gray-50 transition-colors mb-3"><div class="flex items-start gap-4"><button class="text-left flex-1 min-w-0" type="button" data-session-toggle="${escapeAttr(group.path)}"><h3 class="font-bold text-[16px] text-black truncate">${escapeHtml(group.title)}</h3><p class="text-[12px] text-gray-400">${clips.length} klip tersimpan | ${escapeHtml(group.video_quality || '720')}p | ${formatTime(group.timestamp)}</p></button><button class="rounded-xl border border-red-100 px-3 py-2 text-[12px] font-bold text-red-600 hover:bg-red-50" type="button" data-delete-output="${escapeAttr(group.path)}" data-delete-kind="session">Hapus Session</button></div><div class="hidden mt-4 space-y-2" data-session-files="${escapeAttr(group.path)}">${clips.map(renderFileLink).join('')}</div></article>`;
+  return `<article class="border border-gray-200 rounded-2xl p-4 hover:bg-gray-50 transition-colors mb-3"><div class="flex items-start gap-4"><button class="text-left flex-1 min-w-0" type="button" data-session-toggle="${escapeAttr(group.path)}"><h3 class="font-semibold text-[16px] text-black truncate">${escapeHtml(group.title)}</h3><p class="text-[12px] text-gray-400">${clips.length} klip tersimpan | ${escapeHtml(group.video_quality || '720')}p | ${formatTime(group.timestamp)}</p></button><button class="rounded-xl border border-red-100 px-3 py-2 text-[12px] font-semibold text-red-600 hover:bg-red-50" type="button" data-delete-output="${escapeAttr(group.path)}" data-delete-kind="session">Hapus Session</button></div><div class="hidden mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" data-session-files="${escapeAttr(group.path)}">${clips.map(renderFileLink).join('')}</div></article>`;
 }
 
 function renderFileLink(file) {
-  return `<div class="border border-gray-100 rounded-xl p-3 bg-white space-y-3"><video class="w-full max-h-[420px] rounded-lg bg-black" src="/api/download?path=${encodeURIComponent(file.path)}" controls preload="metadata"></video><div class="flex items-center justify-between gap-3"><div class="min-w-0"><div class="font-bold text-[14px] text-black truncate pr-3">${escapeHtml(file.title || file.name)}</div><div class="text-[12px] text-gray-400">${clipDuration(file)}</div></div><a class="text-[12px] text-gray-400" href="/api/download?path=${encodeURIComponent(file.path)}">Download</a></div></div>`;
+  const href = `/api/download?path=${encodeURIComponent(file.path)}`;
+  return `<div class="border border-gray-100 rounded-xl p-3 bg-white flex flex-col justify-between h-full">
+    <div class="relative bg-gray-100 rounded-lg aspect-[9/16] overflow-hidden mb-3">
+      <video class="w-full h-full object-cover" src="${href}" controls preload="metadata"></video>
+    </div>
+    <div class="flex flex-col flex-1">
+      <div class="font-semibold text-[14px] text-black truncate pr-3 mb-1">${escapeHtml(file.title || file.name)}</div>
+      <div class="text-[12px] text-gray-400 mb-3">${clipDuration(file)}</div>
+      <a class="flex items-center justify-center rounded-xl bg-gray-950 hover:bg-black text-white py-2 text-[12px] font-semibold mt-auto transition text-center" href="${href}">Download</a>
+    </div>
+  </div>`;
 }
 
 function renderExportSession(group) {
   const clips = group.clips || [];
-  return `<section class="border border-gray-200 rounded-2xl p-5 bg-white"><div class="flex items-start justify-between gap-4 mb-4"><div class="min-w-0"><h3 class="font-bold text-[20px] leading-tight text-gray-950 truncate">${escapeHtml(group.title)}</h3><p class="text-[13px] text-gray-500">${escapeHtml(metaLine(group, clips.length))}</p></div><div class="flex gap-2 shrink-0"><button class="rounded-xl bg-gray-950 text-white px-4 py-3 text-[13px] font-bold" type="button" data-save-output="${escapeAttr(group.path)}">Simpan yang dipilih</button><button class="rounded-xl border border-red-100 px-4 py-3 text-[13px] font-bold text-red-600 hover:bg-red-50" type="button" data-delete-output="${escapeAttr(group.path)}" data-delete-kind="session">Hapus Session</button></div></div><div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">${clips.map((clip, index) => renderExportCard(group, clip, index)).join('')}</div></section>`;
+  return `<section class="border border-gray-200 rounded-2xl p-5 bg-white"><div class="flex items-start justify-between gap-4 mb-4"><div class="min-w-0"><h3 class="font-semibold text-[20px] leading-tight text-gray-950 truncate">${escapeHtml(group.title)}</h3><p class="text-[13px] text-gray-500">${escapeHtml(metaLine(group, clips.length))}</p></div><div class="flex gap-2 shrink-0"><button class="rounded-xl bg-gray-950 text-white px-4 py-3 text-[13px] font-semibold" type="button" data-save-output="${escapeAttr(group.path)}">Simpan yang dipilih</button><button class="rounded-xl border border-red-100 px-4 py-3 text-[13px] font-semibold text-red-600 hover:bg-red-50" type="button" data-delete-output="${escapeAttr(group.path)}" data-delete-kind="session">Hapus Session</button></div></div><div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">${clips.map((clip, index) => renderExportCard(group, clip, index)).join('')}</div></section>`;
 }
 
 function renderExportCard(group, clip, index = 0) {
   if (!clip || !clip.path) return '';
   const href = `/api/download?path=${encodeURIComponent(clip.path)}`;
-  return `<article class="bg-white border border-gray-200 rounded-2xl p-4"><div class="relative bg-gray-100 rounded-xl aspect-[9/12] overflow-hidden mb-3"><video class="w-full h-full object-cover" src="${href}" controls preload="metadata"></video></div><label class="flex items-center gap-2 text-[12px] font-bold text-gray-600 mb-3"><input type="checkbox" class="clip-select" data-clip-path="${escapeAttr(clip.path)}" data-session-path="${escapeAttr(group.path)}" checked> Pilih klip ${index + 1}</label><h3 class="font-bold text-[16px] leading-tight text-gray-950 mb-1 line-clamp-2">${escapeHtml(clip.title || `Klip ${index + 1}`)}</h3><p class="text-[13px] text-gray-500 mb-1 line-clamp-2">${escapeHtml(clip.description || group.caption)}</p><p class="text-[12px] text-gray-400 mb-4">${clipDuration(clip)}</p><div class="grid grid-cols-[1fr_auto_auto] gap-2"><a class="flex items-center justify-center rounded-xl bg-gray-950 text-white px-4 py-3 text-[13px] font-bold" href="${href}">Download</a><button class="rounded-xl border border-gray-200 px-4 py-3 text-[13px] font-bold text-gray-700 hover:bg-gray-50" type="button" data-save-output="${escapeAttr(group.path)}" data-save-one="${escapeAttr(clip.path)}">Simpan</button><button class="rounded-xl border border-red-100 px-4 py-3 text-[13px] font-bold text-red-600 hover:bg-red-50" type="button" data-delete-output="${escapeAttr(clip.path)}" data-delete-kind="clip">Hapus</button></div></article>`;
+  return `<article class="bg-white border border-gray-200 rounded-2xl p-4 flex flex-col h-full">
+    <div class="relative bg-gray-100 rounded-xl aspect-[9/16] overflow-hidden mb-3">
+      <video class="w-full h-full object-cover" src="${href}" controls preload="metadata"></video>
+    </div>
+    <div class="flex flex-col flex-1">
+      <label class="flex items-center gap-2 text-[12px] font-semibold text-gray-600 mb-2.5">
+        <input type="checkbox" class="clip-select" data-clip-path="${escapeAttr(clip.path)}" data-session-path="${escapeAttr(group.path)}" checked> Pilih klip ${index + 1}
+      </label>
+      <h3 class="font-semibold text-[15px] leading-snug text-gray-950 mb-1 line-clamp-2">${escapeHtml(clip.title || `Klip ${index + 1}`)}</h3>
+      <p class="text-[13px] text-gray-500 mb-2 line-clamp-2 leading-relaxed">${escapeHtml(clip.description || group.caption)}</p>
+      <p class="text-[12px] text-gray-400 mb-4 mt-auto">${clipDuration(clip)}</p>
+      <div class="grid grid-cols-3 gap-2">
+        <a class="flex items-center justify-center rounded-xl bg-gray-950 hover:bg-black text-white py-2.5 text-[12px] font-semibold transition text-center" href="${href}">Download</a>
+        <button class="rounded-xl border border-gray-200 py-2.5 text-[12px] font-semibold text-gray-700 hover:bg-gray-50 transition" type="button" data-save-output="${escapeAttr(group.path)}" data-save-one="${escapeAttr(clip.path)}">Simpan</button>
+        <button class="rounded-xl border border-red-100 py-2.5 text-[12px] font-semibold text-red-600 hover:bg-red-50 transition" type="button" data-delete-output="${escapeAttr(clip.path)}" data-delete-kind="clip">Hapus</button>
+      </div>
+    </div>
+  </article>`;
 }
 
 function confirmDelete(message) {
@@ -491,6 +518,15 @@ function showPage(name) {
   setNavActive('nav-history', name === 'history');
   setNavActive('nav-console', name === 'console');
   setNavActive('nav-settings', name === 'settings');
+
+  if (name === 'history' || name === 'console') {
+    const submenu = $('nav-content-submenu');
+    if (submenu) submenu.classList.remove('hidden');
+    const toggle = $('nav-content-toggle');
+    const arrow = toggle ? toggle.querySelector('.submenu-arrow') : null;
+    if (arrow) arrow.classList.add('rotate-180');
+  }
+
   if (name === 'history') renderOutputs();
   if (name === 'console') refreshLogPanel();
   if (name === 'settings') loadSettings();
@@ -499,7 +535,16 @@ function showPage(name) {
 function setNavActive(id, active) {
   const el = $(id);
   if (!el) return;
-  el.className = active ? 'flex items-center space-x-3 px-4 py-2.5 rounded-xl bg-[#ea580c] text-white font-bold text-[14px] transition' : 'flex items-center space-x-3 px-4 py-2.5 rounded-xl text-gray-500 hover:bg-orange-50/50 hover:text-[#ea580c] font-bold text-[14px] transition';
+  const isSubmenu = id === 'nav-history' || id === 'nav-console';
+  if (isSubmenu) {
+    el.className = active 
+      ? 'flex items-center space-x-3 px-3 py-2 rounded-lg bg-orange-50 text-[#ea580c] font-bold text-[11px] transition' 
+      : 'flex items-center space-x-3 px-3 py-2 rounded-lg text-gray-500 hover:bg-gray-50 hover:text-gray-900 font-medium text-[11px] transition';
+  } else {
+    el.className = active 
+      ? 'flex items-center justify-between w-full px-3 py-2 rounded-xl bg-orange-50 text-[#ea580c] font-bold text-[13px] transition' 
+      : 'flex items-center justify-between w-full px-3 py-2 rounded-xl text-gray-500 hover:text-gray-900 hover:bg-gray-50 font-medium text-[13px] transition';
+  }
 }
 
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
@@ -551,6 +596,17 @@ document.addEventListener('DOMContentLoaded', () => {
   if (navHistory) navHistory.addEventListener('click', (event) => { event.preventDefault(); showPage('history'); });
   if (navConsole) navConsole.addEventListener('click', (event) => { event.preventDefault(); showPage('console'); });
   if (navSettings) navSettings.addEventListener('click', (event) => { event.preventDefault(); showPage('settings'); });
+
+  const contentToggle = $('nav-content-toggle');
+  const contentSubmenu = $('nav-content-submenu');
+  if (contentToggle && contentSubmenu) {
+    contentToggle.addEventListener('click', (event) => {
+      event.preventDefault();
+      const isHidden = contentSubmenu.classList.toggle('hidden');
+      const arrow = contentToggle.querySelector('.submenu-arrow');
+      if (arrow) arrow.classList.toggle('rotate-180', !isHidden);
+    });
+  }
   const instructionModal = $('instruction-modal');
   if (instructionModal) {
     instructionModal.addEventListener('click', (e) => {
