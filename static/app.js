@@ -115,8 +115,37 @@ function initCustomSelects() {
   });
 }
 
+function showError(message) {
+  let container = $('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.className = 'fixed bottom-6 right-6 z-[200] flex flex-col gap-2 pointer-events-none';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  toast.className = 'pointer-events-auto bg-red-50 text-red-800 border border-red-100 rounded-xl px-4 py-3 shadow-lg flex items-center gap-3 max-w-sm transition-all duration-300 transform translate-y-4 opacity-0';
+  toast.innerHTML = `
+    <svg class="w-[18px] h-[18px] text-red-500 shrink-0" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+    </svg>
+    <span class="text-[13px] font-bold leading-normal">${escapeHtml(message)}</span>
+  `;
+  container.appendChild(toast);
+  requestAnimationFrame(() => {
+    toast.className = toast.className.replace('translate-y-4 opacity-0', 'translate-y-0 opacity-100');
+  });
+  setTimeout(() => {
+    toast.className = toast.className.replace('translate-y-0 opacity-100', 'translate-y-4 opacity-0');
+    setTimeout(() => {
+      toast.remove();
+      if (container.children.length === 0) container.remove();
+    }, 300);
+  }, 1500);
+}
+
 async function loadSettings() {
-  try { applySettings(await api('/api/settings'), false); } catch (error) { setText('settings-status', error.message); }
+  try { applySettings(await api('/api/settings'), false); } catch (error) { showError(error.message); }
 }
 
 function applySettings(data, keepApiKey) {
@@ -166,7 +195,7 @@ async function saveSettings() {
     if (result.status !== 'saved') throw new Error(result.message || 'Gagal simpan');
     if (result.settings) applySettings(result.settings, false);
     setText('settings-status', apiKey ? 'Konfigurasi tersimpan. API key tersimpan.' : 'Konfigurasi tersimpan');
-  } catch (error) { setText('settings-status', error.message); }
+  } catch (error) { showError(error.message); }
 }
 
 function settingsPayload(extra = {}) {
@@ -228,7 +257,7 @@ async function clearApiKey() {
     if (result.status !== 'saved') throw new Error(result.message || 'Gagal hapus API key');
     if (result.settings) applySettings(result.settings, false);
     setText('settings-status', 'API key dihapus');
-  } catch (error) { setText('settings-status', error.message); }
+  } catch (error) { showError(error.message); }
 }
 
 function getScreenSize() { const selected = document.querySelector('input[name="screen_size"]:checked'); return selected ? selected.value : '9:16'; }
@@ -281,16 +310,23 @@ async function startProcessing() {
     pollStatus();
   } catch (error) {
     if (button) button.disabled = false;
-    setText('status-text', error.message);
+    showError(error.message);
+    setText('status-text', 'Gagal memproses');
   }
 }
 
 async function pollStatus() {
   try {
     const data = await api('/api/status');
-    const message = cleanStatusText(data.error || data.message || data.status);
-    setText('status-text', message);
-    updateCompactStatus(message);
+    if (data.status === 'error') {
+      showError(data.error || data.message || 'Terjadi kesalahan');
+      setText('status-text', 'Gagal');
+      updateCompactStatus('Gagal');
+    } else {
+      const message = cleanStatusText(data.message || data.status);
+      setText('status-text', message);
+      updateCompactStatus(message);
+    }
     updateLogPanel(data);
     setProgressTarget(data.progress || 0);
     if (data.status === 'complete' || data.status === 'error') {
@@ -301,7 +337,8 @@ async function pollStatus() {
   } catch (error) {
     clearInterval(pollTimer);
     $('process-button').disabled = false;
-    setText('status-text', error.message);
+    showError(error.message);
+    setText('status-text', 'Error koneksi');
   }
 }
 
@@ -430,15 +467,15 @@ function confirmDelete(message) {
 
 async function deleteOutput(path, kind = 'clip') {
   if (!path || !(await confirmDelete(kind === 'session' ? 'Session dan semua klip di dalamnya akan dihapus permanen.' : 'Klip ini akan dihapus permanen.'))) return;
-  try { await api('/api/delete', { method: 'POST', body: JSON.stringify({ path }) }); await renderOutputs(); } catch (error) { setText('status-text', error.message); }
+  try { await api('/api/delete', { method: 'POST', body: JSON.stringify({ path }) }); await renderOutputs(); } catch (error) { showError(error.message); }
 }
 
 async function saveOutput(path, oneClip) {
   if (!path) return;
   const inputs = [...document.querySelectorAll(`.clip-select[data-session-path="${cssEscape(path)}"]`)];
   const selected = oneClip ? [oneClip] : inputs.filter((input) => input.checked).map((input) => input.dataset.clipPath);
-  if (!selected.length) { setText('status-text', 'Pilih minimal 1 klip'); return; }
-  try { await api('/api/save', { method: 'POST', body: JSON.stringify({ path, clips: selected }) }); await renderOutputs(); } catch (error) { setText('status-text', error.message); }
+  if (!selected.length) { showError('Pilih minimal 1 klip'); return; }
+  try { await api('/api/save', { method: 'POST', body: JSON.stringify({ path, clips: selected }) }); await renderOutputs(); } catch (error) { showError(error.message); }
 }
 
 function toggleSession(path) { document.querySelectorAll('[data-session-files]').forEach((el) => el.classList.toggle('hidden', el.dataset.sessionFiles !== path || !el.classList.contains('hidden'))); }
@@ -462,7 +499,7 @@ function showPage(name) {
 function setNavActive(id, active) {
   const el = $(id);
   if (!el) return;
-  el.className = active ? 'flex items-center space-x-3 px-4 py-2.5 rounded-xl bg-[#ea580c] text-white font-bold text-[14px]' : 'flex items-center space-x-3 px-4 py-2.5 rounded-xl text-gray-600 hover:bg-gray-50 hover:text-black font-semibold text-[14px] transition-colors';
+  el.className = active ? 'flex items-center space-x-3 px-4 py-2.5 rounded-xl bg-[#ea580c] text-white font-bold text-[14px] transition' : 'flex items-center space-x-3 px-4 py-2.5 rounded-xl text-gray-500 hover:bg-orange-50/50 hover:text-[#ea580c] font-bold text-[14px] transition';
 }
 
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
