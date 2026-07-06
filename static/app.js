@@ -14,10 +14,106 @@ async function api(path, options = {}) {
 }
 
 function setText(id, value) { const el = $(id); if (el) el.textContent = value; }
-function setValue(id, value) { const el = $(id); if (el) el.value = value; }
+function setValue(id, value) {
+  const el = $(id);
+  if (el) {
+    el.value = value;
+    el.dispatchEvent(new Event('change'));
+  }
+}
 function getValue(id, fallback = '') { const el = $(id); return el ? el.value : fallback; }
 function getChecked(id, fallback = false) { const el = $(id); return el ? el.checked : fallback; }
 function setChecked(id, value) { const el = $(id); if (el) el.checked = value; }
+
+function initCustomSelects() {
+  document.querySelectorAll('select').forEach(select => {
+    if (select.nextElementSibling && select.nextElementSibling.classList.contains('custom-select-wrapper')) {
+      return;
+    }
+    select.style.display = 'none';
+    const wrapper = document.createElement('div');
+    wrapper.className = 'relative w-full custom-select-wrapper';
+    
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = select.className.replace('w-full', '') + ' w-full flex items-center justify-between text-left hover:bg-gray-50 focus:outline-none transition';
+    
+    const label = document.createElement('span');
+    label.className = 'custom-select-label truncate';
+    
+    const updateLabel = () => {
+      const selectedOpt = select.options[select.selectedIndex];
+      label.textContent = selectedOpt ? selectedOpt.textContent : '';
+    };
+    updateLabel();
+    
+    const arrow = document.createElement('div');
+    arrow.innerHTML = `
+      <svg class="w-4 h-4 text-gray-400 ml-2 transition-transform duration-200 custom-select-arrow" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+      </svg>
+    `;
+    
+    btn.appendChild(label);
+    btn.appendChild(arrow.firstElementChild);
+    wrapper.appendChild(btn);
+    
+    const menu = document.createElement('div');
+    menu.className = 'hidden absolute left-0 right-0 mt-1 bg-white border border-gray-100 rounded-xl shadow-lg z-[100] max-h-60 overflow-y-auto p-1 space-y-0.5';
+    
+    const rebuildOptions = () => {
+      menu.innerHTML = '';
+      Array.from(select.options).forEach(opt => {
+        const optBtn = document.createElement('button');
+        optBtn.type = 'button';
+        const isSelected = opt.value === select.value;
+        optBtn.className = `w-full px-3 py-2 rounded-lg text-left text-[13px] transition font-medium ` + 
+          (isSelected ? `bg-orange-50 text-[#ea580c]` : `text-gray-700 hover:bg-gray-55/40`);
+        optBtn.textContent = opt.textContent;
+        optBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          select.value = opt.value;
+          select.dispatchEvent(new Event('change'));
+          updateLabel();
+          menu.classList.add('hidden');
+          btn.querySelector('.custom-select-arrow').classList.remove('rotate-180');
+          rebuildOptions();
+        });
+        menu.appendChild(optBtn);
+      });
+    };
+    
+    rebuildOptions();
+    wrapper.appendChild(menu);
+    
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('.custom-select-wrapper div').forEach(m => {
+        if (m !== menu) {
+          m.classList.add('hidden');
+          const siblingBtn = m.previousElementSibling;
+          if (siblingBtn) {
+            const arrowIcon = siblingBtn.querySelector('.custom-select-arrow');
+            if (arrowIcon) arrowIcon.classList.remove('rotate-180');
+          }
+        }
+      });
+      const isHidden = menu.classList.toggle('hidden');
+      const arrowIcon = btn.querySelector('.custom-select-arrow');
+      if (arrowIcon) {
+        arrowIcon.classList.toggle('rotate-180', !isHidden);
+      }
+      if (!isHidden) rebuildOptions();
+    });
+    
+    select.parentNode.insertBefore(wrapper, select.nextSibling);
+    
+    select.addEventListener('change', () => {
+      updateLabel();
+      rebuildOptions();
+    });
+  });
+}
 
 async function loadSettings() {
   try { applySettings(await api('/api/settings'), false); } catch (error) { setText('settings-status', error.message); }
@@ -448,6 +544,17 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
   });
+  initCustomSelects();
+
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.custom-select-wrapper div').forEach(menu => {
+      menu.classList.add('hidden');
+    });
+    document.querySelectorAll('.custom-select-arrow').forEach(arrow => {
+      arrow.classList.remove('rotate-180');
+    });
+  });
+
   setScreenSize(getScreenSize());
   updateInstructionCount();
   loadSettings();
