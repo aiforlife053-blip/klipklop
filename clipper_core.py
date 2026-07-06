@@ -112,9 +112,9 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         self.subtitle_language = subtitle_language
         self.video_quality = str(video_quality or "720")
         self.landscape_blur = bool(landscape_blur)
-        self.subtitle_style = subtitle_style or {"font": "Arial Black", "size": 65, "bottom_margin": 400}
+        self.subtitle_style = subtitle_style or {"font": "Plus Jakarta Sans", "size": 65, "bottom_margin": 400}
         self.subtitle_engine = subtitle_engine or "local"
-        self.local_whisper = local_whisper or {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"}
+        self.local_whisper = local_whisper or {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"}
         self._local_whisper_model = None
         self.output_resolution = {"480": "540:960", "720": "720:1280", "1080": "1080:1920"}.get(self.video_quality, "720:1280")
         self.log = log_callback or print

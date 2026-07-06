@@ -41,8 +41,9 @@ class ConfigManager:
                 "video_quality": "720",
                 "landscape_blur": False,
                 "subtitle_engine": "local",
-                "local_whisper": {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"},
-                "subtitle_style": {"font": "Arial Black", "size": 65, "bottom_margin": 400},
+                "local_whisper": {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"},
+                "subtitle_style": {"font": "Plus Jakarta Sans", "size": 65, "bottom_margin": 400},
+                "subtitle_position": "auto",
                 "mediapipe_settings": {
                     "lip_activity_threshold": 0.15,
                     "switch_threshold": 0.3,
@@ -93,8 +94,9 @@ class ConfigManager:
             "video_quality": "720",
             "landscape_blur": False,
             "subtitle_engine": "local",
-            "local_whisper": {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"},
-            "subtitle_style": {"font": "Arial Black", "size": 65, "bottom_margin": 400},
+            "local_whisper": {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"},
+            "subtitle_style": {"font": "Plus Jakarta Sans", "size": 65, "bottom_margin": 400},
+            "subtitle_position": "auto",
             "mediapipe_settings": {
                 "lip_activity_threshold": 0.15,
                 "switch_threshold": 0.3,

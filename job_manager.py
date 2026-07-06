@@ -126,8 +126,9 @@ class WebJobManager:
             "video_quality": str(cfg.get("video_quality", "720")),
             "landscape_blur": bool(cfg.get("landscape_blur", False)),
             "subtitle_engine": cfg.get("subtitle_engine", "local"),
-            "local_whisper": cfg.get("local_whisper", {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"}),
-            "subtitle_style": cfg.get("subtitle_style", {"font": "Arial Black", "size": 65, "bottom_margin": 400}),
+            "local_whisper": cfg.get("local_whisper", {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"}),
+            "subtitle_style": cfg.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 65, "bottom_margin": 400}),
+            "subtitle_position": cfg.get("subtitle_position", "auto"),
             "output_dir": cfg.get("output_dir", str(self.output_dir)),
             "cookie_exists": cookies["exists"],
             "cookie_path": cookies["path"],
@@ -154,20 +155,23 @@ class WebJobManager:
         subtitle_engine = str(payload.get("subtitle_engine", cfg_mgr.config.get("subtitle_engine", "local")) or "local")
         if subtitle_engine not in {"auto", "api", "local"}:
             subtitle_engine = "local"
-        local_whisper = cfg_mgr.config.get("local_whisper", {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"})
+        subtitle_position = str(payload.get("subtitle_position", cfg_mgr.config.get("subtitle_position", "auto")) or "auto")
+        if subtitle_position not in {"auto", "top", "middle", "bottom"}:
+            subtitle_position = "auto"
+        local_whisper = cfg_mgr.config.get("local_whisper", {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"})
         if isinstance(payload.get("local_whisper"), dict):
             local_whisper = {**local_whisper, **payload["local_whisper"]}
-        if str(local_whisper.get("model", "small")) not in {"base", "small", "medium"}:
-            local_whisper["model"] = "small"
+        if str(local_whisper.get("model", "medium")) not in {"base", "small", "medium"}:
+            local_whisper["model"] = "medium"
         local_whisper["enabled"] = True
         local_whisper["device"] = str(local_whisper.get("device") or "cpu")
         local_whisper["compute_type"] = str(local_whisper.get("compute_type") or "int8")
         if video_quality not in {"480", "720", "1080"}:
             video_quality = "720"
-        subtitle_style = cfg_mgr.config.get("subtitle_style", {"font": "Arial Black", "size": 65, "bottom_margin": 400})
+        subtitle_style = cfg_mgr.config.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 65, "bottom_margin": 400})
         if isinstance(payload.get("subtitle_style"), dict):
             subtitle_style = {**subtitle_style, **payload["subtitle_style"]}
-        subtitle_style["font"] = str(subtitle_style.get("font") or "Arial Black")[:80]
+        subtitle_style["font"] = str(subtitle_style.get("font") or "Plus Jakarta Sans")[:80]
         subtitle_style["size"] = max(24, min(120, self._as_int(subtitle_style.get("size"), 65)))
         subtitle_style["bottom_margin"] = max(40, min(900, self._as_int(subtitle_style.get("bottom_margin"), 400)))
         providers = cfg_mgr.config.setdefault("ai_providers", {})
@@ -196,6 +200,7 @@ class WebJobManager:
         cfg_mgr.config["video_quality"] = video_quality
         cfg_mgr.config["landscape_blur"] = landscape_blur
         cfg_mgr.config["subtitle_engine"] = subtitle_engine
+        cfg_mgr.config["subtitle_position"] = subtitle_position
         cfg_mgr.config["local_whisper"] = local_whisper
         cfg_mgr.config["subtitle_style"] = subtitle_style
         cfg_mgr.config["output_dir"] = output_dir
@@ -308,6 +313,7 @@ class WebJobManager:
             self._write_run_meta(run_dir, url, {"video_quality": str(cfg.get("video_quality", "720")), "landscape_blur": landscape_blur})
             self._add_log(f"Output folder: {run_dir}")
             self._add_log("Preparing AI/video processor")
+            subtitle_style = {**cfg.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 65, "bottom_margin": 400}), "position": cfg.get("subtitle_position", "auto")}
             core = AutoClipperCore(
                 client=None,
                 ffmpeg_path=get_ffmpeg_path(),
@@ -326,9 +332,9 @@ class WebJobManager:
                 subtitle_language=subtitle_language,
                 video_quality=str(cfg.get("video_quality", "720")),
                 landscape_blur=landscape_blur,
-                subtitle_style=cfg.get("subtitle_style", {"font": "Arial Black", "size": 65, "bottom_margin": 400}),
+                subtitle_style=subtitle_style,
                 subtitle_engine=cfg.get("subtitle_engine", "local"),
-                local_whisper=cfg.get("local_whisper", {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"}),
+                local_whisper=cfg.get("local_whisper", {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"}),
                 log_callback=self._set_message,
                 progress_callback=self._set_progress,
             )

@@ -654,10 +654,18 @@ class ExportMixin:
         """Create ASS subtitle file with CapCut-style word-by-word highlighting"""
         
         style = getattr(self, "subtitle_style", {}) or {}
-        font = str(style.get("font") or "Arial Black").replace(",", " ")
+        font = str(style.get("font") or "Plus Jakarta Sans").replace(",", " ")
         size = int(style.get("size") or 65)
+        position = str(style.get("position") or "auto")
+        if position == "auto":
+            position = "bottom" if getattr(self, "landscape_blur", False) else "bottom"
+        alignment = {"top": 8, "middle": 5, "bottom": 2}.get(position, 2)
         bottom_margin = int(style.get("bottom_margin") or 400)
-        if getattr(self, "landscape_blur", False):
+        if position == "top":
+            bottom_margin = 120
+        elif position == "middle":
+            bottom_margin = 0
+        elif getattr(self, "landscape_blur", False):
             bottom_margin = min(bottom_margin, 260)
         # ASS header - CapCut style: white text, yellow highlight, black outline
         ass_content = f"""[Script Info]
@@ -670,7 +678,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{size},&H00FFFFFF,&H000000FF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,3,8,2,2,60,60,{bottom_margin},1
+Style: Default,{font},{size},&H00FFFFFF,&H000000FF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,3,8,2,{alignment},60,60,{bottom_margin},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

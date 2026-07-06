@@ -2,6 +2,9 @@ const $ = (id) => document.getElementById(id);
 let pollTimer = null;
 let savedInstruction = '';
 let pendingConfirm = null;
+let smoothProgress = 0;
+let smoothProgressTarget = 0;
+let smoothProgressTimer = null;
 
 async function api(path, options = {}) {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...options });
@@ -27,7 +30,7 @@ function applySettings(data, keepApiKey) {
   if (keyInput) keyInput.placeholder = data.api_key_saved ? 'API key tersimpan' : 'Gemini API key';
   setValue('model', data.model || 'gemini-2.5-flash');
   setValue('subtitle-engine', data.subtitle_engine || 'local');
-  setValue('local-whisper-model', data.local_whisper?.model || 'small');
+  setValue('local-whisper-model', data.local_whisper?.model || 'medium');
   setValue('caption-base-url', data.caption_base_url || 'https://api.openai.com/v1');
   setValue('caption-model', data.caption_model || 'whisper-1');
   setValue('caption-api-key', '');
@@ -37,8 +40,9 @@ function applySettings(data, keepApiKey) {
   setValue('video-quality', data.video_quality || '720');
   setValue('video-quality-main', data.video_quality || '720');
   setChecked('landscape-blur', !!data.landscape_blur);
-  setValue('subtitle-font', data.subtitle_style?.font || 'Arial Black');
+  setValue('subtitle-font', data.subtitle_style?.font || 'Plus Jakarta Sans');
   setValue('subtitle-size', data.subtitle_style?.size || 65);
+  setValue('subtitle-position', data.subtitle_position || 'auto');
   setValue('subtitle-bottom-margin', data.subtitle_style?.bottom_margin || 400);
   setValue('output-dir', data.output_dir || '');
   setCookieStatus(data.cookies);
@@ -48,7 +52,7 @@ function applySettings(data, keepApiKey) {
 
 function toggleSubtitleEngineFields() {
   const fields = $('api-whisper-fields');
-  if (fields) fields.classList.toggle('hidden', getValue('subtitle-engine', 'local') !== 'api');
+  if (fields) fields.classList.toggle('hidden', getValue('subtitle-engine', 'local') === 'local');
 }
 
 function setCookieStatus(cookies) {
@@ -76,7 +80,7 @@ function settingsPayload(extra = {}) {
     subtitle_engine: getValue('subtitle-engine', 'local'),
     local_whisper: {
       enabled: true,
-      model: getValue('local-whisper-model', 'small'),
+      model: getValue('local-whisper-model', 'medium'),
       device: 'cpu',
       compute_type: 'int8',
     },
@@ -87,26 +91,38 @@ function settingsPayload(extra = {}) {
     video_quality: getValue('video-quality-main', getValue('video-quality', '720')),
     landscape_blur: getChecked('landscape-blur', false),
     subtitle_style: {
-      font: getValue('subtitle-font', 'Arial Black'),
+      font: getValue('subtitle-font', 'Plus Jakarta Sans'),
       size: Number(getValue('subtitle-size', '65') || 65),
       bottom_margin: Number(getValue('subtitle-bottom-margin', '400') || 400),
     },
+    subtitle_position: getValue('subtitle-position', 'auto'),
     output_dir: getValue('output-dir'),
     ...extra,
   };
 }
 
+function previewPayload() {
+  const settings = settingsPayload();
+  const engine = settings.subtitle_engine;
+  const apiChanged = settings.caption_api_key || settings.caption_model !== 'whisper-1' || settings.caption_base_url !== 'https://api.openai.com/v1';
+  if (engine === 'local' || (engine === 'auto' && !apiChanged)) {
+    delete settings.caption_base_url;
+    delete settings.caption_model;
+    delete settings.caption_api_key;
+  }
+  return settings;
+}
+
 function updatePayloadJson() {
   const el = $('payload-json');
-  if (!el || el.classList.contains('hidden')) return;
-  const data = { settings: settingsPayload(), start: startPayload() };
-  el.textContent = JSON.stringify(data, null, 2);
+  if (!el || $('json-modal')?.classList.contains('hidden')) return;
+  el.textContent = JSON.stringify({ settings: previewPayload(), start: startPayload() }, null, 2);
 }
 
 function showPayloadJson() {
-  const el = $('payload-json');
-  if (!el) return;
-  el.classList.remove('hidden');
+  const modal = $('json-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
   updatePayloadJson();
 }
 
@@ -157,6 +173,8 @@ async function startProcessing() {
   if (button) button.disabled = true;
   refreshLogPanel();
   clearInterval(pollTimer);
+  smoothProgress = 0;
+  setProgressTarget(0);
   try {
     const captionsOn = getChecked('captions', true);
     await saveSettings();
@@ -174,12 +192,11 @@ async function startProcessing() {
 async function pollStatus() {
   try {
     const data = await api('/api/status');
-    const message = data.error || data.message || data.status;
+    const message = cleanStatusText(data.error || data.message || data.status);
     setText('status-text', message);
     updateCompactStatus(message);
     updateLogPanel(data);
-    const bar = $('progress-bar');
-    if (bar) bar.style.width = `${Math.round((data.progress || 0) * 100)}%`;
+    setProgressTarget(data.progress || 0);
     if (data.status === 'complete' || data.status === 'error') {
       clearInterval(pollTimer);
       $('process-button').disabled = false;
@@ -190,6 +207,28 @@ async function pollStatus() {
     $('process-button').disabled = false;
     setText('status-text', error.message);
   }
+}
+
+function cleanStatusText(message) {
+  const text = String(message || '');
+  if (/ffmpeg\.exe|-progress pipe|^"[A-Z]:\\/i.test(text)) return 'Memproses video...';
+  if (/subtitle|caption/i.test(text)) return 'Menambahkan subtitle...';
+  if (/portrait|crop|blur/i.test(text)) return 'Membuat portrait...';
+  if (/cut|trim|clip/i.test(text)) return 'Memotong video...';
+  if (/final/i.test(text)) return 'Finalizing...';
+  return text;
+}
+
+function setProgressTarget(value) {
+  smoothProgressTarget = Math.max(0, Math.min(1, Number(value) || 0));
+  if (smoothProgressTimer) return;
+  smoothProgressTimer = setInterval(() => {
+    smoothProgress += (smoothProgressTarget - smoothProgress) * 0.35;
+    if (Math.abs(smoothProgressTarget - smoothProgress) < 0.002) smoothProgress = smoothProgressTarget;
+    const bar = $('progress-bar');
+    if (bar) bar.style.width = `${Math.round(smoothProgress * 100)}%`;
+    if (smoothProgress === smoothProgressTarget) { clearInterval(smoothProgressTimer); smoothProgressTimer = null; }
+  }, 80);
 }
 
 function updateCompactStatus(message) {
@@ -205,13 +244,18 @@ function updateLogPanel(data) {
   if (!lines || !summary) return;
   const logs = data.logs || [];
   summary.textContent = `${data.status || 'idle'} · ${Math.round((data.progress || 0) * 100)}%`;
+  const nearBottom = lines.scrollHeight - lines.scrollTop - lines.clientHeight < 80;
   lines.innerHTML = logs.length ? logs.map(renderLogLine).join('') : '<div class="text-gray-500">Belum ada log.</div>';
-  lines.scrollTop = lines.scrollHeight;
+  if (nearBottom) lines.scrollTop = lines.scrollHeight;
 }
 
 function renderLogLine(line) {
   const safe = escapeHtml(line);
-  if (line.includes('[Task]')) return `<div class="mt-4 mb-2 rounded-lg bg-indigo-600 px-3 py-2 font-sans text-[13px] font-bold text-white">${safe}</div>`;
+  if (line.includes('[Task]')) {
+    const body = line.split('] ').pop().replace(/^Task /, '');
+    const [time, url] = body.split(' | ');
+    return `<div>${'='.repeat(60)}</div><div>TASK ${escapeHtml(time || '')}</div><div>URL: ${escapeHtml(url || '')}</div><div>${'='.repeat(60)}</div>`;
+  }
   if (line.includes('[Error]')) return `<div class="text-red-300">${safe}</div>`;
   if (line.includes('[Done]')) return `<div class="text-green-300">${safe}</div>`;
   return `<div>${safe}</div>`;
@@ -314,9 +358,10 @@ function escapeAttr(value) { return escapeHtml(value).replace(/`/g, '&#96;'); }
 function cssEscape(value) { return window.CSS && CSS.escape ? CSS.escape(value) : String(value).replace(/"/g, '\\"'); }
 
 document.addEventListener('DOMContentLoaded', () => {
-  const save = $('save-settings'); const showJson = $('show-json'); const clearKey = $('clear-api-key'); const start = $('process-button'); const navHome = $('nav-home'); const navHistory = $('nav-history'); const navConsole = $('nav-console'); const profile = $('profile-button'); const logClear = $('log-clear'); const instruction = $('instruction'); const instructionSave = $('instruction-save'); const instructionCancel = $('instruction-cancel'); const qualityMain = $('video-quality-main'); const qualitySettings = $('video-quality'); const blur = $('landscape-blur');
+  const save = $('save-settings'); const showJson = $('show-json'); const jsonClose = $('json-close'); const clearKey = $('clear-api-key'); const start = $('process-button'); const navHome = $('nav-home'); const navHistory = $('nav-history'); const navConsole = $('nav-console'); const profile = $('profile-button'); const logClear = $('log-clear'); const instruction = $('instruction'); const instructionSave = $('instruction-save'); const instructionCancel = $('instruction-cancel'); const qualityMain = $('video-quality-main'); const qualitySettings = $('video-quality'); const blur = $('landscape-blur');
   if (save) save.addEventListener('click', saveSettings);
   if (showJson) showJson.addEventListener('click', showPayloadJson);
+  if (jsonClose) jsonClose.addEventListener('click', () => $('json-modal')?.classList.add('hidden'));
   if (clearKey) clearKey.addEventListener('click', clearApiKey);
   if (start) start.addEventListener('click', startProcessing);
   if (profile) profile.addEventListener('click', toggleProfileMenu);
