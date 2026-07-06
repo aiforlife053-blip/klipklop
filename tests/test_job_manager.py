@@ -18,11 +18,12 @@ def test_rejects_empty_url(tmp_path):
     assert "url" in result["message"].lower()
 
 
-def test_rejects_captions_without_caption_key(tmp_path):
+def test_rejects_api_captions_without_caption_key(tmp_path):
     manager = mod.WebJobManager(app_dir=tmp_path)
+    manager.save_settings({"subtitle_engine": "api"})
     result = manager.start({"url": "https://www.youtube.com/watch?v=abc", "add_captions": True})
     assert result["status"] == "error"
-    assert "Caption Maker" in result["message"]
+    assert "API Whisper" in result["message"]
 
 
 def test_rejects_unsupported_screen_size(tmp_path):

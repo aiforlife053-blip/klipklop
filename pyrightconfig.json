@@ -1,0 +1,11 @@
+{
+  "exclude": [
+    "output",
+    "**/_temp",
+    "**/__pycache__",
+    ".venv",
+    "venv"
+  ],
+  "reportMissingImports": "warning",
+  "reportUnusedImport": "none"
+}

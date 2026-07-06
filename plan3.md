@@ -36,7 +36,7 @@ Files:
 - `clipper_ai.py`
 - `clipper_export.py`
 
-Status: pending
+Status: done
 
 ---
 
@@ -68,7 +68,7 @@ Fallback:
 - If local package missing → error jelas:
   - `faster-whisper belum terinstall. Run: pip install faster-whisper`
 
-Status: pending
+Status: done
 
 ---
 
@@ -92,7 +92,7 @@ Files:
 - `index.html`
 - `static/app.js`
 
-Status: pending
+Status: done
 
 ---
 
@@ -121,7 +121,7 @@ Files:
 - `job_manager.py`
 - `config/config_manager.py`
 
-Status: pending
+Status: done
 
 ---
 
@@ -143,7 +143,7 @@ Verification:
 "has_captions": true
 ```
 
-Status: pending
+Status: done
 
 ---
 
@@ -167,7 +167,7 @@ Files:
 - `job_manager.py`
 - `static/app.js`
 
-Status: pending
+Status: done
 
 ---
 
@@ -189,7 +189,7 @@ Fix:
 Files:
 - `static/app.js`
 
-Status: pending
+Status: done
 
 ---
 
@@ -222,7 +222,7 @@ Plan:
    - `py -3.12 tests\test_job_manager.py`
    - diagnostics count turun / nol
 
-Status: pending
+Status: done
 
 ---
 

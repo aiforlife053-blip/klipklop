@@ -40,6 +40,8 @@ class ConfigManager:
                 "face_tracking_mode": "center",
                 "video_quality": "720",
                 "landscape_blur": False,
+                "subtitle_engine": "local",
+                "local_whisper": {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"},
                 "subtitle_style": {"font": "Arial Black", "size": 65, "bottom_margin": 400},
                 "mediapipe_settings": {
                     "lip_activity_threshold": 0.15,
@@ -90,6 +92,8 @@ class ConfigManager:
             "face_tracking_mode": "center",
             "video_quality": "720",
             "landscape_blur": False,
+            "subtitle_engine": "local",
+            "local_whisper": {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"},
             "subtitle_style": {"font": "Arial Black", "size": 65, "bottom_margin": 400},
             "mediapipe_settings": {
                 "lip_activity_threshold": 0.15,

@@ -26,6 +26,8 @@ function applySettings(data, keepApiKey) {
   const keyInput = $('api-key');
   if (keyInput) keyInput.placeholder = data.api_key_saved ? 'API key tersimpan' : 'Gemini API key';
   setValue('model', data.model || 'gemini-2.5-flash');
+  setValue('subtitle-engine', data.subtitle_engine || 'local');
+  setValue('local-whisper-model', data.local_whisper?.model || 'small');
   setValue('caption-base-url', data.caption_base_url || 'https://api.openai.com/v1');
   setValue('caption-model', data.caption_model || 'whisper-1');
   setValue('caption-api-key', '');
@@ -40,7 +42,13 @@ function applySettings(data, keepApiKey) {
   setValue('subtitle-bottom-margin', data.subtitle_style?.bottom_margin || 400);
   setValue('output-dir', data.output_dir || '');
   setCookieStatus(data.cookies);
+  toggleSubtitleEngineFields();
   updateCompactStatus('Idle');
+}
+
+function toggleSubtitleEngineFields() {
+  const fields = $('api-whisper-fields');
+  if (fields) fields.classList.toggle('hidden', getValue('subtitle-engine', 'local') !== 'api');
 }
 
 function setCookieStatus(cookies) {
@@ -65,6 +73,13 @@ function settingsPayload(extra = {}) {
   return {
     base_url: getValue('base-url'),
     model: getValue('model'),
+    subtitle_engine: getValue('subtitle-engine', 'local'),
+    local_whisper: {
+      enabled: true,
+      model: getValue('local-whisper-model', 'small'),
+      device: 'cpu',
+      compute_type: 'int8',
+    },
     caption_base_url: getValue('caption-base-url', 'https://api.openai.com/v1'),
     caption_api_key: getValue('caption-api-key'),
     caption_model: getValue('caption-model', 'whisper-1'),
@@ -79,14 +94,6 @@ function settingsPayload(extra = {}) {
     output_dir: getValue('output-dir'),
     ...extra,
   };
-}
-
-async function saveFormSettings() {
-  const captionsOn = getChecked('captions', true);
-  await saveSettings();
-  setChecked('captions', captionsOn);
-  setText('status-text', 'Form tersimpan');
-  updatePayloadJson();
 }
 
 function updatePayloadJson() {
@@ -307,9 +314,8 @@ function escapeAttr(value) { return escapeHtml(value).replace(/`/g, '&#96;'); }
 function cssEscape(value) { return window.CSS && CSS.escape ? CSS.escape(value) : String(value).replace(/"/g, '\\"'); }
 
 document.addEventListener('DOMContentLoaded', () => {
-  const save = $('save-settings'); const saveForm = $('save-form'); const showJson = $('show-json'); const clearKey = $('clear-api-key'); const start = $('process-button'); const navHome = $('nav-home'); const navHistory = $('nav-history'); const navConsole = $('nav-console'); const profile = $('profile-button'); const logClear = $('log-clear'); const instruction = $('instruction'); const instructionSave = $('instruction-save'); const instructionCancel = $('instruction-cancel'); const qualityMain = $('video-quality-main'); const qualitySettings = $('video-quality'); const blur = $('landscape-blur');
+  const save = $('save-settings'); const showJson = $('show-json'); const clearKey = $('clear-api-key'); const start = $('process-button'); const navHome = $('nav-home'); const navHistory = $('nav-history'); const navConsole = $('nav-console'); const profile = $('profile-button'); const logClear = $('log-clear'); const instruction = $('instruction'); const instructionSave = $('instruction-save'); const instructionCancel = $('instruction-cancel'); const qualityMain = $('video-quality-main'); const qualitySettings = $('video-quality'); const blur = $('landscape-blur');
   if (save) save.addEventListener('click', saveSettings);
-  if (saveForm) saveForm.addEventListener('click', saveFormSettings);
   if (showJson) showJson.addEventListener('click', showPayloadJson);
   if (clearKey) clearKey.addEventListener('click', clearApiKey);
   if (start) start.addEventListener('click', startProcessing);
@@ -320,6 +326,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (instructionCancel) instructionCancel.addEventListener('click', cancelInstruction);
   if (qualityMain && qualitySettings) qualityMain.addEventListener('change', () => { qualitySettings.value = qualityMain.value; updateCompactStatus($('status-text')?.textContent || 'Idle'); });
   if (qualitySettings && qualityMain) qualitySettings.addEventListener('change', () => { qualityMain.value = qualitySettings.value; updateCompactStatus($('status-text')?.textContent || 'Idle'); });
+  const subtitleEngine = $('subtitle-engine');
+  if (subtitleEngine) subtitleEngine.addEventListener('change', toggleSubtitleEngineFields);
   if (blur) blur.addEventListener('change', () => updateCompactStatus($('status-text')?.textContent || 'Idle'));
   document.querySelectorAll('[data-screen-card]').forEach((card) => card.addEventListener('click', () => setScreenSize(card.dataset.screenCard)));
   document.addEventListener('input', updatePayloadJson);

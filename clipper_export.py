@@ -612,16 +612,11 @@ class ExportMixin:
             audio_duration = int(h) * 3600 + int(m) * 60 + float(s)
             self.report_tokens(0, 0, audio_duration, 0)
         
-        # Transcribe using Whisper API with word-level timestamps
-        # (raw HTTP for proxy compatibility)
         try:
-            transcript = self._whisper_transcribe_words_api(audio_file)
-        except Exception as e:
-            self.log(f"  Warning: Whisper API error: {e}")
-            import shutil
-            shutil.copy(input_path, output_path)
+            transcript = self._whisper_transcribe_words(audio_file)
+        except Exception:
             os.unlink(audio_file)
-            return
+            raise
         
         os.unlink(audio_file)
         
@@ -662,6 +657,8 @@ class ExportMixin:
         font = str(style.get("font") or "Arial Black").replace(",", " ")
         size = int(style.get("size") or 65)
         bottom_margin = int(style.get("bottom_margin") or 400)
+        if getattr(self, "landscape_blur", False):
+            bottom_margin = min(bottom_margin, 260)
         # ASS header - CapCut style: white text, yellow highlight, black outline
         ass_content = f"""[Script Info]
 Title: Auto-generated captions
@@ -673,7 +670,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,2,2,50,50,{bottom_margin},1
+Style: Default,{font},{size},&H00FFFFFF,&H000000FF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,3,8,2,2,60,60,{bottom_margin},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -1136,15 +1133,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if progress_callback:
             progress_callback(0.3)
         
-        # Transcribe using Whisper API (raw HTTP for proxy compatibility)
         try:
-            transcript = self._whisper_transcribe_words_api(audio_file)
-        except Exception as e:
-            self.log(f"  Warning: Whisper API error: {e}")
-            import shutil
-            shutil.copy(input_path, output_path)
+            transcript = self._whisper_transcribe_words(audio_file)
+        except Exception:
             os.unlink(audio_file)
-            return
+            raise
         
         os.unlink(audio_file)
         

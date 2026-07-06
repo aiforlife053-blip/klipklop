@@ -875,6 +875,42 @@ Transcript:
         return SimpleNamespace(words=words, segments=segments,
                                text=data.get("text", ""))
 
+    def _whisper_transcribe_words_local(self, audio_path: str):
+        from types import SimpleNamespace
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError as exc:
+            raise Exception("faster-whisper belum terinstall. Run: pip install faster-whisper") from exc
+
+        cfg = getattr(self, "local_whisper", {}) or {}
+        model_name = str(cfg.get("model") or "small")
+        device = str(cfg.get("device") or "cpu")
+        compute_type = str(cfg.get("compute_type") or "int8")
+        if self._local_whisper_model is None:
+            self.log(f"  Using local faster-whisper: {model_name}/{device}/{compute_type}")
+            self._local_whisper_model = WhisperModel(model_name, device=device, compute_type=compute_type)
+        lang = getattr(self, "subtitle_language", None) or "id"
+        segments_iter, info = self._local_whisper_model.transcribe(audio_path, language=None if lang == "auto" else lang, word_timestamps=True)
+        raw_segments = list(segments_iter)
+        words = []
+        segments = []
+        for segment in raw_segments:
+            segments.append({"start": segment.start, "end": segment.end, "text": segment.text})
+            for word in segment.words or []:
+                words.append(SimpleNamespace(word=word.word, start=word.start, end=word.end))
+        text = " ".join(segment.get("text", "").strip() for segment in segments).strip()
+        self.log(f"  Local Whisper OK, language: {getattr(info, 'language', lang)}, words: {len(words)}, segments: {len(segments)}")
+        return SimpleNamespace(words=words, segments=segments, text=text)
+
+    def _whisper_transcribe_words(self, audio_path: str):
+        engine = getattr(self, "subtitle_engine", "local") or "local"
+        has_api = bool(getattr(self, "caption_client", None))
+        if engine == "api":
+            return self._whisper_transcribe_words_api(audio_path)
+        if engine == "auto" and has_api:
+            return self._whisper_transcribe_words_api(audio_path)
+        return self._whisper_transcribe_words_local(audio_path)
+
     def _seconds_to_srt_timestamp(seconds: float) -> str:
         """Convert seconds to SRT timestamp format HH:MM:SS,mmm"""
         h = int(seconds // 3600)

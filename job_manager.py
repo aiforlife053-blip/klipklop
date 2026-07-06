@@ -58,8 +58,9 @@ class WebJobManager:
         cfg = self._config().config
         caption_key = cfg.get("ai_providers", {}).get("caption_maker", {}).get("api_key")
         hook_key = cfg.get("ai_providers", {}).get("hook_maker", {}).get("api_key")
-        if add_captions and not caption_key:
-            return {"status": "error", "message": "Suntik Subtitel butuh Caption Maker/Whisper API key. Matikan subtitel dulu atau isi key Caption Maker."}
+        subtitle_engine = cfg.get("subtitle_engine", "local")
+        if add_captions and subtitle_engine == "api" and not caption_key:
+            return {"status": "error", "message": "Subtitle Engine API Whisper butuh Caption Maker/Whisper API key. Pilih Local faster-whisper atau isi key."}
         if add_hook and not hook_key:
             return {"status": "error", "message": "Hook butuh Hook Maker/TTS API key."}
 
@@ -124,6 +125,8 @@ class WebJobManager:
             "subtitle_language": cfg.get("subtitle_language", "id"),
             "video_quality": str(cfg.get("video_quality", "720")),
             "landscape_blur": bool(cfg.get("landscape_blur", False)),
+            "subtitle_engine": cfg.get("subtitle_engine", "local"),
+            "local_whisper": cfg.get("local_whisper", {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"}),
             "subtitle_style": cfg.get("subtitle_style", {"font": "Arial Black", "size": 65, "bottom_margin": 400}),
             "output_dir": cfg.get("output_dir", str(self.output_dir)),
             "cookie_exists": cookies["exists"],
@@ -148,6 +151,17 @@ class WebJobManager:
         subtitle_language = str(payload.get("subtitle_language", "id") or "id")
         video_quality = str(payload.get("video_quality", cfg_mgr.config.get("video_quality", "720")) or "720")
         landscape_blur = self._as_bool(payload.get("landscape_blur", cfg_mgr.config.get("landscape_blur", False)), False)
+        subtitle_engine = str(payload.get("subtitle_engine", cfg_mgr.config.get("subtitle_engine", "local")) or "local")
+        if subtitle_engine not in {"auto", "api", "local"}:
+            subtitle_engine = "local"
+        local_whisper = cfg_mgr.config.get("local_whisper", {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"})
+        if isinstance(payload.get("local_whisper"), dict):
+            local_whisper = {**local_whisper, **payload["local_whisper"]}
+        if str(local_whisper.get("model", "small")) not in {"base", "small", "medium"}:
+            local_whisper["model"] = "small"
+        local_whisper["enabled"] = True
+        local_whisper["device"] = str(local_whisper.get("device") or "cpu")
+        local_whisper["compute_type"] = str(local_whisper.get("compute_type") or "int8")
         if video_quality not in {"480", "720", "1080"}:
             video_quality = "720"
         subtitle_style = cfg_mgr.config.get("subtitle_style", {"font": "Arial Black", "size": 65, "bottom_margin": 400})
@@ -181,6 +195,8 @@ class WebJobManager:
         cfg_mgr.config["subtitle_language"] = subtitle_language
         cfg_mgr.config["video_quality"] = video_quality
         cfg_mgr.config["landscape_blur"] = landscape_blur
+        cfg_mgr.config["subtitle_engine"] = subtitle_engine
+        cfg_mgr.config["local_whisper"] = local_whisper
         cfg_mgr.config["subtitle_style"] = subtitle_style
         cfg_mgr.config["output_dir"] = output_dir
         cfg_mgr.save()
@@ -311,6 +327,8 @@ class WebJobManager:
                 video_quality=str(cfg.get("video_quality", "720")),
                 landscape_blur=landscape_blur,
                 subtitle_style=cfg.get("subtitle_style", {"font": "Arial Black", "size": 65, "bottom_margin": 400}),
+                subtitle_engine=cfg.get("subtitle_engine", "local"),
+                local_whisper=cfg.get("local_whisper", {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"}),
                 log_callback=self._set_message,
                 progress_callback=self._set_progress,
             )
