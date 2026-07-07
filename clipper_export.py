@@ -170,6 +170,10 @@ class ExportMixin:
         
         # Step 4: Add captions (optional)
         final_file = clip_dir / "master.mp4"
+        if add_captions and getattr(self, "screen_size", "9:16") == "16:9":
+            self.log("  ⊘ Skipped captions (landscape)")
+            add_captions = False
+
         if add_captions:
             if self.is_cancelled():
                 return
@@ -634,12 +638,13 @@ class ExportMixin:
         # Burn subtitles into video using GPU/CPU encoder
         # Escape path for FFmpeg on Windows
         ass_path_escaped = ass_file.replace('\\', '/').replace(':', '\\:')
+        fonts_dir_escaped = str(Path(__file__).resolve().parent / "fonts").replace('\\', '/').replace(':', '\\:')
         
         encoder_args = self.get_video_encoder_args()
         cmd = [
             self.ffmpeg_path, "-y",
             "-i", input_path,
-            "-vf", f"ass='{ass_path_escaped}'",
+            "-vf", f"ass='{ass_path_escaped}':fontsdir='{fonts_dir_escaped}'",
             *encoder_args,
             "-c:a", "copy",
             output_path
@@ -659,18 +664,8 @@ class ExportMixin:
         style = getattr(self, "subtitle_style", {}) or {}
         font = str(style.get("font") or "Plus Jakarta Sans").replace(",", " ")
         size = int(style.get("size") or 65)
-        position = str(style.get("position") or "auto")
-        if position == "auto":
-            position = "bottom" if getattr(self, "landscape_blur", False) else "bottom"
-        alignment = {"top": 8, "middle": 5, "bottom": 2}.get(position, 2)
-        bottom_margin = int(style.get("bottom_margin") or 400)
-        if position == "top":
-            bottom_margin = 120
-        elif position == "middle":
-            bottom_margin = 0
-        elif getattr(self, "landscape_blur", False):
-            bottom_margin = min(bottom_margin, 260)
-        # ASS header - CapCut style: white text, yellow highlight, black outline
+        alignment = 2
+        bottom_margin = 520
         ass_content = f"""[Script Info]
 Title: Auto-generated captions
 ScriptType: v4.00+
@@ -681,7 +676,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{size},&H00FFFFFF,&H000000FF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,3,8,2,{alignment},60,60,{bottom_margin},1
+Style: Default,{font},{size},&H00FFFFFF,&H000000FF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,1,4,2,{alignment},60,60,{bottom_margin},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -699,6 +694,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 if text and end > start:
                     words.append({'text': text, 'start': start, 'end': end})
             chunk = []
+            chunks = []
             for index, word in enumerate(words):
                 chunk.append(word)
                 next_word = words[index + 1] if index + 1 < len(words) else None
@@ -707,12 +703,19 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 if len(chunk) >= 3:
                     should_flush = not next_word or word['text'].rstrip().endswith(('.', ',', '?', '!')) or next_word['start'] - word['end'] > 0.45 or len(chunk) >= (4 if remaining == 3 else 5)
                 if should_flush:
-                    events.append({
-                        'start': self.format_time(chunk[0]['start'] + time_offset),
-                        'end': self.format_time(chunk[-1]['end'] + time_offset),
-                        'text': ' '.join(item['text'] for item in chunk)
-                    })
+                    chunks.append(chunk)
                     chunk = []
+            for chunk in chunks:
+                for active_index, active_word in enumerate(chunk):
+                    text = ' '.join(
+                        f"{{\\c&H000000&\\3c&H00FFFF&\\bord10}}{item['text']}{{\\r}}" if i == active_index else item['text']
+                        for i, item in enumerate(chunk)
+                    )
+                    events.append({
+                        'start': self.format_time(active_word['start'] + time_offset),
+                        'end': self.format_time(active_word['end'] + time_offset),
+                        'text': text
+                    })
 
         
         # Fallback: use segment-level timestamps if no word timestamps
@@ -1172,6 +1175,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         
         # Burn subtitles into video using GPU/CPU encoder
         ass_path_escaped = ass_file.replace('\\', '/').replace(':', '\\:')
+        fonts_dir_escaped = str(Path(__file__).resolve().parent / "fonts").replace('\\', '/').replace(':', '\\:')
         
         # Get video duration for progress
         probe_cmd = [self.ffmpeg_path, "-i", input_path, "-f", "null", "-"]
@@ -1186,7 +1190,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         cmd = [
             self.ffmpeg_path, "-y",
             "-i", input_path,
-            "-vf", f"ass='{ass_path_escaped}'",
+            "-vf", f"ass='{ass_path_escaped}':fontsdir='{fonts_dir_escaped}'",
             *encoder_args,
             "-c:a", "copy",
             "-progress", "pipe:1",

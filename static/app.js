@@ -116,7 +116,7 @@ function initCustomSelects() {
   });
 }
 
-function showError(message) {
+function showToast(message, type = 'error') {
   let container = $('toast-container');
   if (!container) {
     container = document.createElement('div');
@@ -124,26 +124,20 @@ function showError(message) {
     container.className = 'fixed bottom-6 right-6 z-[200] flex flex-col gap-2 pointer-events-none';
     document.body.appendChild(container);
   }
+  const ok = type === 'success';
   const toast = document.createElement('div');
-  toast.className = 'pointer-events-auto bg-red-50 text-red-800 border border-red-100 rounded-xl px-4 py-3 shadow-lg flex items-center gap-3 max-w-sm transition-all duration-300 transform translate-y-4 opacity-0';
-  toast.innerHTML = `
-    <svg class="w-[18px] h-[18px] text-red-500 shrink-0" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
-    </svg>
-    <span class="text-[13px] font-semibold leading-normal">${escapeHtml(message)}</span>
-  `;
+  toast.className = `pointer-events-auto ${ok ? 'bg-green-50 text-green-800 border-green-100' : 'bg-red-50 text-red-800 border-red-100'} border rounded-xl px-4 py-3 shadow-lg flex items-center gap-3 max-w-sm transition-all duration-300 transform translate-y-4 opacity-0`;
+  toast.innerHTML = `<span class="text-[13px] font-semibold leading-normal">${escapeHtml(message)}</span>`;
   container.appendChild(toast);
-  requestAnimationFrame(() => {
-    toast.className = toast.className.replace('translate-y-4 opacity-0', 'translate-y-0 opacity-100');
-  });
+  requestAnimationFrame(() => { toast.className = toast.className.replace('translate-y-4 opacity-0', 'translate-y-0 opacity-100'); });
   setTimeout(() => {
     toast.className = toast.className.replace('translate-y-0 opacity-100', 'translate-y-4 opacity-0');
-    setTimeout(() => {
-      toast.remove();
-      if (container.children.length === 0) container.remove();
-    }, 300);
-  }, 1500);
+    setTimeout(() => { toast.remove(); if (container.children.length === 0) container.remove(); }, 300);
+  }, 5000);
 }
+
+function showError(message) { showToast(message, 'error'); }
+function showSuccess(message) { showToast(message, 'success'); }
 
 async function loadSettings() {
   try { applySettings(await api('/api/settings'), false); } catch (error) { showError(error.message); }
@@ -455,8 +449,12 @@ async function renderOutputs() {
   const homePanel = $('home-results-panel');
   let groups = [];
   try { groups = (await api('/api/outputs')).groups || []; } catch (error) { if (historyPanel) historyPanel.innerHTML = `<p class="text-[13px] text-red-500">${escapeHtml(error.message)}</p>`; return; }
-  const savedGroups = groups.filter((group) => group.saved);
-  if (historyPanel) historyPanel.innerHTML = savedGroups.length ? savedGroups.map(renderSessionRow).join('') : '<p class="text-[13px] text-gray-500">Belum ada riwayat tersimpan.</p>';
+  const savedClips = groups.filter((group) => group.saved).flatMap((group) => {
+    const saved = new Set(group.saved_clips || []);
+    const clips = saved.size ? group.clips.filter((clip) => saved.has(clip.path)) : group.clips;
+    return clips.map((clip) => ({ ...clip, group }));
+  });
+  if (historyPanel) historyPanel.innerHTML = renderHistoryBoard(savedClips);
   if (!homePanel) return;
   
   if (processingActive) {
@@ -491,11 +489,75 @@ function withPendingClips(group) { const saved = new Set(group.saved_clips || []
 function metaLine(group, count) { return `${count} klip tersedia | ${group.video_quality || '720'}p | ${group.landscape_blur ? 'Blur Background' : 'Crop'} | ${formatTime(group.timestamp)}`; }
 function clipDuration(clip) { return clip.duration_seconds ? `Durasi: ${Math.round(clip.duration_seconds)}s` : 'Durasi: -'; }
 
+function uploadStates() { try { return JSON.parse(localStorage.getItem('youtubeUploadStates') || '{}'); } catch (_) { return {}; } }
+function saveUploadStates(states) { localStorage.setItem('youtubeUploadStates', JSON.stringify(states)); }
+function setUploadState(path, patch) { const states = uploadStates(); states[path] = { ...(states[path] || {}), ...patch }; saveUploadStates(states); renderOutputs(); }
+
+async function syncYoutubeDeleted() {
+  const states = uploadStates();
+  const entries = Object.entries(states).filter(([, state]) => state.status === 'success' && state.video_id);
+  if (!entries.length) return;
+  try {
+    const data = await api('/api/social/youtube/check', { method: 'POST', body: JSON.stringify({ video_ids: entries.map(([, state]) => state.video_id) }) });
+    const existing = new Set(data.existing || []);
+    let changed = false;
+    for (const [path, state] of entries) {
+      if (!existing.has(state.video_id)) {
+        states[path] = { ...state, status: 'deleted' };
+        changed = true;
+      }
+    }
+    if (changed) { saveUploadStates(states); renderOutputs(); }
+  } catch (_) {}
+}
+
+function renderHistoryBoard(clips) {
+  const states = uploadStates();
+  const queue = clips.filter((clip) => !['success', 'deleted', 'failed'].includes(states[clip.path]?.status));
+  const success = clips.filter((clip) => states[clip.path]?.status === 'success');
+  const failed = clips.filter((clip) => states[clip.path]?.status === 'failed');
+  const deleted = clips.filter((clip) => states[clip.path]?.status === 'deleted');
+  return `<div class="grid grid-cols-1 xl:grid-cols-4 gap-4">
+    ${renderHistoryColumn('Antrean', queue, 'text-orange-400')}
+    ${renderHistoryColumn('Berhasil', success, 'text-green-400')}
+    ${renderHistoryColumn('Gagal', failed, 'text-red-400')}
+    ${renderHistoryColumn('Terhapus', deleted, 'text-gray-400')}
+  </div>`;
+}
+
+function renderHistoryColumn(title, clips, colorClass) {
+  return `<section class="border border-gray-200 rounded-2xl p-4 min-h-[360px]">
+    <div class="flex items-center justify-between mb-3"><h3 class="font-semibold ${colorClass}">${title}</h3><span class="text-[12px] text-gray-400">${clips.length}</span></div>
+    <div class="flex flex-wrap gap-3">${clips.length ? clips.map(renderHistoryClip).join('') : '<p class="text-[13px] text-gray-500">Kosong</p>'}</div>
+  </section>`;
+}
+
+function renderHistoryClip(file) {
+  const href = `/api/download?path=${encodeURIComponent(file.path)}`;
+  const state = uploadStates()[file.path] || {};
+  const label = state.status === 'uploading' ? 'Mengunggah...' : state.status === 'failed' ? 'Coba lagi' : state.status === 'success' ? 'Buka' : 'Unggah';
+  const deleteAttr = state.status === 'success' && state.video_id ? `data-youtube-delete="${escapeAttr(file.path)}" data-video-id="${escapeAttr(state.video_id)}"` : `data-delete-output="${escapeAttr(file.path)}" data-delete-kind="clip"`;
+  const status = state.status === 'failed' ? `<p class="text-[10px] text-red-400 mt-1">${escapeHtml(state.error || 'Upload gagal')}</p>` : state.url ? `<a class="text-[10px] text-green-400 mt-1 truncate" href="${escapeAttr(state.url)}" target="_blank">${escapeHtml(state.url)}</a>` : '';
+  return `<article class="bg-white border border-gray-200 rounded-xl p-2 flex flex-col w-[210px] shrink-0 overflow-hidden">
+    <button type="button" class="relative bg-gray-100 rounded-lg aspect-[4/3] overflow-hidden mb-2 cursor-zoom-in" data-video-open="${escapeAttr(href)}">
+      <video class="w-full h-full object-cover pointer-events-none" src="${href}" muted preload="metadata"></video>
+    </button>
+    <h3 class="font-semibold text-[12px] leading-snug text-gray-950 mb-1 whitespace-normal break-words">${escapeHtml(file.title || file.name)}</h3>
+    <p class="text-[10px] text-gray-400 mb-2">${clipDuration(file)}</p>
+    ${status}
+    <div class="grid grid-cols-3 gap-1.5 mt-auto pt-2">
+      <a class="flex items-center justify-center rounded-lg bg-[#ea580c] hover:bg-[#c2410c] text-white py-1.5 text-[10px] font-semibold transition text-center" href="${href}">Unduh</a>
+      <button class="rounded-lg bg-white border border-gray-200 py-1.5 text-[10px] font-semibold text-gray-900 hover:bg-gray-50 transition" type="button" data-youtube-upload="${escapeAttr(file.path)}" data-youtube-url="${escapeAttr(state.url || '')}" data-title="${escapeAttr(file.title || file.name)}" data-description="${escapeAttr(file.description || file.group?.caption || '')}">${label}</button>
+      <button class="rounded-lg bg-white border border-gray-200 py-1.5 text-[10px] font-semibold text-gray-900 hover:bg-gray-50 transition" type="button" data-delete-output="${escapeAttr(file.path)}" data-delete-kind="clip">Hapus</button>
+    </div>
+  </article>`;
+}
+
 function renderSessionRow(group) {
   const saved = new Set(group.saved_clips || []);
   const allClips = group.clips && group.clips.length ? group.clips : group.files || [];
   const clips = saved.size ? allClips.filter((clip) => saved.has(clip.path)) : allClips;
-  return `<article class="border border-gray-200 rounded-2xl p-4 hover:bg-gray-50 transition-colors mb-3"><button class="text-left w-full min-w-0" type="button" data-session-toggle="${escapeAttr(group.path)}"><h3 class="font-semibold text-[16px] text-black truncate">${escapeHtml(group.title)}</h3><p class="text-[12px] text-gray-400">${clips.length} klip tersimpan | ${escapeHtml(group.video_quality || '720')}p | ${formatTime(group.timestamp)}</p></button><div class="hidden mt-4 flex flex-wrap gap-4 justify-center" data-session-files="${escapeAttr(group.path)}">${clips.map(renderFileLink).join('')}</div></article>`;
+  return `<article class="border border-gray-200 rounded-2xl p-4 mb-3"><button class="text-left w-full min-w-0" style="background: transparent; background-color: transparent;" type="button" data-session-toggle="${escapeAttr(group.path)}"><h3 class="font-semibold text-[16px] text-white truncate">${escapeHtml(group.title)}</h3><p class="text-[12px] text-gray-400">${clips.length} klip tersimpan | ${escapeHtml(group.video_quality || '720')}p | ${formatTime(group.timestamp)}</p></button><div class="hidden mt-4 flex flex-wrap gap-4 justify-center" data-session-files="${escapeAttr(group.path)}">${clips.map(renderFileLink).join('')}</div></article>`;
 }
 
 function renderFileLink(file) {
@@ -507,7 +569,11 @@ function renderFileLink(file) {
     <div class="flex flex-col flex-1 min-h-0">
       <h3 class="font-semibold text-[13px] leading-snug text-gray-950 mb-1 whitespace-normal break-words">${escapeHtml(file.title || file.name)}</h3>
       <p class="text-[11px] text-gray-400 mb-3 mt-auto">${clipDuration(file)}</p>
-      <a class="flex items-center justify-center rounded-lg bg-[#ea580c] hover:bg-[#c2410c] text-white py-2 text-[10px] font-semibold transition text-center" href="${href}">Download</a>
+      <div class="grid grid-cols-3 gap-1.5">
+        <a class="flex items-center justify-center rounded-lg bg-[#ea580c] hover:bg-[#c2410c] text-white py-2 text-[10px] font-semibold transition text-center" href="${href}">Unduh</a>
+        <button class="rounded-lg bg-white border border-gray-200 py-2 text-[10px] font-semibold text-gray-900 hover:bg-gray-50 transition" type="button" data-youtube-upload="${escapeAttr(file.path)}" data-title="${escapeAttr(file.title || file.name)}" data-description="">Upload YT</button>
+        <button class="rounded-lg bg-white border border-gray-200 py-2 text-[10px] font-semibold text-gray-900 hover:bg-gray-50 transition" type="button" data-delete-output="${escapeAttr(file.path)}" data-delete-kind="clip">Hapus</button>
+      </div>
     </div>
   </article>`;
 }
@@ -529,13 +595,28 @@ function renderExportCard(group, clip, index = 0) {
       <h3 class="font-semibold text-[13px] leading-snug text-gray-950 mb-1 whitespace-normal break-words">${escapeHtml(clip.title || `Klip ${index + 1}`)}</h3>
       <p class="text-[12px] text-gray-500 mb-2 leading-relaxed whitespace-normal break-words overflow-hidden" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${escapeHtml(clip.description || group.caption)}</p>
       <p class="text-[11px] text-gray-400 mb-3 mt-auto">${clipDuration(clip)}</p>
-      <div class="grid grid-cols-3 gap-1.5">
-        <a class="flex items-center justify-center rounded-lg bg-[#ea580c] hover:bg-[#c2410c] text-white py-2 text-[10px] font-semibold transition text-center" href="${href}">Download</a>
-        <button class="rounded-lg bg-white border border-gray-200 py-2 text-[10px] font-semibold text-gray-900 hover:bg-gray-50 transition" type="button" data-save-output="${escapeAttr(group.path)}" data-save-one="${escapeAttr(clip.path)}">Simpan</button>
+      <div class="grid grid-cols-2 gap-1.5">
+        <button class="rounded-lg bg-[#ea580c] text-white py-2 text-[10px] font-semibold hover:bg-[#c2410c] transition" type="button" data-save-output="${escapeAttr(group.path)}" data-save-one="${escapeAttr(clip.path)}">Tambah ke Queue</button>
         <button class="rounded-lg bg-white border border-gray-200 py-2 text-[10px] font-semibold text-gray-900 hover:bg-gray-50 transition" type="button" data-delete-output="${escapeAttr(clip.path)}" data-delete-kind="clip">Hapus</button>
       </div>
     </div>
   </article>`;
+}
+
+async function uploadYoutube(button) {
+  const path = button.dataset.youtubeUpload;
+  if (button.dataset.youtubeUrl) { window.open(button.dataset.youtubeUrl, '_blank'); return; }
+  if (!(await confirmDelete('Upload klip ini ke YouTube sebagai private?'))) return;
+  setUploadState(path, { status: 'uploading', error: '', url: '' });
+  try {
+    const data = await api('/api/social/youtube/upload', { method: 'POST', body: JSON.stringify({ path, title: button.dataset.title, description: button.dataset.description, privacy: 'private' }) });
+    setUploadState(path, { status: 'success', video_id: data.video_id, url: data.url, error: '' });
+    showSuccess(`Upload sukses: ${data.url}`);
+    window.open(data.url, '_blank');
+  } catch (error) {
+    setUploadState(path, { status: 'failed', error: error.message });
+    showError(error.message);
+  }
 }
 
 function confirmDelete(message) {
@@ -561,6 +642,7 @@ async function saveOutput(path, oneClip) {
 function toggleSession(path) { document.querySelectorAll('[data-session-files]').forEach((el) => el.classList.toggle('hidden', el.dataset.sessionFiles !== path || !el.classList.contains('hidden'))); }
 function formatTime(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? (value || '') : date.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }); }
 function showPage(name) {
+  if (location.hash !== `#${name}`) window.history.replaceState(null, '', `#${name}`);
   const home = $('page-home'); const history = $('page-history'); const consolePage = $('page-console'); const social = $('page-social'); const settings = $('page-settings');
   if (!home || !history || !consolePage || !social || !settings) return;
   home.classList.toggle('hidden', name !== 'home');
@@ -575,9 +657,10 @@ function showPage(name) {
   setNavActive('nav-settings', name === 'settings');
 
   if (name === 'home') pollStatus();
-  if (name === 'history') renderOutputs();
+  if (name === 'history') { renderOutputs(); syncYoutubeDeleted(); }
   if (name === 'console') refreshLogPanel();
   if (name === 'settings') loadSettings();
+  if (name === 'social') loadSocialStatus();
 }
 
 function setNavActive(id, active) {
@@ -645,10 +728,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const videoButton = event.target.closest('[data-video-open]');
     const deleteButton = event.target.closest('[data-delete-output]');
     const saveButton = event.target.closest('[data-save-output]');
+    const youtubeButton = event.target.closest('[data-youtube-upload]');
     const sessionButton = event.target.closest('[data-session-toggle]');
     if (videoButton) openVideoModal(videoButton.dataset.videoOpen);
     if (deleteButton) deleteOutput(deleteButton.dataset.deleteOutput, deleteButton.dataset.deleteKind);
     if (saveButton) saveOutput(saveButton.dataset.saveOutput, saveButton.dataset.saveOne);
+    if (youtubeButton) uploadYoutube(youtubeButton);
     if (sessionButton) toggleSession(sessionButton.dataset.sessionToggle);
   });
   const confirmCancel = $('confirm-cancel'); const confirmOk = $('confirm-ok');
@@ -713,5 +798,57 @@ document.addEventListener('DOMContentLoaded', () => {
   setScreenSize(getScreenSize());
   updateInstructionCount();
   loadSettings();
-  renderOutputs();
+  showPage((location.hash || '#home').slice(1));
+  setInterval(() => { if (location.hash === '#history') syncYoutubeDeleted(); }, 30000);
 });
+
+async function loadSocialStatus() {
+  const badge = $('yt-status-badge');
+  const info = $('yt-info');
+  const connectBtn = $('yt-connect-btn');
+  const disconnectBtn = $('yt-disconnect-btn');
+  if (!badge) return;
+
+  try {
+    const res = await fetch('/api/social/status');
+    const data = await res.json();
+    if (data.connected) {
+      badge.textContent = 'Connected';
+      badge.className = 'rounded-full border border-green-300 bg-green-50 px-3 py-1 text-[11px] font-semibold text-green-700';
+      info.classList.remove('hidden');
+      connectBtn.classList.add('hidden');
+      disconnectBtn.classList.remove('hidden');
+    } else {
+      badge.textContent = 'Belum connect';
+      badge.className = 'rounded-full border border-gray-200 px-3 py-1 text-[11px] font-semibold text-gray-500';
+      info.classList.add('hidden');
+      connectBtn.classList.remove('hidden');
+      disconnectBtn.classList.add('hidden');
+    }
+  } catch (_) {}
+
+  disconnectBtn.onclick = async () => {
+    if (!(await confirmDelete('Disconnect YouTube? Token lokal akan dihapus.'))) return;
+    await fetch('/api/social/youtube/disconnect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    loadSocialStatus();
+  };
+
+  connectBtn.onclick = async () => {
+    connectBtn.disabled = true;
+    connectBtn.textContent = 'Buka Google Login...';
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    try {
+      const res = await fetch('/api/social/youtube/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', signal: controller.signal });
+      const data = await res.json();
+      if (data.status !== 'ok') throw new Error(data.message || 'Gagal connect');
+      loadSocialStatus();
+    } catch (error) {
+      showError(error.name === 'AbortError' ? 'Gagal menyambungkan YouTube. Coba Connect lagi.' : error.message);
+    } finally {
+      clearTimeout(timeout);
+      connectBtn.disabled = false;
+      connectBtn.textContent = 'Connect YouTube';
+    }
+  };
+}

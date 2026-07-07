@@ -177,6 +177,8 @@ class WebJobManager:
         if isinstance(payload.get("subtitle_style"), dict):
             subtitle_style = {**subtitle_style, **payload["subtitle_style"]}
         subtitle_style["font"] = str(subtitle_style.get("font") or "Plus Jakarta Sans")[:80]
+        if subtitle_style["font"] not in {"Plus Jakarta Sans", "Poppins", "Arial"}:
+            subtitle_style["font"] = "Plus Jakarta Sans"
         subtitle_style["size"] = max(24, min(120, self._as_int(subtitle_style.get("size"), 65)))
         subtitle_style["bottom_margin"] = max(40, min(900, self._as_int(subtitle_style.get("bottom_margin"), 400)))
         providers = cfg_mgr.config.setdefault("ai_providers", {})

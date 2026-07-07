@@ -20,6 +20,8 @@ if sys.version_info < (3, 11) and os.name == "nt" and os.environ.get("KLIPKLOP_P
         raise SystemExit("Python 3.11+ required. Run: py -3.12 server.py")
 
 from job_manager import WebJobManager
+from social_auth import get_youtube_credentials, is_youtube_connected, TOKEN_FILE
+from youtube_uploader import delete_youtube_video, list_existing_youtube_videos, upload_youtube_video
 
 
 MANAGER = WebJobManager()
@@ -36,6 +38,8 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._json(MANAGER.list_outputs())
         elif parsed.path == "/api/download":
             self._download(parsed.query)
+        elif parsed.path == "/api/social/status":
+            self._json(is_youtube_connected())
         else:
             self._static(parsed.path)
 
@@ -59,8 +63,46 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._json(result, 400 if result.get("status") == "error" else 200)
         elif self.path in {"/api/logs/clear", "/api/clear-logs", "/api/clear_logs"}:
             self._json(MANAGER.clear_logs())
+        elif self.path == "/api/social/youtube/connect":
+            try:
+                get_youtube_credentials()
+                self._json({"status": "ok"})
+            except Exception as e:
+                self._json({"status": "error", "message": str(e)}, 400)
+        elif self.path == "/api/social/youtube/disconnect":
+            import os
+            if os.path.exists(TOKEN_FILE):
+                os.remove(TOKEN_FILE)
+            self._json({"status": "ok"})
+        elif self.path == "/api/social/youtube/upload":
+            self._upload_youtube(payload)
+        elif self.path == "/api/social/youtube/check":
+            try:
+                self._json({"status": "ok", "existing": list_existing_youtube_videos(payload.get("video_ids") or [])})
+            except Exception as e:
+                self._json({"status": "error", "message": str(e)}, 400)
+        elif self.path == "/api/social/youtube/delete":
+            try:
+                self._json({"status": "ok", **delete_youtube_video(str(payload.get("video_id") or ""))})
+            except Exception as e:
+                self._json({"status": "error", "message": str(e)}, 400)
         else:
             self._json({"status": "error", "message": "Not found"}, 404)
+
+    def _upload_youtube(self, payload):
+        target = Path(str(payload.get("path", ""))).resolve()
+        output_root = Path(MANAGER.get_settings()["output_dir"] or str(MANAGER.output_dir)).resolve()
+        if not target.exists() or output_root not in target.parents or target.suffix.lower() not in {".mp4", ".webm", ".mkv", ".mov", ".avi"}:
+            self._json({"status": "error", "message": "File video tidak ditemukan"}, 400)
+            return
+        title = str(payload.get("title") or target.stem).strip()
+        description = str(payload.get("description") or "").strip()
+        privacy = str(payload.get("privacy") or "private").strip()
+        try:
+            result = upload_youtube_video(target, title, description, privacy)
+            self._json({"status": "ok", **result})
+        except Exception as e:
+            self._json({"status": "error", "message": str(e)}, 400)
 
     def log_message(self, fmt, *args):
         return
