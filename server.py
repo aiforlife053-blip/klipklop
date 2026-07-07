@@ -20,7 +20,7 @@ if sys.version_info < (3, 11) and os.name == "nt" and os.environ.get("KLIPKLOP_P
         raise SystemExit("Python 3.11+ required. Run: py -3.12 server.py")
 
 from job_manager import WebJobManager
-from social_auth import get_youtube_credentials, is_youtube_connected, TOKEN_FILE
+from social_auth import get_youtube_credentials, is_youtube_connected, start_youtube_oauth, check_youtube_oauth_status, TOKEN_FILE
 from youtube_uploader import delete_youtube_video, list_existing_youtube_videos, upload_youtube_video
 
 
@@ -40,50 +40,76 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._download(parsed.query)
         elif parsed.path == "/api/social/status":
             self._json(is_youtube_connected())
+        elif parsed.path == "/api/activity":
+            self._json(MANAGER.list_activities())
         else:
             self._static(parsed.path)
 
     def do_POST(self):
-        payload = self._payload()
-        if payload is None:
-            self._json({"status": "error", "message": "Invalid JSON"}, 400)
+        parsed = urlparse(self.path)
+
+        # Different endpoints have different payload size limits
+        if parsed.path == "/api/settings":
+            payload, err = self._payload(max_size=65536)  # 64KB
+        elif parsed.path == "/api/cookies":
+            payload, err = self._payload(max_size=524288)  # 512KB
+        elif parsed.path in ["/api/start", "/api/delete", "/api/save"]:
+            payload, err = self._payload(max_size=16384)  # 16KB
+        else:
+            payload, err = self._payload(max_size=65536)  # 64KB default
+
+        if err is not None:
+            self._json(err[0], err[1])
             return
-        if self.path == "/api/settings":
+        if parsed.path == "/api/settings":
             self._json(MANAGER.save_settings(payload))
-        elif self.path == "/api/cookies":
+        elif parsed.path == "/api/cookies":
             self._json(MANAGER.save_cookies(payload.get("content", payload.get("cookie_text", ""))))
-        elif self.path == "/api/start":
+        elif parsed.path == "/api/start":
             result = MANAGER.start(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
-        elif self.path == "/api/delete":
+        elif parsed.path == "/api/delete":
             result = MANAGER.delete_output(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
-        elif self.path == "/api/save":
+        elif parsed.path == "/api/save":
             result = MANAGER.save_output(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
-        elif self.path in {"/api/logs/clear", "/api/clear-logs", "/api/clear_logs"}:
+        elif parsed.path in {"/api/logs/clear", "/api/clear-logs", "/api/clear_logs"}:
             self._json(MANAGER.clear_logs())
-        elif self.path == "/api/social/youtube/connect":
+        elif parsed.path == "/api/activity":
+            result = MANAGER.log_activity(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/activity/clear":
+            self._json(MANAGER.clear_activities())
+        elif parsed.path == "/api/social/youtube/connect":
             try:
-                get_youtube_credentials()
-                self._json({"status": "ok"})
+                result = start_youtube_oauth()
+                self._json(result)
             except Exception as e:
                 self._json({"status": "error", "message": str(e)}, 400)
-        elif self.path == "/api/social/youtube/disconnect":
+        elif parsed.path == "/api/social/youtube/oauth-status":
+            try:
+                result = check_youtube_oauth_status()
+                self._json(result)
+            except Exception as e:
+                self._json({"status": "error", "message": str(e)}, 400)
+        elif parsed.path == "/api/social/youtube/disconnect":
             import os
             if os.path.exists(TOKEN_FILE):
                 os.remove(TOKEN_FILE)
             self._json({"status": "ok"})
-        elif self.path == "/api/social/youtube/upload":
+        elif parsed.path == "/api/social/youtube/upload":
             self._upload_youtube(payload)
-        elif self.path == "/api/social/youtube/check":
+        elif parsed.path == "/api/social/youtube/check":
             try:
                 self._json({"status": "ok", "existing": list_existing_youtube_videos(payload.get("video_ids") or [])})
             except Exception as e:
                 self._json({"status": "error", "message": str(e)}, 400)
-        elif self.path == "/api/social/youtube/delete":
+        elif parsed.path == "/api/social/youtube/delete":
             try:
-                self._json({"status": "ok", **delete_youtube_video(str(payload.get("video_id") or ""))})
+                result = {"status": "ok", **delete_youtube_video(str(payload.get("video_id") or ""))}
+                MANAGER.log_activity({"action": "youtube_delete", "detail": result.get("video_id", "")})
+                self._json(result)
             except Exception as e:
                 self._json({"status": "error", "message": str(e)}, 400)
         else:
@@ -100,6 +126,7 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         privacy = str(payload.get("privacy") or "private").strip()
         try:
             result = upload_youtube_video(target, title, description, privacy)
+            MANAGER.log_activity({"action": "youtube_upload", "detail": result.get("video_id", target.name)})
             self._json({"status": "ok", **result})
         except Exception as e:
             self._json({"status": "error", "message": str(e)}, 400)
@@ -107,28 +134,65 @@ class WebKlipHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         return
 
-    def _payload(self):
+    def _payload(self, max_size=65536):
+        """Parse JSON payload with size limit. Default 64KB, can be overridden.
+        Returns tuple: (payload_dict, error_response_tuple_or_None)
+        If error is not None, caller should send the error and return.
+        """
         try:
             size = int(self.headers.get("content-length", "0") or 0)
         except ValueError:
-            return None
+            return None, ({"status": "error", "message": "Invalid content-length"}, 400)
+        if size > max_size:
+            return None, ({"status": "error", "message": f"Payload too large (max {max_size} bytes)"}, 413)
         if size <= 0:
-            return {}
+            return {}, None
         try:
-            return json.loads(self.rfile.read(size).decode("utf-8"))
+            return json.loads(self.rfile.read(size).decode("utf-8")), None
         except json.JSONDecodeError:
-            return None
+            return None, ({"status": "error", "message": "Invalid JSON"}, 400)
 
     def _json(self, data, status=200):
         raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
+        self._add_security_headers()
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
 
+    def _add_security_headers(self):
+        """Add security headers to all responses"""
+        # CSP: allow self, inline styles (Tailwind), external fonts/scripts (CDN)
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data: blob:; "
+            "media-src 'self' blob:; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'"
+        )
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        self.send_header("X-Frame-Options", "DENY")
+
     def _static(self, path):
+        """Serve static files with allowlist for security"""
+        # Allowlist: only serve specific safe files
         rel = "index.html" if path in {"", "/"} else unquote(path).lstrip("/")
+
+        # Security: block dangerous file extensions
+        blocked_exts = {".py", ".json", ".md", ".txt", ".log", ".cfg", ".ini", ".env", ".yml", ".yaml"}
+        if any(rel.lower().endswith(ext) for ext in blocked_exts):
+            self._json({"status": "error", "message": "Forbidden"}, 403)
+            return
+
         target = (ROOT / rel).resolve()
         if target != ROOT and ROOT not in target.parents:
             self._json({"status": "error", "message": "Forbidden"}, 403)
@@ -136,10 +200,24 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         if not target.exists() or not target.is_file():
             self._json({"status": "error", "message": "Not found"}, 404)
             return
+
+        # Cache control: no-store for HTML (sensitive), immutable for static assets
+        content_type, _ = mimetypes.guess_type(str(target))
+        if content_type is None:
+            content_type = "application/octet-stream"
+
         raw = target.read_bytes()
         self.send_response(200)
-        self.send_header("Content-Type", mimetypes.guess_type(str(target))[0] or "application/octet-stream")
+        self._add_security_headers()
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(raw)))
+
+        # Cache rules
+        if target.suffix == ".html":
+            self.send_header("Cache-Control", "no-store")
+        elif target.suffix in {".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".woff", ".woff2"}:
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+
         self.end_headers()
         self.wfile.write(raw)
 
@@ -164,11 +242,22 @@ class WebKlipHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    host = "127.0.0.1"
-    port = 8765
+    host = os.environ.get("KLIPKLOP_HOST", "127.0.0.1")
+    port = int(os.environ.get("KLIPKLOP_PORT", "8765"))
+    security_mode = os.environ.get("SECURITY_MODE", "local")
+
+    # Startup guard: refuse to bind to non-localhost without explicit public mode
+    if host != "127.0.0.1" and security_mode != "public":
+        raise SystemExit(
+            f"SECURITY ERROR: Cannot bind to {host} without SECURITY_MODE=public.\n"
+            f"Set SECURITY_MODE=public environment variable to allow non-localhost binding.\n"
+            f"Current mode: {security_mode}"
+        )
+
     url = f"http://{host}:{port}"
     server = ThreadingHTTPServer((host, port), WebKlipHandler)
     print(f"KlipKlop Web running at {url}")
+    print(f"Security mode: {security_mode}")
     webbrowser.open(url)
     server.serve_forever()
 

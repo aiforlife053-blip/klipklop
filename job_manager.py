@@ -34,6 +34,9 @@ class WebJobManager:
         self._progress = 0.0
         self._error = ""
         self._logs = []
+        self._activities = []
+        self._job_start_time = None
+        self._job_timeout = 3600  # 1 hour default timeout
 
     def start(self, payload):
         if not isinstance(payload, dict):
@@ -41,6 +44,14 @@ class WebJobManager:
         url = str(payload.get("url", payload.get("youtube_url", ""))).strip()
         if not self._is_url(url):
             return {"status": "error", "message": "YouTube URL validation error: empty or invalid URL"}
+
+        # Check for job timeout
+        if self._job_start_time and (datetime.now() - self._job_start_time).total_seconds() > self._job_timeout:
+            self._status = "idle"
+            self._message = "Idle"
+            self._job_start_time = None
+            self._add_log("Previous job timed out")
+
         with self._lock:
             if self.thread and self.thread.is_alive():
                 return {"status": "busy", "message": "Processing is already running"}
@@ -92,6 +103,7 @@ class WebJobManager:
                 daemon=True,
             )
             self.thread.start()
+            self._job_start_time = datetime.now()
         return {"status": "started"}
 
     def status(self):
@@ -105,6 +117,26 @@ class WebJobManager:
 
     def clear_logs(self):
         self._logs = []
+        return {"status": "cleared"}
+
+    def log_activity(self, payload):
+        if not isinstance(payload, dict):
+            return {"status": "error", "message": "Invalid activity payload"}
+        action = str(payload.get("action", "")).strip()[:40]
+        detail = self._public_text(payload.get("detail", "")).strip()[:200]
+        if not action:
+            return {"status": "error", "message": "Action kosong"}
+        entry = {"timestamp": datetime.now().isoformat(timespec="seconds"), "action": action, "detail": detail}
+        self._activities.append(entry)
+        self._activities = self._activities[-200:]
+        self._add_log(f"[Activity] {action}: {detail}")
+        return {"status": "logged"}
+
+    def list_activities(self):
+        return {"status": "ok", "activities": self._activities[-200:]}
+
+    def clear_activities(self):
+        self._activities = []
         return {"status": "cleared"}
 
     def get_settings(self):
@@ -296,6 +328,7 @@ class WebJobManager:
             shutil.rmtree(target)
         else:
             target.unlink()
+        self.log_activity({"action": "local_delete", "detail": target.name})
         return {"status": "deleted"}
 
     def save_output(self, payload):
@@ -317,6 +350,7 @@ class WebJobManager:
         keep = set(meta.get("saved_clips", [])) | set(valid_clips)
         meta["saved_clips"] = sorted(keep)
         meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.log_activity({"action": "queue_add", "detail": f"{len(valid_clips)} clip dari {target.name}"})
         return {"status": "saved"}
 
     def _run(self, url, num_clips, add_captions, add_hook, subtitle_language, instruction, landscape_blur, run_dir, screen_size="9:16"):
@@ -339,7 +373,7 @@ class WebJobManager:
                 temperature=cfg.get("temperature", 1.0),
                 system_prompt=prompt,
                 watermark_settings=cfg.get("watermark", {"enabled": False}),
-                credit_watermark_settings=cfg.get("credit_watermark", {"enabled": False}),
+                credit_watermark_settings={"enabled": True, "position_x": 0.22, "position_y": 0.245, "opacity": 0.9},
                 hook_style_settings=cfg.get("hook_style", {}),
                 face_tracking_mode=cfg.get("face_tracking_mode", "center"),
                 mediapipe_settings=cfg.get("mediapipe_settings", {}),
@@ -371,6 +405,11 @@ class WebJobManager:
             self._message = "Complete"
             self._progress = 1.0
             self._add_log("Complete", "Done")
+        except TimeoutError as exc:
+            self._status = "error"
+            self._message = "Processing timed out"
+            self._error = "Job exceeded time limit"
+            self._add_log(f"Timeout: {str(exc)}", "Error")
         except Exception as exc:
             self._status = "error"
             self._message = "Processing failed"
@@ -378,6 +417,7 @@ class WebJobManager:
             self._add_log(str(exc), "Error")
         finally:
             self.thread = None
+            self._job_start_time = None
 
     def _config(self):
         return ConfigManager(self.config_file, self.output_dir)
@@ -475,5 +515,12 @@ class WebJobManager:
         return bool(value)
 
     def _is_url(self, value):
+        """Validate URL - restrict to YouTube domains only for security"""
         parsed = urlparse(value)
-        return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+        if parsed.scheme not in {"http", "https"}:
+            return False
+        if not parsed.netloc:
+            return False
+        # Restrict to YouTube domains only
+        allowed_domains = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
+        return parsed.netloc.lower() in allowed_domains

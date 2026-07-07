@@ -74,6 +74,19 @@ def test_clear_api_key_removes_saved_key(tmp_path):
     assert settings["api_key_saved"] is False
 
 
+def test_activity_log_records_to_console(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    result = manager.log_activity({"action": "download_click", "detail": "clip.mp4"})
+    assert result == {"status": "logged"}
+    assert manager.list_activities()["activities"][0]["action"] == "download_click"
+    assert "[Activity] download_click: clip.mp4" in manager.status()["logs"][-1]
+
+
+def test_invalid_activity_payload_rejected(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    assert manager.log_activity(None)["status"] == "error"
+
+
 def test_save_settings_updates_title_provider_too(tmp_path):
     manager = mod.WebJobManager(app_dir=tmp_path)
     manager.save_settings({"base_url": "https://example.test/v1", "api_key": "secret-key", "model": "gemini-test"})

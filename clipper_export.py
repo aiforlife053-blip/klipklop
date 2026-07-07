@@ -262,7 +262,7 @@ class ExportMixin:
             if not final_file.exists():
                 raise Exception(f"Failed to create final video with credit: {final_file}")
             
-            self.log(f"  ✓ Added credit: Source: {self.channel_name}")
+            self.log(f"  ✓ Added credit: sc: {self.channel_name}")
             current_step += 1
             
             # Cleanup temp file
@@ -1316,15 +1316,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         pos_y = self.credit_watermark_settings.get("position_y", 0.95)
         opacity = self.credit_watermark_settings.get("opacity", 0.7)
         
-        # Calculate font size in pixels (based on video height)
-        font_size = int(video_height * size)
+        font_size = int((getattr(self, "subtitle_style", {}) or {}).get("size") or video_height * size)
         
         # Calculate position in pixels
         x_pixels = int(pos_x * video_width)
         y_pixels = int(pos_y * video_height)
         
         # Prepare credit text
-        credit_text = f"Source: {self.channel_name}"
+        credit_text = f"sc: {self.channel_name}"
         # Escape special characters for FFmpeg drawtext
         credit_text_escaped = credit_text.replace("'", "'\\''").replace(":", "\\:")
         
