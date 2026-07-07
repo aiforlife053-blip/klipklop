@@ -1,3 +1,6 @@
+import base64
+import hashlib
+import hmac
 import json
 import mimetypes
 import os
@@ -5,6 +8,8 @@ import subprocess
 import sys
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -25,11 +30,34 @@ from youtube_uploader import delete_youtube_video, list_existing_youtube_videos,
 
 
 MANAGER = WebJobManager()
+SESSION_COOKIE = "klipklop_session"
+SESSION_TTL = 86400
+
+
+def _supabase_config():
+    cfg = MANAGER._config().config
+    url = os.environ.get("SUPABASE_URL") or str(cfg.get("supabase_url") or "")
+    anon_key = os.environ.get("SUPABASE_ANON_KEY") or str(cfg.get("supabase_anon_key") or "")
+    secret = os.environ.get("KLIPKLOP_SECRET") or anon_key or "CHANGE_ME_SESSION_SECRET"
+    return url.rstrip("/"), anon_key, secret
+
+
+def _sign_session(email, secret):
+    ts = str(int(__import__("time").time()))
+    body = f"{email}:{ts}"
+    sig = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
+    return base64.urlsafe_b64encode(f"{body}:{sig}".encode()).decode()
 
 
 class WebKlipHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path == "/login":
+            self._login_page()
+            return
+        if not self._authenticated():
+            self._redirect_login() if not parsed.path.startswith("/api/") else self._json({"status": "error", "message": "Unauthorized"}, 401)
+            return
         if parsed.path == "/api/status":
             self._json(MANAGER.status())
         elif parsed.path == "/api/settings":
@@ -47,6 +75,18 @@ class WebKlipHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        if parsed.path == "/api/login":
+            self._login()
+            return
+        if parsed.path == "/api/signup":
+            self._signup()
+            return
+        if parsed.path == "/api/logout":
+            self._logout()
+            return
+        if not self._authenticated():
+            self._json({"status": "error", "message": "Unauthorized"}, 401)
+            return
 
         # Different endpoints have different payload size limits
         if parsed.path == "/api/settings":
@@ -114,6 +154,134 @@ class WebKlipHandler(BaseHTTPRequestHandler):
                 self._json({"status": "error", "message": str(e)}, 400)
         else:
             self._json({"status": "error", "message": "Not found"}, 404)
+
+    def _authenticated(self):
+        raw = self.headers.get("Cookie", "")
+        token = ""
+        for part in raw.split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == SESSION_COOKIE:
+                token = value
+                break
+        if not token:
+            return False
+        _, _, secret = _supabase_config()
+        try:
+            body = base64.urlsafe_b64decode(token.encode()).decode()
+            email, ts, sig = body.rsplit(":", 2)
+            age = __import__("time").time() - int(ts)
+        except Exception:
+            return False
+        expected = hmac.new(secret.encode(), f"{email}:{ts}".encode(), hashlib.sha256).hexdigest()
+        return "@" in email and 0 <= age <= SESSION_TTL and hmac.compare_digest(sig, expected)
+
+    def _login(self):
+        payload, err = self._payload(max_size=4096)
+        if err is not None:
+            self._json(err[0], err[1])
+            return
+        url, anon_key, secret = _supabase_config()
+        if not url or "YOUR_" in url or not anon_key or "YOUR_" in anon_key:
+            self._json({"status": "error", "message": "Supabase belum dikonfigurasi"}, 500)
+            return
+        email = str(payload.get("email", "")).strip()
+        password = str(payload.get("password", ""))
+        if not email or not password:
+            self._json({"status": "error", "message": "Email dan password wajib diisi"}, 400)
+            return
+        req = Request(
+            f"{url}/auth/v1/token?grant_type=password",
+            data=json.dumps({"email": email, "password": password}).encode(),
+            headers={"apikey": anon_key, "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urlopen(req, timeout=15) as res:
+                data = json.loads(res.read().decode())
+        except HTTPError as e:
+            try:
+                error_data = json.loads(e.read().decode())
+                message = error_data.get("msg") or error_data.get("message")
+            except Exception:
+                message = "Email/password salah atau Supabase gagal"
+            self._json({"status": "error", "message": message}, 401)
+            return
+        except Exception:
+            self._json({"status": "error", "message": "Supabase gagal dihubungi"}, 401)
+            return
+        token = _sign_session(data.get("user", {}).get("email") or email, secret)
+        self.send_response(200)
+        self._add_security_headers()
+        self.send_header("Set-Cookie", f"{SESSION_COOKIE}={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_TTL}")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b'{"status":"ok"}')
+
+    def _signup(self):
+        payload, err = self._payload(max_size=4096)
+        if err is not None:
+            self._json(err[0], err[1])
+            return
+        url, anon_key, _ = _supabase_config()
+        if not url or "YOUR_" in url or not anon_key or "YOUR_" in anon_key:
+            self._json({"status": "error", "message": "Supabase belum dikonfigurasi"}, 500)
+            return
+        email = str(payload.get("email", "")).strip()
+        password = str(payload.get("password", ""))
+        if not email or not password:
+            self._json({"status": "error", "message": "Email dan password wajib diisi"}, 400)
+            return
+        req = Request(
+            f"{url}/auth/v1/signup",
+            data=json.dumps({"email": email, "password": password}).encode(),
+            headers={"apikey": anon_key, "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urlopen(req, timeout=15) as res:
+                data = json.loads(res.read().decode())
+        except HTTPError as e:
+            try:
+                error_data = json.loads(e.read().decode())
+                message = error_data.get("msg") or error_data.get("message")
+            except Exception:
+                message = "Gagal daftar. Cek email/password atau pengaturan Supabase."
+            self._json({"status": "error", "message": message}, 400)
+            return
+        except Exception:
+            self._json({"status": "error", "message": "Gagal daftar. Cek koneksi atau pengaturan Supabase."}, 400)
+            return
+        token = _sign_session(data.get("user", {}).get("email") or email, _supabase_config()[2])
+        self.send_response(200)
+        self._add_security_headers()
+        self.send_header("Set-Cookie", f"{SESSION_COOKIE}={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_TTL}")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b'{"status":"ok"}')
+
+    def _logout(self):
+        self.send_response(200)
+        self._add_security_headers()
+        self.send_header("Set-Cookie", f"{SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b'{"status":"ok"}')
+
+    def _redirect_login(self):
+        self.send_response(302)
+        self._add_security_headers()
+        self.send_header("Location", "/login")
+        self.end_headers()
+
+    def _login_page(self):
+        raw = '''<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Masuk KlipKlop</title><script src="https://cdn.tailwindcss.com"></script></head><body class="min-h-dvh bg-[#182231] text-white antialiased"><main class="grid min-h-dvh lg:grid-cols-[1.05fr_.95fr]"><section class="hidden lg:flex flex-col justify-between border-r border-white/10 bg-[#111827] p-10"><div class="flex items-center gap-3 font-extrabold text-2xl"><img src="/logo%20klipklop.png?v=3" class="h-10 w-10 rounded-xl object-contain" alt="KlipKlop"><span>KlipKlop</span></div><div class="max-w-xl space-y-5"><p class="text-sm font-semibold text-[#f15a24]">Creator clipping workspace</p><h1 class="text-5xl font-extrabold tracking-tight leading-tight">Masuk, generate 1 klip terbaik, upload langsung.</h1><p class="text-lg leading-8 text-slate-300">Akun dipakai untuk mengamankan dashboard, riwayat upload, dan koneksi sosial.</p></div><p class="text-sm text-slate-500">KlipKlop Web</p></section><section class="flex items-center justify-center p-6"><div class="w-full max-w-sm rounded-2xl border border-white/10 bg-[#111827] p-5 shadow-2xl shadow-black/30"><div class="mb-7 lg:hidden flex items-center gap-3 font-extrabold text-xl"><img src="/logo%20klipklop.png?v=3" class="h-9 w-9 rounded-xl object-contain" alt="KlipKlop"><span>KlipKlop</span></div><div class="mb-6"><h2 id="title" class="text-2xl font-extrabold tracking-tight">Masuk</h2><p id="subtitle" class="mt-2 text-sm text-slate-300">Lanjutkan ke dashboard KlipKlop.</p></div><div class="mb-5 grid grid-cols-2 rounded-2xl bg-[#222b3b] p-1 text-sm font-bold"><button id="tab-login" class="rounded-xl bg-[#f15a24] px-3 py-2.5 text-white transition" type="button">Masuk</button><button id="tab-signup" class="rounded-xl px-3 py-2.5 text-slate-300 transition" type="button">Daftar</button></div><form id="form" class="space-y-4"><label class="block text-sm font-semibold text-slate-200" for="email">Email</label><input id="email" class="w-full rounded-2xl bg-[#222b3b] border border-[#3a4558] px-3.5 py-3 text-sm outline-none transition focus:border-[#f15a24] focus:ring-2 focus:ring-[#f15a24]/25" placeholder="nama@email.com" type="email" autocomplete="username" required><label class="block text-sm font-semibold text-slate-200" for="password">Password</label><input id="password" class="w-full rounded-2xl bg-[#222b3b] border border-[#3a4558] px-3.5 py-3 text-sm outline-none transition focus:border-[#f15a24] focus:ring-2 focus:ring-[#f15a24]/25" placeholder="Minimal 6 karakter" type="password" autocomplete="current-password" required><p id="err" class="min-h-5 text-sm text-red-300" role="alert"></p><button id="submit" class="w-full rounded-2xl bg-[#f15a24] py-3 font-bold text-white transition hover:bg-[#ff6a33] disabled:cursor-not-allowed disabled:opacity-60">Masuk</button></form></div></section></main><script>let mode='login';function setMode(next){mode=next;const isSignup=mode==='signup';title.textContent=isSignup?'Daftar':'Masuk';subtitle.textContent=isSignup?'Buat akun baru untuk akses dashboard.':'Lanjutkan ke dashboard KlipKlop.';submit.textContent=isSignup?'Buat akun':'Masuk';tab_login.className=isSignup?'rounded-xl px-3 py-2.5 text-slate-300 transition':'rounded-xl bg-[#f15a24] px-3 py-2.5 text-white transition';tab_signup.className=isSignup?'rounded-xl bg-[#f15a24] px-3 py-2.5 text-white transition':'rounded-xl px-3 py-2.5 text-slate-300 transition'}const tab_login=document.getElementById('tab-login'),tab_signup=document.getElementById('tab-signup');tab_login.onclick=()=>setMode('login');tab_signup.onclick=()=>setMode('signup');form.onsubmit=async e=>{e.preventDefault();const email=document.getElementById('email').value.trim();const password=document.getElementById('password').value;err.textContent='';submit.disabled=true;const r=await fetch(mode==='signup'?'/api/signup':'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});submit.disabled=false;if(r.ok) location.href='/'; else {const msg=(await r.json()).message||'Gagal';err.textContent=msg==='Email not confirmed'?'Email belum dikonfirmasi. Cek inbox Supabase atau matikan Confirm email.':msg}};</script></body></html>'''.encode("utf-8")
+        self.send_response(200)
+        self._add_security_headers()
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(raw)
 
     def _upload_youtube(self, payload):
         target = Path(str(payload.get("path", ""))).resolve()

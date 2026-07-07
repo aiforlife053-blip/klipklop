@@ -20,7 +20,7 @@
 18. Frontend: tambah helper activity log minimal, kirim ke backend.
 19. Backend: tambah endpoint activity log minimal, masuk ke log console.
 20. Verifikasi lint/typecheck/test sesuai command yang tersedia.
-21. Hosting security: proteksi app dengan Cloudflare Access.
-22. Cloudflare Access: hanya email pribadi yang boleh login.
-23. Cloudflare Access: lindungi seluruh domain dan semua `/api/*`.
-24. Dokumentasikan setup Cloudflare Tunnel/Access untuk deployment simpan dalam file cloudflare.md
+21. Hosting security: proteksi app dengan Supabase Auth.
+22. Supabase Auth: hanya akun terdaftar yang boleh login.
+23. Supabase Auth: lindungi dashboard dan semua `/api/*`.
+24. Dokumentasikan setup Supabase Auth jika deployment publik dipakai.

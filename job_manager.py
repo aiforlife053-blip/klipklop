@@ -55,16 +55,13 @@ class WebJobManager:
         with self._lock:
             if self.thread and self.thread.is_alive():
                 return {"status": "busy", "message": "Processing is already running"}
-        try:
-            num_clips = int(payload.get("num_clips", 3) or 3)
-        except (TypeError, ValueError):
-            num_clips = 3
-        num_clips = max(1, min(10, num_clips))
+        num_clips = 1
         add_captions = self._as_bool(payload.get("enable_captions", payload.get("add_captions", True)), True)
         add_hook = self._as_bool(payload.get("add_hook", False), False)
         subtitle_language = "id"
         instruction = str(payload.get("instruction", "")).strip()[:1000]
         landscape_blur = self._as_bool(payload.get("landscape_blur", self._config().config.get("landscape_blur", False)), False)
+        source_credit = self._as_bool(payload.get("source_credit", True), True)
         screen_size = str(payload.get("screen_size", "9:16") or "9:16")
         if screen_size not in {"9:16", "16:9"}:
             return {"status": "error", "message": "Unsupported screen size: only 9:16 and 16:9 are supported"}
@@ -87,9 +84,9 @@ class WebJobManager:
             self._add_log(f"Task {datetime.now().strftime('%d %b %Y %H:%M:%S')} | {url}", "Task")
             self._add_log("Job started")
             self._add_log(f"URL accepted: {url}")
-            self._add_log(f"Requested clips: {num_clips}, subtitles: {'on' if add_captions else 'off'}, language: {subtitle_language}, screen: {screen_size}, blur: {'on' if landscape_blur else 'off'}")
+            self._add_log(f"Requested clips: {num_clips}, subtitles: {'on' if add_captions else 'off'}, language: {subtitle_language}, screen: {screen_size}, blur: {'on' if landscape_blur else 'off'}, source credit: {'on' if source_credit else 'off'}")
             self._add_log(f"Subtitles: {'ON' if add_captions else 'OFF'}")
-            args = (url, num_clips, add_captions, add_hook, subtitle_language, instruction, landscape_blur, self._make_run_dir(url), screen_size)
+            args = (url, num_clips, add_captions, add_hook, subtitle_language, instruction, landscape_blur, self._make_run_dir(url), screen_size, source_credit)
             expected_args = self._run.__code__.co_argcount - int(hasattr(self._run, "__self__"))
             if expected_args == 6:
                 args = args[:6]
@@ -97,6 +94,8 @@ class WebJobManager:
                 args = args[:7]
             elif expected_args == 8:
                 args = args[:8]
+            elif expected_args == 9:
+                args = args[:9]
             self.thread = threading.Thread(
                 target=self._run,
                 args=args,
@@ -295,7 +294,7 @@ class WebJobManager:
                 clip_meta = [self._read_json(Path(file["path"]).with_name("data.json")) for file in clips]
                 title = next((item.get("source_title") for item in clip_meta if item.get("source_title")), "")
                 description = next((item.get("source_description") for item in clip_meta if item.get("source_description")), "")
-                items = [dict(file, title=(clip_meta[i].get("title") or file["name"]), description=(clip_meta[i].get("description") or ""), duration_seconds=clip_meta[i].get("duration_seconds")) for i, file in enumerate(clips)]
+                items = [dict(file, title=(clip_meta[i].get("title") or file["name"]), description=(clip_meta[i].get("description") or ""), duration_seconds=clip_meta[i].get("duration_seconds"), channel_name=clip_meta[i].get("channel_name", "")) for i, file in enumerate(clips)]
                 groups.append({
                     "name": folder.name,
                     "path": str(folder),
@@ -353,7 +352,7 @@ class WebJobManager:
         self.log_activity({"action": "queue_add", "detail": f"{len(valid_clips)} clip dari {target.name}"})
         return {"status": "saved"}
 
-    def _run(self, url, num_clips, add_captions, add_hook, subtitle_language, instruction, landscape_blur, run_dir, screen_size="9:16"):
+    def _run(self, url, num_clips, add_captions, add_hook, subtitle_language, instruction, landscape_blur, run_dir, screen_size="9:16", source_credit=True):
         try:
             self._sync_core_cookie_file()
             cfg = self._config().config
@@ -373,7 +372,7 @@ class WebJobManager:
                 temperature=cfg.get("temperature", 1.0),
                 system_prompt=prompt,
                 watermark_settings=cfg.get("watermark", {"enabled": False}),
-                credit_watermark_settings={"enabled": True, "position_x": 0.22, "position_y": 0.245, "opacity": 0.9},
+                credit_watermark_settings={"enabled": source_credit, "position_x": 0.06, "position_y": 0.23, "opacity": 0.95, "size": 0.032},
                 hook_style_settings=cfg.get("hook_style", {}),
                 face_tracking_mode=cfg.get("face_tracking_mode", "center"),
                 mediapipe_settings=cfg.get("mediapipe_settings", {}),
@@ -479,7 +478,8 @@ class WebJobManager:
         clips = [self._read_json(path) for path in sorted(run_dir.rglob("data.json"))]
         source_title = next((clip.get("source_title") for clip in clips if clip.get("source_title")), "")
         source_description = next((clip.get("source_description") for clip in clips if clip.get("source_description")), "")
-        return {"title": source_title or run_dir.name, "caption": source_description or f"{len(clips)} klip diekspor", "saved": False}
+        channel_name = next((clip.get("channel_name") for clip in clips if clip.get("channel_name")), "")
+        return {"title": source_title or run_dir.name, "caption": source_description or f"{len(clips)} klip diekspor", "channel_name": channel_name, "saved": False}
 
     def _thumbnail(self, files):
         video = next((file for file in files if file["name"].lower().endswith(".mp4")), None)

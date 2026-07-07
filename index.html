@@ -98,6 +98,117 @@
                 outline: 2px solid #f59e0b !important;
                 outline-offset: 2px;
             }
+            @media (max-width: 768px) {
+                body {
+                    height: auto !important;
+                    min-height: 100svh;
+                    overflow: auto !important;
+                    padding-bottom: 76px;
+                }
+                header {
+                    padding: 10px 14px !important;
+                }
+                header nav {
+                    position: fixed;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    z-index: 60;
+                    display: grid !important;
+                    grid-template-columns: repeat(6, minmax(0, 1fr));
+                    gap: 4px !important;
+                    padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+                    background: var(--panel);
+                    border-top: 1px solid var(--line);
+                }
+                header nav a {
+                    min-height: 44px;
+                    padding: 8px 4px !important;
+                    border-radius: 12px !important;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 11px !important;
+                    line-height: 1.1;
+                    text-align: center;
+                }
+                body > div,
+                main,
+                main > div,
+                #page-home,
+                #page-history,
+                #page-console,
+                #page-social,
+                #page-settings {
+                    height: auto !important;
+                    min-height: calc(100svh - 57px);
+                    overflow: visible !important;
+                }
+                #page-home {
+                    flex-direction: column !important;
+                    align-items: stretch !important;
+                }
+                #page-home > aside {
+                    width: 100% !important;
+                    height: auto !important;
+                    order: 1 !important;
+                    padding: 16px !important;
+                    border-right: 0 !important;
+                    border-bottom: 1px solid var(--line) !important;
+                    overflow: visible !important;
+                }
+                #page-home > section {
+                    order: 2 !important;
+                    min-height: 360px;
+                    height: auto !important;
+                    padding: 16px !important;
+                    border-left: 0 !important;
+                    overflow: visible !important;
+                }
+                #home-results-panel {
+                    max-width: none !important;
+                    padding: 28px 0 !important;
+                }
+                #page-history,
+                #page-console,
+                #page-social,
+                #page-settings {
+                    padding: 16px !important;
+                }
+                #page-settings .grid,
+                #page-social .grid {
+                    grid-template-columns: 1fr !important;
+                }
+                input,
+                select,
+                textarea,
+                button {
+                    min-height: 44px;
+                    font-size: 16px !important;
+                }
+                aside .grid.grid-cols-2,
+                aside .grid.grid-cols-3 {
+                    grid-template-columns: 1fr !important;
+                }
+                #process-button {
+                    min-height: 48px;
+                }
+                #show-json {
+                    min-width: 64px;
+                }
+                [data-session-files] {
+                    flex-direction: column !important;
+                    align-items: stretch !important;
+                }
+                [data-session-files] article,
+                #home-results-panel article {
+                    width: 100% !important;
+                    max-width: none !important;
+                }
+                video {
+                    max-height: 70svh;
+                }
+            }
         </style>
     </head>
     <body
@@ -152,6 +263,13 @@
                     class="px-3 py-2 rounded-xl text-gray-500 hover:bg-gray-50 hover:text-gray-900 transition"
                     >Pengaturan</a
                 >
+                <button
+                    id="logout-button"
+                    type="button"
+                    class="ml-2 min-h-11 rounded-xl border border-red-400/30 px-3 py-2 text-red-300 hover:bg-red-500/10 hover:text-red-200 transition"
+                >
+                    Keluar
+                </button>
             </nav>
         </header>
 
@@ -176,7 +294,7 @@
 
                         <div
                             id="home-results-panel"
-                            class="flex flex-col items-center justify-center py-10 text-center max-w-xl mx-auto w-full"
+                            class="flex flex-1 h-full flex-col items-center justify-center text-center max-w-xl mx-auto w-full"
                         >
                             <div
                                 class="w-14 h-14 bg-[#fff7ed] text-[#ea580c] rounded-2xl flex items-center justify-center mb-5"
@@ -199,14 +317,13 @@
                             <h3
                                 class="text-[19px] font-semibold text-black mb-2.5 tracking-tight"
                             >
-                                Siap Membuat Klip Viral Pertamamu?
+                                Siap Membuat Klip Viral Terbaik?
                             </h3>
                             <p
                                 class="text-[13px] text-gray-500 leading-relaxed max-w-md"
                             >
-                                Tempel link YouTube di atas, dan biarkan AI kami
-                                menemukan 3 momen emas terbaik dari videomu.
-                                Proses otomatis, hasil profesional.
+                                Tempel link YouTube di panel kiri. AI akan memilih
+                                1 momen dengan potensi viral tertinggi.
                             </p>
                         </div>
 
@@ -241,39 +358,26 @@
                                     </p>
                                 </div>
 
-                                <div class="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <label
-                                            class="block text-[12px] font-semibold text-black mb-1.5"
-                                            >Jumlah Klip</label
-                                        >
-                                        <select
-                                            id="num-clips"
-                                            class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-[13px] bg-white"
-                                        >
-                                            <option value="1">1 klip</option>
-                                            <option value="3" selected>
-                                                3 klip
-                                            </option>
-                                            <option value="5">5 klip</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label
-                                            class="block text-[12px] font-semibold text-black mb-1.5"
-                                            >Kualitas Video</label
-                                        >
-                                        <select
-                                            id="video-quality-main"
-                                            class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-[13px] bg-white"
-                                        >
-                                            <option value="480">480p</option>
-                                            <option value="720" selected>
-                                                720p
-                                            </option>
-                                            <option value="1080">1080p</option>
-                                        </select>
-                                    </div>
+                                <input id="num-clips" type="hidden" value="1" />
+
+                                <div>
+                                    <label
+                                        class="block text-[12px] font-semibold text-black mb-1.5"
+                                        >Kualitas Video</label
+                                    >
+                                    <select
+                                        id="video-quality-main"
+                                        class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-[13px] bg-white"
+                                    >
+                                        <option value="480">480p</option>
+                                        <option value="720" selected>
+                                            720p
+                                        </option>
+                                        <option value="1080">1080p</option>
+                                    </select>
+                                    <p class="text-[11px] text-gray-400 mt-1">
+                                        Sekali proses hanya menghasilkan 1 klip terbaik dengan potensi viral tertinggi.
+                                    </p>
                                 </div>
 
                                 <div>
@@ -504,7 +608,7 @@
                                 Riwayat Klip
                             </h2>
                             <p class="text-[13px] text-gray-500">
-                                Klip yang sudah dibuat dari folder output.
+                                Hanya klip yang sudah di-upload.
                             </p>
                         </div>
                         <div id="history-panel" class="space-y-3"></div>
@@ -1047,6 +1151,6 @@
                 </div>
             </div>
         </div>
-        <script src="static/app.js"></script>
+        <script src="static/app.js?v=20260708-8"></script>
     </body>
 </html>

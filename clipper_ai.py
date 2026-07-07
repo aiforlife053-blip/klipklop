@@ -348,6 +348,7 @@ Transcript:
             self.log(f"   AI returned too few segments within 10–120s.")
             self.log(f"   Consider adding user instruction with the desired topic.")
         
+        valid.sort(key=lambda h: float(h.get("virality_score", 0) or 0), reverse=True)
         return valid[:num_clips]
 
     def format_timestamp(self, seconds: float) -> str:

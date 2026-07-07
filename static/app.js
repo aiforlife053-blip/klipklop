@@ -281,13 +281,14 @@ function toggleProfileMenu() { const menu = $('profile-menu'); if (menu) menu.cl
 function startPayload(captionsOn = getChecked('captions', true)) {
   return {
     url: getValue('youtube-url'),
-    num_clips: Number(getValue('num-clips', '3') || 3),
+    num_clips: 1,
     add_captions: captionsOn,
     enable_captions: captionsOn,
     add_hook: getChecked('add-hook', false),
     screen_size: getScreenSize(),
     subtitle_language: getValue('subtitle-language', 'id'),
     landscape_blur: getChecked('landscape-blur', false),
+    source_credit: true,
     instruction: savedInstruction,
   };
 }
@@ -427,6 +428,11 @@ function renderLogLine(line) {
 }
 
 async function refreshLogPanel() { try { updateLogPanel(await api('/api/status')); } catch (error) { const lines = $('log-lines'); if (lines) lines.innerHTML = `<div class="text-red-300">[Error] ${escapeHtml(error.message)}</div>`; } }
+async function logout() {
+  await fetch('/api/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  location.href = '/login';
+}
+
 async function clearLogPanel() {
   const lines = $('log-lines');
   if (lines) lines.innerHTML = '<div class="text-gray-500">Belum ada log.</div>';
@@ -451,12 +457,9 @@ async function renderOutputs() {
   const homePanel = $('home-results-panel');
   let groups = [];
   try { groups = (await api('/api/outputs')).groups || []; } catch (error) { if (historyPanel) historyPanel.innerHTML = `<p class="text-[13px] text-red-500">${escapeHtml(error.message)}</p>`; return; }
-  const savedClips = groups.filter((group) => group.saved).flatMap((group) => {
-    const saved = new Set(group.saved_clips || []);
-    const clips = saved.size ? group.clips.filter((clip) => saved.has(clip.path)) : group.clips;
-    return clips.map((clip) => ({ ...clip, group }));
-  });
-  if (historyPanel) historyPanel.innerHTML = renderHistoryBoard(savedClips);
+  const states = uploadStates();
+  const uploadedClips = groups.flatMap((group) => (group.clips || []).map((clip) => ({ ...clip, group }))).filter((clip) => states[clip.path]?.status === 'success');
+  if (historyPanel) historyPanel.innerHTML = renderHistoryBoard(uploadedClips);
   if (!homePanel) return;
 
   if (processingActive) {
@@ -481,15 +484,16 @@ function renderEmptyHome() {
       <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
     </svg>
   </div>
-  <h3 class="text-[19px] font-semibold text-black mb-2.5 tracking-tight">Siap Membuat Klip Viral Pertamamu?</h3>
+  <h3 class="text-[19px] font-semibold text-black mb-2.5 tracking-tight">Siap Membuat Klip Viral Terbaik?</h3>
   <p class="text-[13px] text-gray-500 leading-relaxed max-w-md mx-auto">
-    Tempel link YouTube di atas, dan biarkan AI kami menemukan 3 momen emas terbaik dari videomu. Proses otomatis, hasil profesional.
+    Tempel link YouTube di panel kiri. AI akan memilih 1 momen dengan potensi viral tertinggi.
   </p>`;
 }
 
 function withPendingClips(group) { const saved = new Set(group.saved_clips || []); return { ...group, clips: (group.clips || []).filter((clip) => !saved.has(clip.path)) }; }
 function metaLine(group, count) { return `${count} klip tersedia | ${group.video_quality || '720'}p | ${group.landscape_blur ? 'Blur Background' : 'Crop'} | ${formatTime(group.timestamp)}`; }
 function clipDuration(clip) { return clip.duration_seconds ? `Durasi: ${Math.round(clip.duration_seconds)}s` : 'Durasi: -'; }
+function uploadDescription(clip, group) { const source = clip.channel_name || group.channel_name || ''; return `${clip.description || group.caption || ''}${source ? `\n\nsc: ${source}` : ''}`.trim(); }
 
 function uploadStates() { try { return JSON.parse(localStorage.getItem('youtubeUploadStates') || '{}'); } catch (_) { return {}; } }
 function saveUploadStates(states) { localStorage.setItem('youtubeUploadStates', JSON.stringify(states)); }
@@ -514,31 +518,14 @@ async function syncYoutubeDeleted() {
 }
 
 function renderHistoryBoard(clips) {
-  const states = uploadStates();
-  const queue = clips.filter((clip) => !['success', 'deleted', 'failed'].includes(states[clip.path]?.status));
-  const success = clips.filter((clip) => states[clip.path]?.status === 'success');
-  const failed = clips.filter((clip) => states[clip.path]?.status === 'failed');
-  const deleted = clips.filter((clip) => states[clip.path]?.status === 'deleted');
-  return `<div class="grid grid-cols-1 xl:grid-cols-4 gap-4">
-    ${renderHistoryColumn('Antrean', queue, 'text-orange-400')}
-    ${renderHistoryColumn('Berhasil', success, 'text-green-400')}
-    ${renderHistoryColumn('Gagal', failed, 'text-red-400')}
-    ${renderHistoryColumn('Terhapus', deleted, 'text-gray-400')}
-  </div>`;
-}
-
-function renderHistoryColumn(title, clips, colorClass) {
-  return `<section class="border border-gray-200 rounded-2xl p-4 min-h-[360px]">
-    <div class="flex items-center justify-between mb-3"><h3 class="font-semibold ${colorClass}">${title}</h3><span class="text-[12px] text-gray-400">${clips.length}</span></div>
-    <div class="flex flex-wrap gap-3">${clips.length ? clips.map(renderHistoryClip).join('') : '<p class="text-[13px] text-gray-500">Kosong</p>'}</div>
-  </section>`;
+  return clips.length ? `<div class="flex flex-wrap gap-3">${clips.map(renderHistoryClip).join('')}</div>` : '';
 }
 
 function renderHistoryClip(file) {
   const href = `/api/download?path=${encodeURIComponent(file.path)}`;
   const state = uploadStates()[file.path] || {};
   const label = state.status === 'uploading' ? 'Mengunggah...' : state.status === 'failed' ? 'Coba lagi' : state.status === 'success' ? 'Buka' : 'Unggah';
-  const deleteAttr = state.status === 'success' && state.video_id ? `data-youtube-delete="${escapeAttr(file.path)}" data-video-id="${escapeAttr(state.video_id)}"` : `data-delete-output="${escapeAttr(file.path)}" data-delete-kind="clip"`;
+  const deleteAttr = `data-delete-output="${escapeAttr(file.path)}" data-delete-kind="clip"`;
   const status = state.status === 'failed' ? `<p class="text-[10px] text-red-400 mt-1">${escapeHtml(state.error || 'Upload gagal')}</p>` : state.url ? `<a class="text-[10px] text-green-400 mt-1 truncate" href="${escapeAttr(state.url)}" target="_blank">${escapeHtml(state.url)}</a>` : '';
   return `<article class="bg-white border border-gray-200 rounded-xl p-2 flex flex-col w-full max-w-[210px] overflow-hidden">
     <button type="button" class="relative bg-gray-100 rounded-lg aspect-[4/3] overflow-hidden mb-2 cursor-zoom-in" data-video-open="${escapeAttr(href)}">
@@ -548,7 +535,7 @@ function renderHistoryClip(file) {
     <p class="text-[10px] text-gray-400 mb-2">${clipDuration(file)}</p>
     ${status}
     <div class="grid grid-cols-2 gap-1.5 mt-auto pt-2">
-      <button class="rounded-lg bg-[#ea580c] text-white py-1.5 text-[10px] font-semibold hover:bg-[#c2410c] transition" type="button" data-youtube-upload="${escapeAttr(file.path)}" data-youtube-url="${escapeAttr(state.url || '')}" data-title="${escapeAttr(file.title || file.name)}" data-description="${escapeAttr(file.description || file.group?.caption || '')}">${label}</button>
+      <button class="rounded-lg bg-[#ea580c] text-white py-1.5 text-[10px] font-semibold hover:bg-[#c2410c] transition" type="button" data-youtube-upload="${escapeAttr(file.path)}" data-youtube-url="${escapeAttr(state.url || '')}" data-title="${escapeAttr(file.title || file.name)}" data-description="${escapeAttr(uploadDescription(file, file.group || {}))}">${label}</button>
       <button class="rounded-lg bg-white border border-gray-200 py-1.5 text-[10px] font-semibold text-gray-900 hover:bg-gray-50 transition" type="button" ${deleteAttr}>Hapus</button>
     </div>
   </article>`;
@@ -572,7 +559,7 @@ function renderFileLink(file) {
       <p class="text-[11px] text-gray-400 mb-3 mt-auto">${clipDuration(file)}</p>
       <div class="grid grid-cols-3 gap-1.5">
         <a class="flex items-center justify-center rounded-lg bg-[#ea580c] hover:bg-[#c2410c] text-white py-2 text-[10px] font-semibold transition text-center" href="${href}" data-download-output="${escapeAttr(file.path)}">Unduh</a>
-        <button class="rounded-lg bg-white border border-gray-200 py-2 text-[10px] font-semibold text-gray-900 hover:bg-gray-50 transition" type="button" data-youtube-upload="${escapeAttr(file.path)}" data-title="${escapeAttr(file.title || file.name)}" data-description="">Upload YT</button>
+        <button class="rounded-lg bg-white border border-gray-200 py-2 text-[10px] font-semibold text-gray-900 hover:bg-gray-50 transition" type="button" data-youtube-upload="${escapeAttr(file.path)}" data-title="${escapeAttr(file.title || file.name)}" data-description="${escapeAttr(uploadDescription(file, file.group || {}))}">Upload YT</button>
         <button class="rounded-lg bg-white border border-gray-200 py-2 text-[10px] font-semibold text-gray-900 hover:bg-gray-50 transition" type="button" data-delete-output="${escapeAttr(file.path)}" data-delete-kind="clip">Hapus</button>
       </div>
     </div>
@@ -597,7 +584,7 @@ function renderExportCard(group, clip, index = 0) {
       <p class="text-[12px] text-gray-500 mb-2 leading-relaxed whitespace-normal break-words overflow-hidden" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${escapeHtml(clip.description || group.caption)}</p>
       <p class="text-[11px] text-gray-400 mb-3 mt-auto">${clipDuration(clip)}</p>
       <div class="grid grid-cols-2 gap-1.5">
-        <button class="rounded-lg bg-[#ea580c] text-white py-2 text-[10px] font-semibold hover:bg-[#c2410c] transition" type="button" data-save-output="${escapeAttr(group.path)}" data-save-one="${escapeAttr(clip.path)}">Tambah ke Queue</button>
+        <button class="rounded-lg bg-[#ea580c] text-white py-2 text-[10px] font-semibold hover:bg-[#c2410c] transition" type="button" data-youtube-upload="${escapeAttr(clip.path)}" data-save-session="${escapeAttr(group.path)}" data-save-one="${escapeAttr(clip.path)}" data-title="${escapeAttr(clip.title || `Klip ${index + 1}`)}" data-description="${escapeAttr(uploadDescription(clip, group))}">Upload YT</button>
         <button class="rounded-lg bg-white border border-gray-200 py-2 text-[10px] font-semibold text-gray-900 hover:bg-gray-50 transition" type="button" data-delete-output="${escapeAttr(clip.path)}" data-delete-kind="clip">Hapus</button>
       </div>
     </div>
@@ -610,6 +597,7 @@ async function uploadYoutube(button) {
   if (!(await confirmDelete('Upload klip ini ke YouTube sebagai private?'))) return;
   setUploadState(path, { status: 'uploading', error: '', url: '' });
   try {
+    if (button.dataset.saveSession) await api('/api/save', { method: 'POST', body: JSON.stringify({ path: button.dataset.saveSession, clips: [button.dataset.saveOne || path] }) });
     const data = await api('/api/social/youtube/upload', { method: 'POST', body: JSON.stringify({ path, title: button.dataset.title, description: button.dataset.description, privacy: 'private' }) });
     setUploadState(path, { status: 'success', video_id: data.video_id, url: data.url, error: '' });
     logActivity('youtube_upload', data.video_id || path);
@@ -624,7 +612,7 @@ async function uploadYoutube(button) {
 async function deleteYoutube(button) {
   const path = button.dataset.youtubeDelete;
   const videoId = button.dataset.videoId;
-  if (!path || !videoId || !(await confirmDelete('Video YouTube dan klip lokal ini akan masuk panel Terhapus.'))) return;
+  if (!path || !videoId || !(await confirmDelete('Video YouTube dan klip lokal ini akan dihapus dari riwayat.'))) return;
   try {
     await api('/api/social/youtube/delete', { method: 'POST', body: JSON.stringify({ video_id: videoId }) });
     setUploadState(path, { ...(uploadStates()[path] || {}), status: 'deleted' });
@@ -713,7 +701,7 @@ function closeModal(id) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  const save = $('save-settings'); const showJson = $('show-json'); const jsonClose = $('json-close'); const videoClose = $('video-modal-close'); const clearKey = $('clear-api-key'); const start = $('process-button'); const profile = $('profile-button'); const logClear = $('log-clear'); const instruction = $('instruction'); const instructionSave = $('instruction-save'); const instructionCancel = $('instruction-cancel'); const qualityMain = $('video-quality-main'); const qualitySettings = $('video-quality'); const blur = $('landscape-blur');
+  const save = $('save-settings'); const showJson = $('show-json'); const jsonClose = $('json-close'); const videoClose = $('video-modal-close'); const clearKey = $('clear-api-key'); const start = $('process-button'); const profile = $('profile-button'); const logoutButton = $('logout-button'); const logClear = $('log-clear'); const instruction = $('instruction'); const instructionSave = $('instruction-save'); const instructionCancel = $('instruction-cancel'); const qualityMain = $('video-quality-main'); const qualitySettings = $('video-quality'); const blur = $('landscape-blur');
   if (save) save.addEventListener('click', saveSettings);
   if (showJson) showJson.addEventListener('click', showPayloadJson);
   if (jsonClose) jsonClose.addEventListener('click', () => $('json-modal')?.classList.add('hidden'));
@@ -721,6 +709,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (clearKey) clearKey.addEventListener('click', clearApiKey);
   if (start) start.addEventListener('click', startProcessing);
   if (profile) profile.addEventListener('click', toggleProfileMenu);
+  if (logoutButton) logoutButton.addEventListener('click', logout);
   if (logClear) logClear.addEventListener('click', clearLogPanel);
   if (instruction) instruction.addEventListener('input', updateInstructionCount);
   if (instructionSave) instructionSave.addEventListener('click', saveInstruction);

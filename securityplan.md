@@ -20,7 +20,7 @@ Temuan cepat:
 Jangan host app ini langsung seperti sekarang.
 
 Target aman minimum:
-1. Tetap private via VPN/Tailscale/Cloudflare Access, atau
+1. Tetap private via VPN/Tailscale, atau
 2. Jika public internet wajib: tambah auth kuat, CSRF, rate limit, secret vault, job isolation, storage boundary, reverse proxy, monitoring.
 
 ## Threat model
@@ -95,7 +95,7 @@ Target aman minimum:
    - `SameSite=Lax` atau `Strict`
    - short idle timeout
 3. Password hash pakai stdlib tidak cukup; gunakan Argon2/bcrypt jika dependency sudah ada, kalau belum pakai external auth/reverse proxy lebih sederhana.
-4. Untuk paling cepat dan aman: pakai Cloudflare Access/Tailscale, app tetap tanpa public auth internal.
+4. Untuk paling cepat dan aman: pakai Tailscale atau Supabase Auth internal.
 5. Jika auth internal dibuat: tambah logout, session rotation, brute-force lockout.
 
 ### P2 - CSRF & headers
@@ -237,7 +237,7 @@ Best personal setup:
 
 1. Keep app bound to `127.0.0.1`.
 2. Access remotely using Tailscale/ZeroTier/WireGuard.
-3. If browser access via domain needed, put Cloudflare Access in front and still bind app privately.
+3. If browser access via domain needed, require Supabase Auth and still bind app privately when possible.
 4. Do not public-port-forward this app.
 
 ## Files to audit next

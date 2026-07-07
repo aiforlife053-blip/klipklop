@@ -708,7 +708,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             for chunk in chunks:
                 for active_index, active_word in enumerate(chunk):
                     text = ' '.join(
-                        f"{{\\c&H000000&\\3c&H00FFFF&\\bord10}}{item['text']}{{\\r}}" if i == active_index else item['text']
+                        f"{{\\c&H000000&\\3c&H00FFFF&\\bord5}}{item['text']}{{\\r}}" if i == active_index else item['text']
                         for i, item in enumerate(chunk)
                     )
                     events.append({
@@ -1316,7 +1316,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         pos_y = self.credit_watermark_settings.get("position_y", 0.95)
         opacity = self.credit_watermark_settings.get("opacity", 0.7)
         
-        font_size = int((getattr(self, "subtitle_style", {}) or {}).get("size") or video_height * size)
+        font_size = max(22, int(video_height * size))
         
         # Calculate position in pixels
         x_pixels = int(pos_x * video_width)
@@ -1350,9 +1350,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f"text='{credit_text_escaped}':"
                 f"fontsize={font_size}:"
                 f"fontcolor=white@{opacity}:"
-                f"borderw=2:"
-                f"bordercolor=black@{opacity}:"
-                f"x={x_pixels}-(text_w/2):"
+                f"borderw=3:"
+                f"bordercolor=black@0.75:"
+                f"x={x_pixels}:"
                 f"y={y_pixels}-(text_h/2)"
             )
         else:
@@ -1361,9 +1361,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f"drawtext=text='{credit_text_escaped}':"
                 f"fontsize={font_size}:"
                 f"fontcolor=white@{opacity}:"
-                f"borderw=2:"
-                f"bordercolor=black@{opacity}:"
-                f"x={x_pixels}-(text_w/2):"
+                f"borderw=3:"
+                f"bordercolor=black@0.75:"
+                f"x={x_pixels}:"
                 f"y={y_pixels}-(text_h/2)"
             )
         
