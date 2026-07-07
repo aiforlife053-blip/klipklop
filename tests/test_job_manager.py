@@ -2,6 +2,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "job_manager.py"
@@ -9,6 +10,8 @@ spec = importlib.util.spec_from_file_location("web_klip_job_manager", MODULE)
 mod = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = mod
 spec.loader.exec_module(mod)
+from clipper_core import AutoClipperCore
+from clipper_export import ExportMixin
 
 
 def test_rejects_empty_url(tmp_path):
@@ -16,6 +19,12 @@ def test_rejects_empty_url(tmp_path):
     result = manager.start({"url": ""})
     assert result["status"] == "error"
     assert "url" in result["message"].lower()
+
+
+def test_rejects_non_dict_start_payload(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    result = manager.start(None)
+    assert result["status"] == "error"
 
 
 def test_rejects_api_captions_without_caption_key(tmp_path):
@@ -29,7 +38,7 @@ def test_rejects_api_captions_without_caption_key(tmp_path):
 def test_rejects_unsupported_screen_size(tmp_path):
     manager = mod.WebJobManager(app_dir=tmp_path)
     result = manager.start({"url": "https://www.youtube.com/watch?v=abc", "screen_size": "1:1"})
-    assert result == {"status": "error", "message": "Unsupported screen size: only 9:16 is supported"}
+    assert result == {"status": "error", "message": "Unsupported screen size: only 9:16 and 16:9 are supported"}
 
 
 def test_rejects_when_busy(tmp_path):
@@ -214,6 +223,31 @@ def test_youtube_url_alias_starts_job(tmp_path):
     assert manager.captured["url"] == "https://www.youtube.com/watch?v=abc"
 
 
+def test_sixteen_by_nine_screen_size_is_supported(tmp_path):
+    manager = InstantJobManager(app_dir=tmp_path)
+    result = manager.start({"url": "https://www.youtube.com/watch?v=abc", "add_captions": False, "screen_size": "16:9"})
+    thread = manager.thread
+    if thread:
+        thread.join(1)
+    assert result == {"status": "started"}
+
+
+class LegacySevenArgJobManager(mod.WebJobManager):
+    def _run(self, url, num_clips, add_captions, add_hook, subtitle_language, instruction, landscape_blur):
+        self.captured = {"landscape_blur": landscape_blur}
+        self.thread = None
+
+
+def test_legacy_seven_arg_run_gets_landscape_blur(tmp_path):
+    manager = LegacySevenArgJobManager(app_dir=tmp_path)
+    result = manager.start({"url": "https://www.youtube.com/watch?v=abc", "add_captions": False, "landscape_blur": True})
+    thread = manager.thread
+    if thread:
+        thread.join(1)
+    assert result == {"status": "started"}
+    assert manager.captured["landscape_blur"] is True
+
+
 def test_nested_provider_settings_are_supported(tmp_path):
     manager = mod.WebJobManager(app_dir=tmp_path)
     result = manager.save_settings({
@@ -232,6 +266,93 @@ def test_cookie_exists_top_level_flag(tmp_path):
     assert manager.get_settings()["cookie_exists"] is False
     manager.save_cookies("SID=abc")
     assert manager.get_settings()["cookie_exists"] is True
+
+
+def test_save_output_accepts_empty_clips_payload(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    run = tmp_path / "output" / "run"
+    run.mkdir(parents=True)
+    result = manager.save_output({"path": str(run), "clips": None})
+    assert result["status"] == "saved"
+
+
+def test_save_output_ignores_clips_outside_session(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    run = tmp_path / "output" / "run"
+    run.mkdir(parents=True)
+    outside = tmp_path / "output" / "other" / "master.mp4"
+    outside.parent.mkdir()
+    outside.write_bytes(b"x")
+    result = manager.save_output({"path": str(run), "clips": [str(outside)]})
+    meta = json.loads((run / "run.json").read_text(encoding="utf-8"))
+    assert result["status"] == "saved"
+    assert meta["saved_clips"] == []
+
+
+class SubtitleHarness(ExportMixin):
+    subtitle_style = {"font": "Arial", "size": 60, "bottom_margin": 300}
+    landscape_blur = False
+
+    def format_time(self, seconds):
+        centiseconds = int(round(seconds * 100))
+        h, rem = divmod(centiseconds, 360000)
+        m, rem = divmod(rem, 6000)
+        s, cs = divmod(rem, 100)
+        return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+
+def test_ass_subtitle_groups_words_in_dynamic_chunks(tmp_path):
+    words = [SimpleNamespace(word=f"w{i}", start=i * 0.2, end=i * 0.2 + 0.1) for i in range(7)]
+    output = tmp_path / "sub.ass"
+    count = SubtitleHarness().create_ass_subtitle_capcut(SimpleNamespace(words=words), str(output))
+    text = output.read_text(encoding="utf-8")
+    assert count == 2
+    assert "w0 w1 w2 w3" in text
+    assert "w4 w5 w6" in text
+
+
+class NoSubtitleCore(AutoClipperCore):
+    def __init__(self):
+        self.output_dir = "out"
+
+    def set_progress(self, stage, progress):
+        pass
+
+    def is_cancelled(self):
+        return False
+
+    def download_subtitle_only(self, url):
+        return None, {"title": "video"}
+
+    def download_video_only(self, url):
+        self.downloaded = getattr(self, "downloaded", 0) + 1
+        return "source.mp4"
+
+    def transcribe_full_video_local(self, source_path):
+        self.transcribed = source_path
+        return "[00:00:00,000 - 00:00:03,000] halo indonesia"
+
+    def find_highlights(self, transcript, video_info, num_clips):
+        self.highlight_transcript = transcript
+        return [{"start_time": "00:00:00,000", "end_time": "00:00:03,000"}]
+
+    def process_clip(self, source_path, highlight, index, total_clips, add_captions=True, add_hook=True, pre_cut=False):
+        self.processed = source_path
+
+    def cleanup(self):
+        self.cleaned = True
+
+    def log(self, message):
+        pass
+
+
+def test_process_falls_back_to_local_whisper_when_indonesian_subtitle_missing(tmp_path):
+    core = NoSubtitleCore()
+    core.process("https://www.youtube.com/watch?v=abc", num_clips=1)
+    assert core.transcribed == "source.mp4"
+    assert core.highlight_transcript == "[00:00:00,000 - 00:00:03,000] halo indonesia"
+    assert core.downloaded == 1
+    assert core.processed == "source.mp4"
 
 
 if __name__ == "__main__":

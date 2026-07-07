@@ -54,6 +54,7 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         subtitle_language: str = "id",
         video_quality: str = "720",
         landscape_blur: bool = False,
+        screen_size: str = "9:16",
         subtitle_style: dict = None,
         subtitle_engine: str = "local",
         local_whisper: dict = None,
@@ -109,14 +110,16 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
             "min_shot_duration": 90,
             "center_weight": 0.3,
         }
-        self.subtitle_language = subtitle_language
+        self.subtitle_language = "id"
         self.video_quality = str(video_quality or "720")
         self.landscape_blur = bool(landscape_blur)
+        self.screen_size = "16:9" if str(screen_size) == "16:9" else "9:16"
         self.subtitle_style = subtitle_style or {"font": "Plus Jakarta Sans", "size": 65, "bottom_margin": 400}
         self.subtitle_engine = subtitle_engine or "local"
         self.local_whisper = local_whisper or {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"}
         self._local_whisper_model = None
-        self.output_resolution = {"480": "540:960", "720": "720:1280", "1080": "1080:1920"}.get(self.video_quality, "720:1280")
+        resolutions = {"16:9": {"480": "854:480", "720": "1280:720", "1080": "1920:1080"}, "9:16": {"480": "540:960", "720": "720:1280", "1080": "1080:1920"}}
+        self.output_resolution = resolutions[self.screen_size].get(self.video_quality, resolutions[self.screen_size]["720"])
         self.log = log_callback or print
         self.set_progress = progress_callback or (lambda s, p: None)
         self.report_tokens = token_callback or (lambda gi, go, w, t: None)
@@ -135,21 +138,22 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         self.channel_name = video_info.get("channel", "") if video_info else ""
         if self.is_cancelled():
             return
+        source_path = ""
         if not srt_path:
-            raise SubtitleNotFoundError(
-                f"No subtitle available for language: {self.subtitle_language.upper()}",
-                video_path="",
-                video_info=video_info,
-            )
+            self.set_progress("Subtitle tidak ditemukan, download video untuk transkripsi lokal...", 0.18)
+            source_path = self.download_video_only(url)
+            transcript = self.transcribe_full_video_local(source_path)
+        else:
+            transcript = self.parse_srt(srt_path)
         self.set_progress("Finding highlights...", 0.3)
-        transcript = self.parse_srt(srt_path)
         highlights = self.find_highlights(transcript, video_info, num_clips)
         if self.is_cancelled():
             return
         if not highlights:
             raise Exception("No valid highlights found!")
-        self.set_progress("Downloading source video/audio once...", 0.32)
-        source_path = self.download_video_only(url)
+        if not source_path:
+            self.set_progress("Downloading source video/audio once...", 0.32)
+            source_path = self.download_video_only(url)
         total_clips = len(highlights)
         for i, highlight in enumerate(highlights, 1):
             if self.is_cancelled():

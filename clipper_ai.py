@@ -651,6 +651,38 @@ Transcript:
         
         return transcript
 
+    def transcribe_full_video_local(self, video_path: str) -> str:
+        self.log("[AI Transcription] Subtitle tidak ditemukan, transcribing lokal faster-whisper...")
+        audio_file = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
+        cmd = [
+            self.ffmpeg_path, "-y",
+            "-i", video_path,
+            "-vn",
+            "-acodec", "libmp3lame",
+            "-ar", "16000",
+            "-ac", "1",
+            "-b:a", "64k",
+            audio_file
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
+        if result.returncode != 0:
+            if os.path.exists(audio_file):
+                os.unlink(audio_file)
+            raise Exception(f"Failed to extract audio for local transcription:\n{result.stderr[:200]}")
+        try:
+            transcript = self._whisper_transcribe_words_local(audio_file)
+        finally:
+            if os.path.exists(audio_file):
+                os.unlink(audio_file)
+        lines = []
+        for segment in getattr(transcript, "segments", []) or []:
+            text = str(segment.get("text", "")).strip()
+            if text:
+                lines.append(f"[{self._seconds_to_srt_timestamp(segment.get('start', 0))} - {self._seconds_to_srt_timestamp(segment.get('end', 0))}] {text}")
+        if not lines:
+            raise Exception("Local faster-whisper returned empty transcription. Video may have no speech.")
+        return "\n".join(lines)
+
     def _whisper_transcribe_file(self, audio_path: str, time_offset: float = 0) -> list:
         """Transcribe a single audio file with Whisper API.
         
@@ -683,8 +715,7 @@ Transcript:
             "model": self.whisper_model,
             "response_format": "verbose_json",
         }
-        if self.subtitle_language and self.subtitle_language != "none":
-            form_data["language"] = self.subtitle_language
+        form_data["language"] = "id"
         
         # Run API call in a thread so we can log heartbeat while waiting
         response_data = None
@@ -779,7 +810,7 @@ Transcript:
         url = f"{base_url}/audio/transcriptions"
         headers = {"Authorization": f"Bearer {api_key}"}
 
-        lang = getattr(self, "subtitle_language", None) or "id"
+        lang = "id"
 
         # Compress WAV → MP3 to reduce upload size (proxy rejects large bodies)
         upload_path = audio_path
@@ -889,8 +920,8 @@ Transcript:
         if self._local_whisper_model is None:
             self.log(f"  Using local faster-whisper: {model_name}/{device}/{compute_type}")
             self._local_whisper_model = WhisperModel(model_name, device=device, compute_type=compute_type)
-        lang = getattr(self, "subtitle_language", None) or "id"
-        segments_iter, info = self._local_whisper_model.transcribe(audio_path, language=None if lang == "auto" else lang, word_timestamps=True)
+        lang = "id"
+        segments_iter, info = self._local_whisper_model.transcribe(audio_path, language=lang, word_timestamps=True)
         raw_segments = list(segments_iter)
         words = []
         segments = []

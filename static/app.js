@@ -69,7 +69,7 @@ function initCustomSelects() {
         optBtn.type = 'button';
         const isSelected = opt.value === select.value;
         optBtn.className = `w-full px-3 py-2 rounded-lg text-left text-[13px] transition font-medium ` + 
-          (isSelected ? `bg-orange-50 text-[#ea580c]` : `text-gray-700 hover:bg-gray-55/40`);
+          (isSelected ? `bg-orange-50 text-[#ea580c]` : `text-gray-700 hover:bg-gray-50`);
         optBtn.textContent = opt.textContent;
         optBtn.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -263,11 +263,13 @@ async function clearApiKey() {
 
 function getScreenSize() { const selected = document.querySelector('input[name="screen_size"]:checked'); return selected ? selected.value : '9:16'; }
 function setScreenSize(value) {
+  if (!['9:16', '16:9'].includes(value)) value = '9:16';
   document.querySelectorAll('[data-screen-card]').forEach((card) => {
     const selected = card.dataset.screenCard === value;
     const title = card.querySelector('span:first-of-type');
     const subtitle = card.querySelector('span:last-of-type');
-    card.className = selected ? 'border border-orange-600 bg-orange-50/30 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer text-center transition' : 'border border-gray-200 hover:border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer text-center transition';
+    const supported = ['9:16', '16:9'].includes(card.dataset.screenCard);
+    card.className = selected ? 'border border-orange-600 bg-orange-50/30 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer text-center transition' : `border border-gray-200 rounded-xl p-3 flex flex-col items-center justify-center text-center transition ${supported ? 'hover:border-gray-300 cursor-pointer' : 'opacity-50 cursor-not-allowed'}`;
     if (title) title.className = selected ? 'text-[14px] font-semibold text-orange-600 block' : 'text-[14px] font-semibold text-gray-700 block';
     if (subtitle) subtitle.className = selected ? 'text-[11px] text-orange-500' : 'text-[11px] text-gray-400';
     const input = card.querySelector('input');
@@ -330,7 +332,7 @@ async function pollStatus() {
       setText('status-text', 'Gagal');
       updateCompactStatus('Gagal');
     } else {
-      processingActive = (data.status === 'started' || data.status === 'processing');
+      processingActive = ['started', 'processing', 'running'].includes(data.status);
       const rawMsg = data.error || data.message || data.status;
       const message = cleanStatusText(rawMsg);
       
@@ -346,7 +348,7 @@ async function pollStatus() {
         if (homePanel) {
           const loaderPct = homePanel.querySelector('.loader-percentage');
           if (!loaderPct) {
-            homePanel.className = 'flex flex-col items-center justify-center py-10 text-center max-w-xl mx-auto w-full';
+            homePanel.className = 'flex h-full flex-col items-center justify-center text-center max-w-xl mx-auto w-full';
             homePanel.innerHTML = renderProcessingLoader(data.progress || 0, message);
           } else {
             loaderPct.textContent = `${progressPct}%`;
@@ -458,7 +460,7 @@ async function renderOutputs() {
   if (!homePanel) return;
   
   if (processingActive) {
-    homePanel.className = 'flex flex-1 flex-col items-center justify-center text-center max-w-xl mx-auto w-full';
+    homePanel.className = 'flex h-full flex-col items-center justify-center text-center max-w-xl mx-auto w-full';
     homePanel.innerHTML = renderProcessingLoader(0, 'Menyiapkan AI...');
     return;
   }
@@ -468,7 +470,7 @@ async function renderOutputs() {
     homePanel.className = 'space-y-5 w-full';
     homePanel.innerHTML = pendingGroups.map(renderExportSession).join('');
   } else {
-    homePanel.className = 'flex flex-1 flex-col items-center justify-center text-center max-w-xl mx-auto w-full';
+    homePanel.className = 'flex h-full flex-col items-center justify-center text-center max-w-xl mx-auto w-full';
     homePanel.innerHTML = renderEmptyHome();
   }
 }
@@ -493,27 +495,27 @@ function renderSessionRow(group) {
   const saved = new Set(group.saved_clips || []);
   const allClips = group.clips && group.clips.length ? group.clips : group.files || [];
   const clips = saved.size ? allClips.filter((clip) => saved.has(clip.path)) : allClips;
-  return `<article class="border border-gray-200 rounded-2xl p-4 hover:bg-gray-50 transition-colors mb-3"><div class="flex items-start gap-4"><button class="text-left flex-1 min-w-0" type="button" data-session-toggle="${escapeAttr(group.path)}"><h3 class="font-semibold text-[16px] text-black truncate">${escapeHtml(group.title)}</h3><p class="text-[12px] text-gray-400">${clips.length} klip tersimpan | ${escapeHtml(group.video_quality || '720')}p | ${formatTime(group.timestamp)}</p></button><button class="rounded-xl bg-white border border-gray-200 px-3 py-2 text-[12px] font-semibold text-gray-900 hover:bg-gray-50" type="button" data-delete-output="${escapeAttr(group.path)}" data-delete-kind="session">Hapus Session</button></div><div class="hidden mt-4 flex flex-wrap gap-4 justify-center" data-session-files="${escapeAttr(group.path)}">${clips.map(renderFileLink).join('')}</div></article>`;
+  return `<article class="border border-gray-200 rounded-2xl p-4 hover:bg-gray-50 transition-colors mb-3"><button class="text-left w-full min-w-0" type="button" data-session-toggle="${escapeAttr(group.path)}"><h3 class="font-semibold text-[16px] text-black truncate">${escapeHtml(group.title)}</h3><p class="text-[12px] text-gray-400">${clips.length} klip tersimpan | ${escapeHtml(group.video_quality || '720')}p | ${formatTime(group.timestamp)}</p></button><div class="hidden mt-4 flex flex-wrap gap-4 justify-center" data-session-files="${escapeAttr(group.path)}">${clips.map(renderFileLink).join('')}</div></article>`;
 }
 
 function renderFileLink(file) {
   const href = `/api/download?path=${encodeURIComponent(file.path)}`;
-  return `<div class="border border-gray-100 rounded-xl p-3 bg-white flex flex-col justify-between h-full w-[280px] shrink-0">
-    <div class="relative bg-gray-100 rounded-lg aspect-[9/16] overflow-hidden mb-3">
-      <video class="w-full h-full object-cover" src="${href}" controls preload="metadata"></video>
+  return `<article class="bg-white border border-gray-200 rounded-xl p-3 flex flex-col w-[260px] shrink-0 overflow-hidden">
+    <button type="button" class="relative bg-gray-100 rounded-lg aspect-[4/3] overflow-hidden mb-2 cursor-zoom-in" data-video-open="${escapeAttr(href)}">
+      <video class="w-full h-full object-cover pointer-events-none" src="${href}" muted preload="metadata"></video>
+    </button>
+    <div class="flex flex-col flex-1 min-h-0">
+      <h3 class="font-semibold text-[13px] leading-snug text-gray-950 mb-1 whitespace-normal break-words">${escapeHtml(file.title || file.name)}</h3>
+      <p class="text-[11px] text-gray-400 mb-3 mt-auto">${clipDuration(file)}</p>
+      <a class="flex items-center justify-center rounded-lg bg-[#ea580c] hover:bg-[#c2410c] text-white py-2 text-[10px] font-semibold transition text-center" href="${href}">Download</a>
     </div>
-    <div class="flex flex-col flex-1">
-      <div class="font-semibold text-[14px] text-black truncate pr-3 mb-1">${escapeHtml(file.title || file.name)}</div>
-      <div class="text-[12px] text-gray-400 mb-3">${clipDuration(file)}</div>
-      <a class="flex items-center justify-center rounded-xl bg-[#ea580c] hover:bg-[#c2410c] text-white py-2 text-[12px] font-semibold mt-auto transition text-center" href="${href}">Download</a>
-    </div>
-  </div>`;
+  </article>`;
 }
 
 function renderExportSession(group) {
   const clips = group.clips || [];
   const status = $('compact-status')?.innerHTML || 'Status: Idle<br>Clip: - | Quality: 480p | Mode: Blur';
-  return `<section class="border border-gray-200 p-4 bg-white w-full max-w-full min-h-[calc(100vh-85px)] overflow-hidden flex flex-col"><div class="mb-6"><h2 class="text-[20px] font-semibold text-black mb-0.5 tracking-tight">Hasil Klip</h2><p class="text-[13px] text-gray-500">Lihat klip yang sudah jadi dan pantau progress yang sedang diproses.</p></div><div class="flex flex-col gap-3 mb-4"><div class="min-w-0"><h3 class="font-semibold text-[16px] leading-snug text-gray-950 whitespace-normal break-words max-w-4xl">${escapeHtml(group.title)}</h3><p class="text-[12px] text-gray-500 whitespace-normal break-words mt-1">${escapeHtml(metaLine(group, clips.length))}</p></div><div class="flex flex-wrap gap-2"><button class="rounded-lg bg-[#ea580c] text-white px-3 py-2 text-[12px] font-semibold hover:bg-[#c2410c]" type="button" data-save-output="${escapeAttr(group.path)}">Simpan yang dipilih</button><button class="rounded-lg bg-white border border-gray-200 text-gray-900 px-3 py-2 text-[12px] font-semibold hover:bg-gray-50" type="button" data-delete-output="${escapeAttr(group.path)}" data-delete-kind="session">Hapus Session</button></div></div><div class="flex flex-wrap gap-4 justify-center">${clips.map((clip, index) => renderExportCard(group, clip, index)).join('')}</div><div class="text-[13px] text-gray-500 mt-auto pt-6">${status}</div></section>`;
+  return `<section class="border-0 p-6 bg-transparent w-full max-w-full h-full overflow-hidden flex flex-col"><div class="mb-6"><h2 class="text-[20px] font-semibold text-black mb-0.5 tracking-tight">Hasil Klip</h2><p class="text-[13px] text-gray-500">Lihat klip yang sudah jadi dan pantau progress yang sedang diproses.</p></div><div class="flex flex-wrap gap-4 justify-center">${clips.map((clip, index) => renderExportCard(group, clip, index)).join('')}</div><div class="mt-4 text-center"><h3 class="font-semibold text-[16px] leading-snug text-gray-950 whitespace-normal break-words">${escapeHtml(group.title)}</h3><p class="text-[12px] text-gray-500 whitespace-normal break-words mt-1">${escapeHtml(metaLine(group, clips.length))}</p></div><div class="text-[13px] text-gray-500 mt-auto pt-6">${status}</div></section>`;
 }
 
 function renderExportCard(group, clip, index = 0) {
@@ -524,9 +526,6 @@ function renderExportCard(group, clip, index = 0) {
       <video class="w-full h-full object-cover pointer-events-none" src="${href}" muted preload="metadata"></video>
     </button>
     <div class="flex flex-col flex-1 min-h-0">
-      <label class="flex items-center gap-2 text-[11px] font-semibold text-gray-600 mb-2">
-        <input type="checkbox" class="clip-select" data-clip-path="${escapeAttr(clip.path)}" data-session-path="${escapeAttr(group.path)}" checked> Pilih klip ${index + 1}
-      </label>
       <h3 class="font-semibold text-[13px] leading-snug text-gray-950 mb-1 whitespace-normal break-words">${escapeHtml(clip.title || `Klip ${index + 1}`)}</h3>
       <p class="text-[12px] text-gray-500 mb-2 leading-relaxed whitespace-normal break-words overflow-hidden" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${escapeHtml(clip.description || group.caption)}</p>
       <p class="text-[11px] text-gray-400 mb-3 mt-auto">${clipDuration(clip)}</p>
@@ -573,14 +572,7 @@ function showPage(name) {
   setNavActive('nav-console', name === 'console');
   setNavActive('nav-settings', name === 'settings');
 
-  if (name === 'history' || name === 'console') {
-    const submenu = $('nav-content-submenu');
-    if (submenu) submenu.classList.remove('hidden');
-    const toggle = $('nav-content-toggle');
-    const arrow = toggle ? toggle.querySelector('.submenu-arrow') : null;
-    if (arrow) arrow.classList.add('rotate-180');
-  }
-
+  if (name === 'home') pollStatus();
   if (name === 'history') renderOutputs();
   if (name === 'console') refreshLogPanel();
   if (name === 'settings') loadSettings();
@@ -589,16 +581,9 @@ function showPage(name) {
 function setNavActive(id, active) {
   const el = $(id);
   if (!el) return;
-  const isSubmenu = id === 'nav-history' || id === 'nav-console';
-  if (isSubmenu) {
-    el.className = active 
-      ? 'flex items-center space-x-3 px-3 py-2 rounded-lg bg-orange-50 text-[#ea580c] font-bold text-[14px] transition' 
-      : 'flex items-center space-x-3 px-3 py-2 rounded-lg text-gray-500 hover:bg-gray-50 hover:text-gray-900 font-medium text-[14px] transition';
-  } else {
-    el.className = active 
-      ? 'flex items-center justify-between w-full px-3 py-2 rounded-xl bg-orange-50 text-[#ea580c] font-bold text-[14px] transition' 
-      : 'flex items-center justify-between w-full px-3 py-2 rounded-xl text-gray-500 hover:text-gray-900 hover:bg-gray-50 font-medium text-[14px] transition';
-  }
+  el.className = active
+    ? 'px-3 py-2 rounded-xl bg-orange-50 text-[#ea580c] transition'
+    : 'px-3 py-2 rounded-xl text-gray-500 hover:bg-gray-50 hover:text-gray-900 transition';
 }
 
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }

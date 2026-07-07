@@ -130,18 +130,22 @@ class ExportMixin:
         
         current_step += 1
         
-        # Step 2: Convert to portrait with progress
+        # Step 2: Convert to selected aspect ratio with progress
         if self.is_cancelled():
             return
-        clip_progress("Converting to portrait...", current_step, 0)
         portrait_file = clip_dir / "temp_portrait.mp4"
-        self.convert_to_portrait_with_progress(str(landscape_file), str(portrait_file), 
-            lambda p: clip_progress("Converting to portrait...", current_step, p))
-        self.log("  ✓ Portrait conversion")
+        if getattr(self, "screen_size", "9:16") == "16:9":
+            self.log("  ⊘ Skipped portrait conversion (16:9)")
+            current_output = landscape_file
+        else:
+            clip_progress("Converting to portrait...", current_step, 0)
+            self.convert_to_portrait_with_progress(str(landscape_file), str(portrait_file), 
+                lambda p: clip_progress("Converting to portrait...", current_step, p))
+            self.log("  ✓ Portrait conversion")
+            current_output = portrait_file
         current_step += 1
         
         # Track which file is the current output
-        current_output = portrait_file
         hook_duration = 0
         
         # Step 3: Add hook (optional)
@@ -171,8 +175,7 @@ class ExportMixin:
                 return
             clip_progress("Adding captions...", current_step, 0)
             
-            # Use portrait_file (without hook) as audio source for transcription
-            audio_source = str(portrait_file) if add_hook else None
+            audio_source = str(portrait_file if getattr(self, "screen_size", "9:16") != "16:9" else landscape_file) if add_hook else None
             
             # If watermark enabled, add captions to temp file first
             if self.watermark_settings.get("enabled"):
@@ -688,18 +691,29 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         
         # Check if we have word-level timestamps
         if hasattr(transcript, 'words') and transcript.words:
-            words = transcript.words
-            
-            for word in words:
+            words = []
+            for word in transcript.words:
                 text = str(getattr(word, 'word', '') or '').strip()
-                start = float(getattr(word, 'start', 0) or 0) + time_offset
-                end = float(getattr(word, 'end', start + 0.25) or start + 0.25) + time_offset
+                start = float(getattr(word, 'start', 0) or 0)
+                end = float(getattr(word, 'end', start + 0.25) or start + 0.25)
                 if text and end > start:
+                    words.append({'text': text, 'start': start, 'end': end})
+            chunk = []
+            for index, word in enumerate(words):
+                chunk.append(word)
+                next_word = words[index + 1] if index + 1 < len(words) else None
+                remaining = len(words) - index - 1
+                should_flush = False
+                if len(chunk) >= 3:
+                    should_flush = not next_word or word['text'].rstrip().endswith(('.', ',', '?', '!')) or next_word['start'] - word['end'] > 0.45 or len(chunk) >= (4 if remaining == 3 else 5)
+                if should_flush:
                     events.append({
-                        'start': self.format_time(start),
-                        'end': self.format_time(end),
-                        'text': text
+                        'start': self.format_time(chunk[0]['start'] + time_offset),
+                        'end': self.format_time(chunk[-1]['end'] + time_offset),
+                        'text': ' '.join(item['text'] for item in chunk)
                     })
+                    chunk = []
+
         
         # Fallback: use segment-level timestamps if no word timestamps
         elif hasattr(transcript, 'segments') and transcript.segments:

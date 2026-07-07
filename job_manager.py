@@ -36,6 +36,8 @@ class WebJobManager:
         self._logs = []
 
     def start(self, payload):
+        if not isinstance(payload, dict):
+            return {"status": "error", "message": "Invalid start payload"}
         url = str(payload.get("url", payload.get("youtube_url", ""))).strip()
         if not self._is_url(url):
             return {"status": "error", "message": "YouTube URL validation error: empty or invalid URL"}
@@ -49,12 +51,12 @@ class WebJobManager:
         num_clips = max(1, min(10, num_clips))
         add_captions = self._as_bool(payload.get("enable_captions", payload.get("add_captions", True)), True)
         add_hook = self._as_bool(payload.get("add_hook", False), False)
-        subtitle_language = str(payload.get("subtitle_language", "id") or "id")
+        subtitle_language = "id"
         instruction = str(payload.get("instruction", "")).strip()[:1000]
         landscape_blur = self._as_bool(payload.get("landscape_blur", self._config().config.get("landscape_blur", False)), False)
         screen_size = str(payload.get("screen_size", "9:16") or "9:16")
-        if screen_size != "9:16":
-            return {"status": "error", "message": "Unsupported screen size: only 9:16 is supported"}
+        if screen_size not in {"9:16", "16:9"}:
+            return {"status": "error", "message": "Unsupported screen size: only 9:16 and 16:9 are supported"}
         cfg = self._config().config
         caption_key = cfg.get("ai_providers", {}).get("caption_maker", {}).get("api_key")
         hook_key = cfg.get("ai_providers", {}).get("hook_maker", {}).get("api_key")
@@ -74,13 +76,16 @@ class WebJobManager:
             self._add_log(f"Task {datetime.now().strftime('%d %b %Y %H:%M:%S')} | {url}", "Task")
             self._add_log("Job started")
             self._add_log(f"URL accepted: {url}")
-            self._add_log(f"Requested clips: {num_clips}, subtitles: {'on' if add_captions else 'off'}, language: {subtitle_language}, blur: {'on' if landscape_blur else 'off'}")
+            self._add_log(f"Requested clips: {num_clips}, subtitles: {'on' if add_captions else 'off'}, language: {subtitle_language}, screen: {screen_size}, blur: {'on' if landscape_blur else 'off'}")
             self._add_log(f"Subtitles: {'ON' if add_captions else 'OFF'}")
-            args = (url, num_clips, add_captions, add_hook, subtitle_language, instruction, landscape_blur, self._make_run_dir(url))
-            if self._run.__code__.co_argcount == 7:
+            args = (url, num_clips, add_captions, add_hook, subtitle_language, instruction, landscape_blur, self._make_run_dir(url), screen_size)
+            expected_args = self._run.__code__.co_argcount - int(hasattr(self._run, "__self__"))
+            if expected_args == 6:
                 args = args[:6]
-            elif self._run.__code__.co_argcount == 8:
-                args = args[:6] + args[7:]
+            elif expected_args == 7:
+                args = args[:7]
+            elif expected_args == 8:
+                args = args[:8]
             self.thread = threading.Thread(
                 target=self._run,
                 args=args,
@@ -122,7 +127,7 @@ class WebJobManager:
             "hook_key_saved": hook_key_saved,
             "model": model,
             "provider": {"base_url": base_url, "api_key": "", "model": model},
-            "subtitle_language": cfg.get("subtitle_language", "id"),
+            "subtitle_language": "id",
             "video_quality": str(cfg.get("video_quality", "720")),
             "landscape_blur": bool(cfg.get("landscape_blur", False)),
             "subtitle_engine": cfg.get("subtitle_engine", "local"),
@@ -149,7 +154,7 @@ class WebJobManager:
         caption_api_key = str(payload.get("caption_api_key", "")).strip()
         caption_model = str(payload.get("caption_model", cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("model", "whisper-1"))).strip() or "whisper-1"
         output_dir = str(payload.get("output_dir", cfg_mgr.config.get("output_dir", str(self.output_dir)))).strip() or str(self.output_dir)
-        subtitle_language = str(payload.get("subtitle_language", "id") or "id")
+        subtitle_language = "id"
         video_quality = str(payload.get("video_quality", cfg_mgr.config.get("video_quality", "720")) or "720")
         landscape_blur = self._as_bool(payload.get("landscape_blur", cfg_mgr.config.get("landscape_blur", False)), False)
         subtitle_engine = str(payload.get("subtitle_engine", cfg_mgr.config.get("subtitle_engine", "local")) or "local")
@@ -299,18 +304,26 @@ class WebJobManager:
         meta_path = target / "run.json"
         meta = self._read_json(meta_path)
         meta["saved"] = True
-        keep = set(meta.get("saved_clips", [])) | {str(path) for path in payload.get("clips", []) if path}
+        clips = payload.get("clips") or []
+        if not isinstance(clips, list):
+            return {"status": "error", "message": "Invalid clips payload"}
+        valid_clips = []
+        for clip in clips:
+            clip_path = Path(str(clip)).resolve()
+            if clip_path.exists() and target in clip_path.parents:
+                valid_clips.append(str(clip_path))
+        keep = set(meta.get("saved_clips", [])) | set(valid_clips)
         meta["saved_clips"] = sorted(keep)
         meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
         return {"status": "saved"}
 
-    def _run(self, url, num_clips, add_captions, add_hook, subtitle_language, instruction, landscape_blur, run_dir):
+    def _run(self, url, num_clips, add_captions, add_hook, subtitle_language, instruction, landscape_blur, run_dir, screen_size="9:16"):
         try:
             self._sync_core_cookie_file()
             cfg = self._config().config
             prompt = self._with_indonesian_instruction(cfg.get("system_prompt"), instruction)
             run_dir.mkdir(parents=True, exist_ok=True)
-            self._write_run_meta(run_dir, url, {"video_quality": str(cfg.get("video_quality", "720")), "landscape_blur": landscape_blur})
+            self._write_run_meta(run_dir, url, {"video_quality": str(cfg.get("video_quality", "720")), "landscape_blur": landscape_blur, "screen_size": screen_size})
             self._add_log(f"Output folder: {run_dir}")
             self._add_log("Preparing AI/video processor")
             subtitle_style = {**cfg.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 65, "bottom_margin": 400}), "position": cfg.get("subtitle_position", "auto")}
@@ -332,6 +345,7 @@ class WebJobManager:
                 subtitle_language=subtitle_language,
                 video_quality=str(cfg.get("video_quality", "720")),
                 landscape_blur=landscape_blur,
+                screen_size=screen_size,
                 subtitle_style=subtitle_style,
                 subtitle_engine=cfg.get("subtitle_engine", "local"),
                 local_whisper=cfg.get("local_whisper", {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"}),
@@ -342,13 +356,15 @@ class WebJobManager:
                 self._add_log("GPU acceleration requested")
                 core.enable_gpu_acceleration(True)
             quality = str(cfg.get("video_quality", "720"))
-            resolution = {"480": "540x960", "720": "720x1280", "1080": "1080x1920"}.get(quality, "720x1280")
+            resolution_map = {"16:9": {"480": "854x480", "720": "1280x720", "1080": "1920x1080"}, "9:16": {"480": "540x960", "720": "720x1280", "1080": "1080x1920"}}
+            resolution = resolution_map.get(screen_size, resolution_map["9:16"]).get(quality, resolution_map.get(screen_size, resolution_map["9:16"])["720"])
             self._add_log(f"Video quality: {quality}p")
             self._add_log(f"Output resolution: {resolution}")
+            self._add_log(f"Screen size: {screen_size}")
             self._add_log(f"Landscape blur: {'on' if landscape_blur else 'off'}")
             self._add_log("Processor started")
             core.process(url, num_clips=num_clips, add_captions=add_captions, add_hook=add_hook)
-            self._write_run_meta(run_dir, url, {**self._summarize_run(run_dir), "video_quality": quality, "landscape_blur": landscape_blur})
+            self._write_run_meta(run_dir, url, {**self._summarize_run(run_dir), "video_quality": quality, "landscape_blur": landscape_blur, "screen_size": screen_size})
             self._status = "complete"
             self._message = "Complete"
             self._progress = 1.0

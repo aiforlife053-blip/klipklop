@@ -923,20 +923,15 @@ class DownloadMixin:
                     "📖 Lihat COOKIES.md untuk panduan lengkap"
                 )
             else:
-                raise Exception(f"Subtitle download failed!\n\n{last_error}")
+                self.log("  Subtitle unavailable, will transcribe locally")
+                return None, video_info
         
         # Find downloaded subtitle file
         srt_path = self.temp_dir / f"source.{self.subtitle_language}.srt"
         
         if not srt_path.exists():
-            available_subs = list(self.temp_dir.glob("source.*.srt"))
-            if available_subs:
-                srt_path = available_subs[0]
-                detected_lang = srt_path.stem.split('.')[-1]
-                self.log(f"  ⚠ {self.subtitle_language} subtitle not found, using {detected_lang} instead")
-            else:
-                srt_path = None
-                self.log(f"  ✗ No subtitle found for language: {self.subtitle_language}")
+            srt_path = None
+            self.log("  ✗ Subtitle Indonesia not found, will transcribe locally")
         
         return str(srt_path) if srt_path else None, video_info
 
@@ -1013,7 +1008,9 @@ class DownloadMixin:
         if result.returncode != 0:
             error_msg = result.stderr.strip() if result.stderr else "Unknown error"
             self.log(f"  ✗ Failed: {error_msg[:100]}")
-            raise Exception(f"Subtitle download failed!\n\n{error_msg}")
+            if "403" in error_msg or "Forbidden" in error_msg:
+                raise Exception(f"Subtitle download failed!\n\n{error_msg}")
+            return None, video_info
         
         self.log(f"  ✓ Subtitle download complete!")
         
@@ -1021,14 +1018,8 @@ class DownloadMixin:
         srt_path = self.temp_dir / f"source.{self.subtitle_language}.srt"
         
         if not srt_path.exists():
-            available_subs = list(self.temp_dir.glob("source.*.srt"))
-            if available_subs:
-                srt_path = available_subs[0]
-                detected_lang = srt_path.stem.split('.')[-1]
-                self.log(f"  ⚠ {self.subtitle_language} subtitle not found, using {detected_lang} instead")
-            else:
-                srt_path = None
-                self.log(f"  ✗ No subtitle found for language: {self.subtitle_language}")
+            srt_path = None
+            self.log("  ✗ Subtitle Indonesia not found, will transcribe locally")
         
         return str(srt_path) if srt_path else None, video_info
 
