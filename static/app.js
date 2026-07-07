@@ -270,8 +270,8 @@ function setScreenSize(value) {
     const subtitle = card.querySelector('span:last-of-type');
     const supported = ['9:16', '16:9'].includes(card.dataset.screenCard);
     card.className = selected ? 'border border-orange-600 bg-orange-50/30 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer text-center transition' : `border border-gray-200 rounded-xl p-3 flex flex-col items-center justify-center text-center transition ${supported ? 'hover:border-gray-300 cursor-pointer' : 'opacity-50 cursor-not-allowed'}`;
-    if (title) title.className = selected ? 'text-[14px] font-semibold text-orange-600 block' : 'text-[14px] font-semibold text-gray-700 block';
-    if (subtitle) subtitle.className = selected ? 'text-[11px] text-orange-500' : 'text-[11px] text-gray-400';
+    if (title) title.className = selected ? 'text-[14px] font-semibold text-white block' : 'text-[14px] font-semibold text-gray-700 block';
+    if (subtitle) subtitle.className = selected ? 'text-[11px] text-white' : 'text-[11px] text-gray-400';
     const input = card.querySelector('input');
     if (input) input.checked = selected;
   });
@@ -288,7 +288,7 @@ function startPayload(captionsOn = getChecked('captions', true)) {
     num_clips: Number(getValue('num-clips', '3') || 3),
     add_captions: captionsOn,
     enable_captions: captionsOn,
-    add_hook: false,
+    add_hook: getChecked('add-hook', false),
     screen_size: getScreenSize(),
     subtitle_language: getValue('subtitle-language', 'id'),
     landscape_blur: getChecked('landscape-blur', false),
@@ -561,15 +561,17 @@ async function saveOutput(path, oneClip) {
 function toggleSession(path) { document.querySelectorAll('[data-session-files]').forEach((el) => el.classList.toggle('hidden', el.dataset.sessionFiles !== path || !el.classList.contains('hidden'))); }
 function formatTime(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? (value || '') : date.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }); }
 function showPage(name) {
-  const home = $('page-home'); const history = $('page-history'); const consolePage = $('page-console'); const settings = $('page-settings');
-  if (!home || !history || !consolePage || !settings) return;
+  const home = $('page-home'); const history = $('page-history'); const consolePage = $('page-console'); const social = $('page-social'); const settings = $('page-settings');
+  if (!home || !history || !consolePage || !social || !settings) return;
   home.classList.toggle('hidden', name !== 'home');
   history.classList.toggle('hidden', name !== 'history');
   consolePage.classList.toggle('hidden', name !== 'console');
+  social.classList.toggle('hidden', name !== 'social');
   settings.classList.toggle('hidden', name !== 'settings');
   setNavActive('nav-home', name === 'home');
   setNavActive('nav-history', name === 'history');
   setNavActive('nav-console', name === 'console');
+  setNavActive('nav-social', name === 'social');
   setNavActive('nav-settings', name === 'settings');
 
   if (name === 'home') pollStatus();
@@ -582,7 +584,7 @@ function setNavActive(id, active) {
   const el = $(id);
   if (!el) return;
   el.className = active
-    ? 'px-3 py-2 rounded-xl bg-orange-50 text-[#ea580c] transition'
+    ? 'px-3 py-2 rounded-xl bg-[#2a3446] text-[#f15a24] transition'
     : 'px-3 py-2 rounded-xl text-gray-500 hover:bg-gray-50 hover:text-gray-900 transition';
 }
 
@@ -614,7 +616,7 @@ function closeModal(id) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  const save = $('save-settings'); const showJson = $('show-json'); const jsonClose = $('json-close'); const videoClose = $('video-modal-close'); const clearKey = $('clear-api-key'); const start = $('process-button'); const navHome = $('nav-home'); const navHistory = $('nav-history'); const navConsole = $('nav-console'); const navSettings = $('nav-settings'); const profile = $('profile-button'); const logClear = $('log-clear'); const instruction = $('instruction'); const instructionSave = $('instruction-save'); const instructionCancel = $('instruction-cancel'); const qualityMain = $('video-quality-main'); const qualitySettings = $('video-quality'); const blur = $('landscape-blur');
+  const save = $('save-settings'); const showJson = $('show-json'); const jsonClose = $('json-close'); const videoClose = $('video-modal-close'); const clearKey = $('clear-api-key'); const start = $('process-button'); const profile = $('profile-button'); const logClear = $('log-clear'); const instruction = $('instruction'); const instructionSave = $('instruction-save'); const instructionCancel = $('instruction-cancel'); const qualityMain = $('video-quality-main'); const qualitySettings = $('video-quality'); const blur = $('landscape-blur');
   if (save) save.addEventListener('click', saveSettings);
   if (showJson) showJson.addEventListener('click', showPayloadJson);
   if (jsonClose) jsonClose.addEventListener('click', () => $('json-modal')?.classList.add('hidden'));
@@ -652,10 +654,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const confirmCancel = $('confirm-cancel'); const confirmOk = $('confirm-ok');
   if (confirmCancel) confirmCancel.addEventListener('click', () => { $('confirm-modal').classList.add('hidden'); if (pendingConfirm) pendingConfirm(false); });
   if (confirmOk) confirmOk.addEventListener('click', () => { $('confirm-modal').classList.add('hidden'); if (pendingConfirm) pendingConfirm(true); });
-  if (navHome) navHome.addEventListener('click', (event) => { event.preventDefault(); showPage('home'); });
-  if (navHistory) navHistory.addEventListener('click', (event) => { event.preventDefault(); showPage('history'); });
-  if (navConsole) navConsole.addEventListener('click', (event) => { event.preventDefault(); showPage('console'); });
-  if (navSettings) navSettings.addEventListener('click', (event) => { event.preventDefault(); showPage('settings'); });
+  document.querySelectorAll('[data-page]').forEach((nav) => nav.addEventListener('click', (event) => {
+    event.preventDefault();
+    showPage(nav.dataset.page);
+  }));
 
   const contentToggle = $('nav-content-toggle');
   const contentSubmenu = $('nav-content-submenu');

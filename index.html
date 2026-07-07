@@ -28,6 +28,68 @@
             .rotate-180 {
                 transform: rotate(180deg);
             }
+            :root {
+                --bg: #182231;
+                --panel: #111827;
+                --surface: #222b3b;
+                --surface-2: #2a3446;
+                --line: #3a4558;
+                --text: #f3f4f6;
+                --muted: #aab3c2;
+                --accent: #f15a24;
+                --accent-hover: #ff6a33;
+            }
+            body {
+                background: var(--bg) !important;
+                color: var(--text) !important;
+            }
+            .bg-dots {
+                background-color: var(--bg) !important;
+                background-image: none !important;
+            }
+            header, aside, section, [class*="bg-white"], [class*="bg-[#f9fafb]"], [class*="bg-gray-50"] {
+                background-color: var(--panel) !important;
+            }
+            article, input, select, textarea, pre, .custom-select-wrapper > div,
+            button:not([class*="bg-[#ea580c]"]) {
+                background-color: var(--surface) !important;
+                color: var(--text) !important;
+                border-color: var(--line) !important;
+            }
+            label > div.border, aside div.border {
+                background-color: var(--surface) !important;
+                color: var(--text) !important;
+                border-color: var(--line) !important;
+            }
+            input::placeholder, textarea::placeholder {
+                color: var(--muted) !important;
+            }
+            [class*="text-black"], [class*="text-gray-950"], [class*="text-gray-900"], [class*="text-gray-800"], [class*="text-gray-700"] {
+                color: var(--text) !important;
+            }
+            [class*="text-gray-500"], [class*="text-gray-400"] {
+                color: var(--muted) !important;
+            }
+            [class*="border-gray"], [class*="border-[#"], header {
+                border-color: var(--line) !important;
+            }
+            [class*="bg-orange-50"], [class*="bg-orange-50/30"] {
+                background-color: var(--surface-2) !important;
+            }
+            button[class*="bg-[#ea580c]"], a[class*="bg-[#ea580c]"] {
+                background-color: var(--accent) !important;
+            }
+            [data-session-toggle] {
+                background-color: transparent !important;
+            }
+            [class*="hover:bg-[#c2410c]"]:hover,
+            [class*="hover:bg-orange-700"]:hover {
+                background-color: var(--accent-hover) !important;
+            }
+            a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+                outline: 2px solid #f59e0b !important;
+                outline-offset: 2px;
+            }
         </style>
     </head>
     <body
@@ -51,7 +113,7 @@
                     href="#"
                     id="nav-home"
                     data-page="home"
-                    class="px-3 py-2 rounded-xl bg-orange-50 text-[#ea580c] transition"
+                    class="px-3 py-2 rounded-xl bg-[#2a3446] text-[#f15a24] transition"
                     >Dashboard</a
                 >
                 <a
@@ -67,6 +129,13 @@
                     data-page="console"
                     class="px-3 py-2 rounded-xl text-gray-500 hover:bg-gray-50 hover:text-gray-900 transition"
                     >Konsol</a
+                >
+                <a
+                    href="#"
+                    id="nav-social"
+                    data-page="social"
+                    class="px-3 py-2 rounded-xl text-gray-500 hover:bg-gray-50 hover:text-gray-900 transition"
+                    >Sosmed</a
                 >
                 <a
                     href="#"
@@ -270,6 +339,20 @@
                                 </div>
 
                                 <div>
+                                    <label class="block text-[12px] font-semibold text-black mb-1.5">Hook</label>
+                                    <div class="border border-gray-200 rounded-xl p-2.5 flex items-center justify-between bg-white">
+                                        <div>
+                                            <span class="text-[13px] font-semibold text-gray-800 block">Hook Pembuka</span>
+                                            <span class="text-[10px] text-gray-400 block">Intro pendek sebelum klip</span>
+                                        </div>
+                                        <label class="relative inline-flex items-center cursor-pointer">
+                                            <input id="add-hook" type="checkbox" value="" class="sr-only peer" />
+                                            <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#ea580c]"></div>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div>
                                     <label
                                         class="block text-[12px] font-semibold text-black mb-1.5"
                                         >Ukuran Layar</label
@@ -287,11 +370,11 @@
                                                 checked
                                             />
                                             <span
-                                                class="text-[13px] font-semibold text-orange-600 block"
+                                                class="text-[13px] font-semibold text-white block"
                                                 >9:16</span
                                             >
                                             <span
-                                                class="text-[10px] text-orange-500"
+                                                class="text-[10px] text-white"
                                                 >Shorts</span
                                             >
                                         </label>
@@ -452,6 +535,53 @@
                             id="log-lines"
                             class="min-h-[360px] max-h-[70vh] overflow-auto rounded-2xl bg-gray-950 p-4 font-mono text-[12px] leading-relaxed text-gray-200"
                         ></div>
+                    </section>
+                </div>
+                <div
+                    id="page-social"
+                    class="hidden p-6 space-y-7 bg-[#f9fafb] bg-dots flex-1 h-[calc(100vh-53px)] overflow-auto"
+                >
+                    <section class="bg-white border border-[#e5e7eb] rounded-2xl p-7 shadow-sm w-full">
+                        <div class="mb-6">
+                            <h2 class="text-[20px] font-semibold text-black mb-0.5 tracking-tight">Sosmed</h2>
+                            <p class="text-[13px] text-gray-500">Siapkan koneksi upload otomatis ke YouTube dan TikTok.</p>
+                        </div>
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <article class="border border-gray-200 rounded-2xl p-5 space-y-4">
+                                <div class="flex items-start justify-between gap-3">
+                                    <div class="flex items-start gap-3">
+                                        <div class="w-10 h-10 rounded-xl bg-[#ff0033] text-white flex items-center justify-center font-extrabold text-[13px]">YT</div>
+                                        <div>
+                                            <h3 class="text-[16px] font-semibold text-black">YouTube</h3>
+                                            <p class="text-[13px] text-gray-500 mt-1">Upload Shorts / video ke channel YouTube.</p>
+                                        </div>
+                                    </div>
+                                    <span class="rounded-full border border-gray-200 px-3 py-1 text-[11px] font-semibold text-gray-500">Belum connect</span>
+                                </div>
+                                <div class="space-y-2 text-[13px] text-gray-500">
+                                    <p>Scope nanti: upload video, title, description, privacy, thumbnail.</p>
+                                    <p>Status: placeholder UI, API belum disambungkan.</p>
+                                </div>
+                                <button type="button" class="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-[13px] font-semibold text-gray-700 hover:bg-gray-50">Connect YouTube</button>
+                            </article>
+                            <article class="border border-gray-200 rounded-2xl p-5 space-y-4">
+                                <div class="flex items-start justify-between gap-3">
+                                    <div class="flex items-start gap-3">
+                                        <div class="w-10 h-10 rounded-xl bg-black text-white flex items-center justify-center font-extrabold text-[13px]">TT</div>
+                                        <div>
+                                            <h3 class="text-[16px] font-semibold text-black">TikTok</h3>
+                                            <p class="text-[13px] text-gray-500 mt-1">Upload video pendek ke akun TikTok.</p>
+                                        </div>
+                                    </div>
+                                    <span class="rounded-full border border-gray-200 px-3 py-1 text-[11px] font-semibold text-gray-500">Belum connect</span>
+                                </div>
+                                <div class="space-y-2 text-[13px] text-gray-500">
+                                    <p>Scope nanti: upload video, caption, privacy, schedule.</p>
+                                    <p>Status: placeholder UI, API belum disambungkan.</p>
+                                </div>
+                                <button type="button" class="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-[13px] font-semibold text-gray-700 hover:bg-gray-50">Connect TikTok</button>
+                            </article>
+                        </div>
                     </section>
                 </div>
                 <div
