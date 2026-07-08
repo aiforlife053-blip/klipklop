@@ -199,22 +199,22 @@ def test_enable_captions_alias_can_disable_caption_guard(tmp_path):
     assert manager.captured["add_captions"] is False
 
 
-def test_num_clips_is_forced_to_one(tmp_path):
+def test_num_clips_is_forced_to_three(tmp_path):
     manager = InstantJobManager(app_dir=tmp_path)
     manager.start({"url": "https://www.youtube.com/watch?v=abc", "add_captions": False, "num_clips": 999})
     thread = manager.thread
     if thread:
         thread.join(1)
-    assert manager.captured["num_clips"] == 1
+    assert manager.captured["num_clips"] == 3
 
 
-def test_invalid_num_clips_still_generates_one_clip(tmp_path):
+def test_invalid_num_clips_still_generates_three_clips(tmp_path):
     manager = InstantJobManager(app_dir=tmp_path)
     manager.start({"url": "https://www.youtube.com/watch?v=abc", "add_captions": False, "num_clips": "bad"})
     thread = manager.thread
     if thread:
         thread.join(1)
-    assert manager.captured["num_clips"] == 1
+    assert manager.captured["num_clips"] == 3
 
 
 def test_instruction_is_trimmed_and_limited(tmp_path):

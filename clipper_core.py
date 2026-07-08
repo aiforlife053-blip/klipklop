@@ -110,7 +110,7 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
             "min_shot_duration": 90,
             "center_weight": 0.3,
         }
-        self.subtitle_language = "id"
+        self.subtitle_language = subtitle_language or "id"
         self.video_quality = str(video_quality or "720")
         self.landscape_blur = bool(landscape_blur)
         self.screen_size = "16:9" if str(screen_size) == "16:9" else "9:16"
@@ -132,34 +132,35 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
     def process(self, url: str, num_clips: int = 5, add_captions: bool = True, add_hook: bool = True):
-        self.set_progress("Downloading subtitle...", 0.1)
-        srt_path, video_info = self.download_subtitle_only(url)
-        self.video_info = video_info or {}
-        self.channel_name = video_info.get("channel", "") if video_info else ""
-        if self.is_cancelled():
-            return
-        source_path = ""
-        if not srt_path:
-            self.set_progress("Subtitle tidak ditemukan, download video untuk transkripsi lokal...", 0.18)
-            source_path = self.download_video_only(url)
-            transcript = self.transcribe_full_video_local(source_path)
-        else:
-            transcript = self.parse_srt(srt_path)
-        self.set_progress("Finding highlights...", 0.3)
-        highlights = self.find_highlights(transcript, video_info, num_clips)
-        if self.is_cancelled():
-            return
-        if not highlights:
-            raise Exception("No valid highlights found!")
-        if not source_path:
-            self.set_progress("Downloading source video/audio once...", 0.32)
-            source_path = self.download_video_only(url)
-        total_clips = len(highlights)
-        for i, highlight in enumerate(highlights, 1):
+        try:
+            self.set_progress("Downloading subtitle...", 0.1)
+            srt_path, video_info = self.download_subtitle_only(url)
+            self.video_info = video_info or {}
+            self.channel_name = video_info.get("channel", "") if video_info else ""
             if self.is_cancelled():
                 return
-            self.process_clip(source_path, highlight, i, total_clips, add_captions=add_captions, add_hook=add_hook, pre_cut=False)
-        self.set_progress("Cleaning up...", 0.95)
-        self.cleanup()
-        self.set_progress("Complete!", 1.0)
-        self.log(f"\n✅ Created {total_clips} clips in: {self.output_dir}")
+            source_path = ""
+            if not srt_path:
+                self.set_progress("Subtitle tidak ditemukan, download video untuk transkripsi lokal...", 0.18)
+                source_path = self.download_video_only(url)
+                transcript = self.transcribe_full_video_local(source_path)
+            else:
+                transcript = self.parse_srt(srt_path)
+            self.set_progress("Finding highlights...", 0.3)
+            highlights = self.find_highlights(transcript, video_info, num_clips)
+            if self.is_cancelled():
+                return
+            if not highlights:
+                raise Exception("No valid highlights found!")
+            if not source_path:
+                self.set_progress("Downloading source video/audio once...", 0.32)
+                source_path = self.download_video_only(url)
+            total_clips = len(highlights)
+            for i, highlight in enumerate(highlights, 1):
+                if self.is_cancelled():
+                    return
+                self.process_clip(source_path, highlight, i, total_clips, add_captions=add_captions, add_hook=add_hook, pre_cut=False)
+            self.set_progress("Complete!", 1.0)
+            self.log(f"\n✅ Created {total_clips} clips in: {self.output_dir}")
+        finally:
+            self.cleanup()

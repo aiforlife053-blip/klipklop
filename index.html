@@ -9,207 +9,7 @@
             href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Poppins:wght@400;500;600;700;800&display=swap"
             rel="stylesheet"
         />
-        <style>
-            body {
-                font-family: "Plus Jakarta Sans", sans-serif;
-                overflow-x: hidden;
-            }
-            .bg-dots {
-                background-image: radial-gradient(
-                    rgba(0, 0, 0, 0.05) 1.5px,
-                    transparent 1.5px
-                );
-                background-size: 20px 20px;
-                background-position: 10px 10px;
-            }
-            .custom-select-arrow {
-                transition: transform 0.2s ease;
-            }
-            .rotate-180 {
-                transform: rotate(180deg);
-            }
-            :root {
-                --bg: #182231;
-                --panel: #111827;
-                --surface: #222b3b;
-                --surface-2: #2a3446;
-                --line: #3a4558;
-                --text: #f3f4f6;
-                --muted: #aab3c2;
-                --accent: #f15a24;
-                --accent-hover: #ff6a33;
-            }
-            body {
-                background: var(--bg) !important;
-                color: var(--text) !important;
-            }
-            .bg-dots {
-                background-color: var(--bg) !important;
-                background-image: none !important;
-            }
-            header, aside, section, [class*="bg-white"], [class*="bg-[#f9fafb]"], [class*="bg-gray-50"] {
-                background-color: var(--panel) !important;
-            }
-            article, input, select, textarea, pre, .custom-select-wrapper > div,
-            button:not([class*="bg-[#ea580c]"]) {
-                background-color: var(--surface) !important;
-                color: var(--text) !important;
-                border-color: var(--line) !important;
-            }
-            label > div.border, aside div.border {
-                background-color: var(--surface) !important;
-                color: var(--text) !important;
-                border-color: var(--line) !important;
-            }
-            input::placeholder, textarea::placeholder {
-                color: var(--muted) !important;
-            }
-            [class*="text-black"], [class*="text-gray-950"], [class*="text-gray-900"], [class*="text-gray-800"], [class*="text-gray-700"] {
-                color: var(--text) !important;
-            }
-            [class*="text-gray-500"], [class*="text-gray-400"] {
-                color: var(--muted) !important;
-            }
-            [class*="border-gray"], [class*="border-[#"], header {
-                border-color: var(--line) !important;
-            }
-            [class*="bg-orange-50"], [class*="bg-orange-50/30"] {
-                background-color: rgba(241, 90, 36, 0.14) !important;
-                border-color: var(--accent) !important;
-            }
-            button[class*="bg-[#ea580c]"], a[class*="bg-[#ea580c]"], button[class*="bg-red-600"], .peer:checked ~ div {
-                background-color: var(--accent) !important;
-            }
-            .peer:checked ~ div {
-                border-color: var(--accent) !important;
-            }
-            .custom-select-wrapper [class*="bg-orange-50"] {
-                background-color: var(--accent) !important;
-                color: #fff !important;
-            }
-            [data-session-toggle] {
-                background-color: transparent !important;
-            }
-            [class*="hover:bg-[#c2410c]"]:hover,
-            [class*="hover:bg-orange-700"]:hover {
-                background-color: var(--accent-hover) !important;
-            }
-            a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
-                outline: 2px solid #f59e0b !important;
-                outline-offset: 2px;
-            }
-            @media (max-width: 768px) {
-                body {
-                    height: auto !important;
-                    min-height: 100svh;
-                    overflow: auto !important;
-                    padding-bottom: 76px;
-                }
-                header {
-                    padding: 10px 14px !important;
-                }
-                header nav {
-                    position: fixed;
-                    left: 0;
-                    right: 0;
-                    bottom: 0;
-                    z-index: 60;
-                    display: grid !important;
-                    grid-template-columns: repeat(6, minmax(0, 1fr));
-                    gap: 4px !important;
-                    padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
-                    background: var(--panel);
-                    border-top: 1px solid var(--line);
-                }
-                header nav a {
-                    min-height: 44px;
-                    padding: 8px 4px !important;
-                    border-radius: 12px !important;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    font-size: 11px !important;
-                    line-height: 1.1;
-                    text-align: center;
-                }
-                body > div,
-                main,
-                main > div,
-                #page-home,
-                #page-history,
-                #page-console,
-                #page-social,
-                #page-settings {
-                    height: auto !important;
-                    min-height: calc(100svh - 57px);
-                    overflow: visible !important;
-                }
-                #page-home {
-                    flex-direction: column !important;
-                    align-items: stretch !important;
-                }
-                #page-home > aside {
-                    width: 100% !important;
-                    height: auto !important;
-                    order: 1 !important;
-                    padding: 16px !important;
-                    border-right: 0 !important;
-                    border-bottom: 1px solid var(--line) !important;
-                    overflow: visible !important;
-                }
-                #page-home > section {
-                    order: 2 !important;
-                    min-height: 360px;
-                    height: auto !important;
-                    padding: 16px !important;
-                    border-left: 0 !important;
-                    overflow: visible !important;
-                }
-                #home-results-panel {
-                    max-width: none !important;
-                    padding: 28px 0 !important;
-                }
-                #page-history,
-                #page-console,
-                #page-social,
-                #page-settings {
-                    padding: 16px !important;
-                }
-                #page-settings .grid,
-                #page-social .grid {
-                    grid-template-columns: 1fr !important;
-                }
-                input,
-                select,
-                textarea,
-                button {
-                    min-height: 44px;
-                    font-size: 16px !important;
-                }
-                aside .grid.grid-cols-2,
-                aside .grid.grid-cols-3 {
-                    grid-template-columns: 1fr !important;
-                }
-                #process-button {
-                    min-height: 48px;
-                }
-                #show-json {
-                    min-width: 64px;
-                }
-                [data-session-files] {
-                    flex-direction: column !important;
-                    align-items: stretch !important;
-                }
-                [data-session-files] article,
-                #home-results-panel article {
-                    width: 100% !important;
-                    max-width: none !important;
-                }
-                video {
-                    max-height: 70svh;
-                }
-            }
-        </style>
+        <link rel="stylesheet" href="/static/styles.css?v=20260708-3" />
     </head>
     <body
         class="bg-[#fcfcfc] text-[#111827] h-screen overflow-hidden flex flex-col antialiased"
@@ -240,7 +40,7 @@
                     id="nav-history"
                     data-page="history"
                     class="px-3 py-2 rounded-xl text-gray-500 hover:bg-gray-50 hover:text-gray-900 transition"
-                    >Riwayat</a
+                    >Galeri</a
                 >
                 <a
                     href="#"
@@ -275,7 +75,10 @@
 
         <div class="flex flex-1 min-h-0 overflow-hidden">
             <main class="flex-1 min-w-0 flex flex-col">
-                <div id="page-home" class="flex flex-row flex-1 items-stretch h-[calc(100vh-53px)] overflow-hidden">
+                <div
+                    id="page-home"
+                    class="flex flex-row flex-1 items-stretch h-[calc(100vh-53px)] overflow-hidden"
+                >
                     <!-- Middle Panel: Hasil Klip -->
                     <section
                         class="order-2 flex-1 bg-[#f9fafb] bg-dots border-l border-[#f1f5f9] p-0 h-full overflow-auto flex flex-col justify-between"
@@ -322,8 +125,8 @@
                             <p
                                 class="text-[13px] text-gray-500 leading-relaxed max-w-md"
                             >
-                                Tempel link YouTube di panel kiri. AI akan memilih
-                                1 momen dengan potensi viral tertinggi.
+                                Tempel link YouTube di panel kiri. AI akan
+                                memilih 1 momen dengan potensi viral tertinggi.
                             </p>
                         </div>
 
@@ -358,7 +161,7 @@
                                     </p>
                                 </div>
 
-                                <input id="num-clips" type="hidden" value="1" />
+                                <input id="num-clips" type="hidden" value="3" />
 
                                 <div>
                                     <label
@@ -376,7 +179,8 @@
                                         <option value="1080">1080p</option>
                                     </select>
                                     <p class="text-[11px] text-gray-400 mt-1">
-                                        Sekali proses hanya menghasilkan 1 klip terbaik dengan potensi viral tertinggi.
+                                        Sekali proses menghasilkan 3 klip
+                                        terbaik dengan potensi viral tertinggi.
                                     </p>
                                 </div>
 
@@ -451,15 +255,35 @@
                                 </div>
 
                                 <div>
-                                    <label class="block text-[12px] font-semibold text-black mb-1.5">Hook</label>
-                                    <div class="border border-gray-200 rounded-xl p-2.5 flex items-center justify-between bg-white">
+                                    <label
+                                        class="block text-[12px] font-semibold text-black mb-1.5"
+                                        >Hook</label
+                                    >
+                                    <div
+                                        class="border border-gray-200 rounded-xl p-2.5 flex items-center justify-between bg-white"
+                                    >
                                         <div>
-                                            <span class="text-[13px] font-semibold text-gray-800 block">Hook Pembuka</span>
-                                            <span class="text-[10px] text-gray-400 block">Intro pendek sebelum klip</span>
+                                            <span
+                                                class="text-[13px] font-semibold text-gray-800 block"
+                                                >Hook Pembuka</span
+                                            >
+                                            <span
+                                                class="text-[10px] text-gray-400 block"
+                                                >Intro pendek sebelum klip</span
+                                            >
                                         </div>
-                                        <label class="relative inline-flex items-center cursor-pointer">
-                                            <input id="add-hook" type="checkbox" value="" class="sr-only peer" />
-                                            <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#ea580c]"></div>
+                                        <label
+                                            class="relative inline-flex items-center cursor-pointer"
+                                        >
+                                            <input
+                                                id="add-hook"
+                                                type="checkbox"
+                                                value=""
+                                                class="sr-only peer"
+                                            />
+                                            <div
+                                                class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#ea580c]"
+                                            ></div>
                                         </label>
                                     </div>
                                 </div>
@@ -485,8 +309,7 @@
                                                 class="text-[13px] font-semibold text-white block"
                                                 >9:16</span
                                             >
-                                            <span
-                                                class="text-[10px] text-white"
+                                            <span class="text-[10px] text-white"
                                                 >Shorts</span
                                             >
                                         </label>
@@ -605,10 +428,10 @@
                             <h2
                                 class="text-[20px] font-semibold text-black mb-0.5 tracking-tight"
                             >
-                                Riwayat Klip
+                                Galeri
                             </h2>
                             <p class="text-[13px] text-gray-500">
-                                Hanya klip yang sudah di-upload.
+                                Klip yang sudah kamu simpan.
                             </p>
                         </div>
                         <div id="history-panel" class="space-y-3"></div>
@@ -655,43 +478,138 @@
                 >
                     <section class="bg-transparent w-full">
                         <div class="mb-6">
-                            <h2 class="text-[20px] font-semibold text-black mb-0.5 tracking-tight">Sosmed</h2>
-                            <p class="text-[13px] text-gray-500">Siapkan koneksi upload otomatis ke YouTube dan TikTok.</p>
+                            <h2
+                                class="text-[20px] font-semibold text-black mb-0.5 tracking-tight"
+                            >
+                                Sosmed
+                            </h2>
+                            <p class="text-[13px] text-gray-500">
+                                Siapkan koneksi upload otomatis ke YouTube dan
+                                TikTok.
+                            </p>
                         </div>
                         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                            <article class="border border-gray-200 rounded-2xl p-5 space-y-4" id="yt-card">
-                                <div class="flex items-start justify-between gap-3">
+                            <article
+                                class="border border-gray-200 rounded-2xl p-5 space-y-4"
+                                id="yt-card"
+                            >
+                                <div
+                                    class="flex items-start justify-between gap-3"
+                                >
                                     <div class="flex items-start gap-3">
-                                        <div class="w-10 h-10 rounded-xl bg-[#ff0033] text-white flex items-center justify-center" aria-hidden="true"><svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31.4 31.4 0 0 0 0 12a31.4 31.4 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31.4 31.4 0 0 0 24 12a31.4 31.4 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.3 3.6-6.3 3.6Z"/></svg></div>
+                                        <div
+                                            class="w-10 h-10 rounded-xl bg-[#ff0033] text-white flex items-center justify-center"
+                                            aria-hidden="true"
+                                        >
+                                            <svg
+                                                class="w-6 h-6"
+                                                viewBox="0 0 24 24"
+                                                fill="currentColor"
+                                            >
+                                                <path
+                                                    d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31.4 31.4 0 0 0 0 12a31.4 31.4 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31.4 31.4 0 0 0 24 12a31.4 31.4 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.3 3.6-6.3 3.6Z"
+                                                />
+                                            </svg>
+                                        </div>
                                         <div>
-                                            <h3 class="text-[16px] font-semibold text-black">YouTube</h3>
-                                            <p class="text-[13px] text-gray-500 mt-1">Upload Shorts / video ke channel YouTube.</p>
+                                            <h3
+                                                class="text-[16px] font-semibold text-black"
+                                            >
+                                                YouTube
+                                            </h3>
+                                            <p
+                                                class="text-[13px] text-gray-500 mt-1"
+                                            >
+                                                Upload Shorts / video ke channel
+                                                YouTube.
+                                            </p>
                                         </div>
                                     </div>
-                                    <span id="yt-status-badge" class="rounded-full border border-gray-200 px-3 py-1 text-[11px] font-semibold text-gray-500">Belum connect</span>
+                                    <span
+                                        id="yt-status-badge"
+                                        class="rounded-full border border-gray-200 px-3 py-1 text-[11px] font-semibold text-gray-500"
+                                        >Belum connect</span
+                                    >
                                 </div>
-                                <div id="yt-info" class="hidden text-[13px] text-gray-500 space-y-1">
+                                <div
+                                    id="yt-info"
+                                    class="hidden text-[13px] text-gray-500 space-y-1"
+                                >
                                     <p>Token tersimpan lokal. Siap upload.</p>
                                 </div>
-                                <button id="yt-connect-btn" type="button" class="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-[13px] font-semibold text-gray-700 hover:bg-gray-50">Connect YouTube</button>
-                                <button id="yt-disconnect-btn" type="button" class="hidden w-full rounded-xl border border-red-200 px-4 py-2.5 text-[13px] font-semibold text-red-600 hover:bg-red-50">Disconnect</button>
+                                <button
+                                    id="yt-connect-btn"
+                                    type="button"
+                                    class="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-[13px] font-semibold text-gray-700 hover:bg-gray-50"
+                                >
+                                    Connect YouTube
+                                </button>
+                                <button
+                                    id="yt-disconnect-btn"
+                                    type="button"
+                                    class="hidden w-full rounded-xl border border-red-200 px-4 py-2.5 text-[13px] font-semibold text-red-600 hover:bg-red-50"
+                                >
+                                    Disconnect
+                                </button>
                             </article>
-                            <article class="border border-gray-200 rounded-2xl p-5 space-y-4">
-                                <div class="flex items-start justify-between gap-3">
+                            <article
+                                class="border border-gray-200 rounded-2xl p-5 space-y-4"
+                            >
+                                <div
+                                    class="flex items-start justify-between gap-3"
+                                >
                                     <div class="flex items-start gap-3">
-                                        <div class="w-10 h-10 rounded-xl bg-black text-white flex items-center justify-center" aria-hidden="true"><svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor"><path d="M16.6 2c.4 3 2.1 4.8 5.1 5v3.4a8.7 8.7 0 0 1-5-1.5v7.1c0 9-9.8 11.8-13.7 5.4-2.5-4.1-1-11.3 7-11.6v3.6c-.5.1-.9.2-1.4.3-3.3 1.1-2.6 6.3.8 6.8 2.2.3 3.7-1.3 3.7-4.1V2h3.5Z"/></svg></div>
+                                        <div
+                                            class="w-10 h-10 rounded-xl bg-black text-white flex items-center justify-center"
+                                            aria-hidden="true"
+                                        >
+                                            <svg
+                                                class="w-6 h-6"
+                                                viewBox="0 0 24 24"
+                                                fill="currentColor"
+                                            >
+                                                <path
+                                                    d="M16.6 2c.4 3 2.1 4.8 5.1 5v3.4a8.7 8.7 0 0 1-5-1.5v7.1c0 9-9.8 11.8-13.7 5.4-2.5-4.1-1-11.3 7-11.6v3.6c-.5.1-.9.2-1.4.3-3.3 1.1-2.6 6.3.8 6.8 2.2.3 3.7-1.3 3.7-4.1V2h3.5Z"
+                                                />
+                                            </svg>
+                                        </div>
                                         <div>
-                                            <h3 class="text-[16px] font-semibold text-black">TikTok</h3>
-                                            <p class="text-[13px] text-gray-500 mt-1">Upload video pendek ke akun TikTok.</p>
+                                            <h3
+                                                class="text-[16px] font-semibold text-black"
+                                            >
+                                                TikTok
+                                            </h3>
+                                            <p
+                                                class="text-[13px] text-gray-500 mt-1"
+                                            >
+                                                Upload video pendek ke akun
+                                                TikTok.
+                                            </p>
                                         </div>
                                     </div>
-                                    <span class="rounded-full border border-gray-200 px-3 py-1 text-[11px] font-semibold text-gray-500">Belum connect</span>
+                                    <span
+                                        class="rounded-full border border-gray-200 px-3 py-1 text-[11px] font-semibold text-gray-500"
+                                        >Belum connect</span
+                                    >
                                 </div>
-                                <div class="space-y-2 text-[13px] text-gray-500">
-                                    <p>Scope nanti: upload video, caption, privacy, schedule.</p>
-                                    <p>Status: placeholder UI, API belum disambungkan.</p>
+                                <div
+                                    class="space-y-2 text-[13px] text-gray-500"
+                                >
+                                    <p>
+                                        Scope nanti: upload video, caption,
+                                        privacy, schedule.
+                                    </p>
+                                    <p>
+                                        Status: placeholder UI, API belum
+                                        disambungkan.
+                                    </p>
                                 </div>
-                                <button type="button" class="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-[13px] font-semibold text-gray-700 hover:bg-gray-50">Connect TikTok</button>
+                                <button
+                                    type="button"
+                                    class="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-[13px] font-semibold text-gray-700 hover:bg-gray-50"
+                                >
+                                    Connect TikTok
+                                </button>
                             </article>
                         </div>
                     </section>
@@ -700,9 +618,7 @@
                     id="page-settings"
                     class="hidden p-6 space-y-7 bg-[#f9fafb] bg-dots flex-1 h-[calc(100vh-53px)] overflow-auto"
                 >
-                    <section
-                        class="bg-transparent w-full"
-                    >
+                    <section class="bg-transparent w-full">
                         <div class="border-b border-gray-100 pb-5 mb-5">
                             <h2
                                 class="text-[20px] font-semibold text-black tracking-tight"
@@ -915,8 +831,12 @@
                                             id="subtitle-font"
                                             class="w-full px-2 py-2 border border-gray-200 rounded-lg text-[12px] text-gray-700 bg-white"
                                         >
-                                            <option value="Plus Jakarta Sans">Plus Jakarta Sans</option>
-                                            <option value="Poppins">Poppins</option>
+                                            <option value="Plus Jakarta Sans">
+                                                Plus Jakarta Sans
+                                            </option>
+                                            <option value="Poppins">
+                                                Poppins
+                                            </option>
                                             <option value="Arial">Arial</option>
                                         </select>
                                     </div>
@@ -1151,6 +1071,7 @@
                 </div>
             </div>
         </div>
-        <script src="static/app.js?v=20260708-8"></script>
+        <script src="/static/src/core.js?v=20260708-1"></script>
+        <script src="/static/app.js?v=20260708-12"></script>
     </body>
 </html>

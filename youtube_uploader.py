@@ -9,31 +9,31 @@ from social_auth import get_youtube_credentials
 VIDEO_EXTS = {".mp4", ".webm", ".mkv", ".mov", ".avi"}
 
 
-def delete_youtube_video(video_id):
+def delete_youtube_video(video_id, user_key=None):
     if not video_id:
         raise ValueError("Video ID tidak valid")
-    youtube = build("youtube", "v3", credentials=get_youtube_credentials())
+    youtube = build("youtube", "v3", credentials=get_youtube_credentials(user_key))
     youtube.videos().delete(id=video_id).execute()
     return {"video_id": video_id}
 
 
-def list_existing_youtube_videos(video_ids):
+def list_existing_youtube_videos(video_ids, user_key=None):
     ids = [video_id for video_id in video_ids if video_id]
     if not ids:
         return []
-    youtube = build("youtube", "v3", credentials=get_youtube_credentials())
+    youtube = build("youtube", "v3", credentials=get_youtube_credentials(user_key))
     response = youtube.videos().list(part="id", id=",".join(ids)).execute()
     return [item["id"] for item in response.get("items", [])]
 
 
-def upload_youtube_video(file_path, title, description="", privacy="private"):
+def upload_youtube_video(file_path, title, description="", privacy="private", user_key=None):
     path = Path(file_path).resolve()
     if not path.exists() or path.suffix.lower() not in VIDEO_EXTS:
         raise ValueError("File video tidak valid")
     if privacy not in {"private", "unlisted", "public"}:
         raise ValueError("Privacy tidak valid")
 
-    youtube = build("youtube", "v3", credentials=get_youtube_credentials())
+    youtube = build("youtube", "v3", credentials=get_youtube_credentials(user_key))
     media = MediaFileUpload(str(path), chunksize=-1, resumable=True)
     request = youtube.videos().insert(
         part="snippet,status",

@@ -706,16 +706,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     chunks.append(chunk)
                     chunk = []
             for chunk in chunks:
-                for active_index, active_word in enumerate(chunk):
-                    text = ' '.join(
-                        f"{{\\c&H000000&\\3c&H00FFFF&\\bord5}}{item['text']}{{\\r}}" if i == active_index else item['text']
-                        for i, item in enumerate(chunk)
-                    )
-                    events.append({
-                        'start': self.format_time(active_word['start'] + time_offset),
-                        'end': self.format_time(active_word['end'] + time_offset),
-                        'text': text
-                    })
+                events.append({
+                    'start': self.format_time(chunk[0]['start'] + time_offset),
+                    'end': self.format_time(chunk[-1]['end'] + time_offset),
+                    'text': ' '.join(item['text'] for item in chunk)
+                })
 
         
         # Fallback: use segment-level timestamps if no word timestamps

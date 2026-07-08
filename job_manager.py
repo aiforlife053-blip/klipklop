@@ -55,10 +55,12 @@ class WebJobManager:
         with self._lock:
             if self.thread and self.thread.is_alive():
                 return {"status": "busy", "message": "Processing is already running"}
-        num_clips = 1
+        if self._has_staged_outputs():
+            return {"status": "busy", "message": "Simpan atau hapus klip di Beranda sebelum generate baru"}
+        num_clips = 3
         add_captions = self._as_bool(payload.get("enable_captions", payload.get("add_captions", True)), True)
-        add_hook = self._as_bool(payload.get("add_hook", False), False)
-        subtitle_language = "id"
+        add_hook = self._as_bool(payload.get("add_hook", payload.get("hook_mode", False)), False)
+        subtitle_language = str(payload.get("subtitle_language", self._config().config.get("subtitle_language", "id")) or "id")[:12]
         instruction = str(payload.get("instruction", "")).strip()[:1000]
         landscape_blur = self._as_bool(payload.get("landscape_blur", self._config().config.get("landscape_blur", False)), False)
         source_credit = self._as_bool(payload.get("source_credit", True), True)
@@ -67,12 +69,9 @@ class WebJobManager:
             return {"status": "error", "message": "Unsupported screen size: only 9:16 and 16:9 are supported"}
         cfg = self._config().config
         caption_key = cfg.get("ai_providers", {}).get("caption_maker", {}).get("api_key")
-        hook_key = cfg.get("ai_providers", {}).get("hook_maker", {}).get("api_key")
         subtitle_engine = cfg.get("subtitle_engine", "local")
         if add_captions and subtitle_engine == "api" and not caption_key:
             return {"status": "error", "message": "Subtitle Engine API Whisper butuh Caption Maker/Whisper API key. Pilih Local faster-whisper atau isi key."}
-        if add_hook and not hook_key:
-            return {"status": "error", "message": "Hook butuh Hook Maker/TTS API key."}
 
         with self._lock:
             if self.thread and self.thread.is_alive():
@@ -84,7 +83,7 @@ class WebJobManager:
             self._add_log(f"Task {datetime.now().strftime('%d %b %Y %H:%M:%S')} | {url}", "Task")
             self._add_log("Job started")
             self._add_log(f"URL accepted: {url}")
-            self._add_log(f"Requested clips: {num_clips}, subtitles: {'on' if add_captions else 'off'}, language: {subtitle_language}, screen: {screen_size}, blur: {'on' if landscape_blur else 'off'}, source credit: {'on' if source_credit else 'off'}")
+            self._add_log(f"Requested clips: {num_clips}, subtitles: {'on' if add_captions else 'off'}, hook: {'on' if add_hook else 'off'}, language: {subtitle_language}, screen: {screen_size}, blur: {'on' if landscape_blur else 'off'}, source credit: {'on' if source_credit else 'off'}")
             self._add_log(f"Subtitles: {'ON' if add_captions else 'OFF'}")
             args = (url, num_clips, add_captions, add_hook, subtitle_language, instruction, landscape_blur, self._make_run_dir(url), screen_size, source_credit)
             expected_args = self._run.__code__.co_argcount - int(hasattr(self._run, "__self__"))
@@ -185,7 +184,9 @@ class WebJobManager:
         caption_api_key = str(payload.get("caption_api_key", "")).strip()
         caption_model = str(payload.get("caption_model", cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("model", "whisper-1"))).strip() or "whisper-1"
         output_dir = str(payload.get("output_dir", cfg_mgr.config.get("output_dir", str(self.output_dir)))).strip() or str(self.output_dir)
-        subtitle_language = "id"
+        subtitle_language = str(payload.get("subtitle_language", cfg_mgr.config.get("subtitle_language", "id")) or "id")[:12]
+        if not re.fullmatch(r"[a-zA-Z-]{2,12}", subtitle_language):
+            subtitle_language = "id"
         video_quality = str(payload.get("video_quality", cfg_mgr.config.get("video_quality", "720")) or "720")
         landscape_blur = self._as_bool(payload.get("landscape_blur", cfg_mgr.config.get("landscape_blur", False)), False)
         subtitle_engine = str(payload.get("subtitle_engine", cfg_mgr.config.get("subtitle_engine", "local")) or "local")
@@ -289,8 +290,10 @@ class WebJobManager:
         for folder in sorted((p for p in output_dir.iterdir() if p.is_dir() and p.name != "_temp"), key=lambda p: p.stat().st_mtime, reverse=True):
             group_files = [self._file_item(path) for path in sorted(folder.rglob("*"), key=lambda p: p.stat().st_mtime, reverse=True) if path.is_file() and path.suffix.lower() in allowed and "_temp" not in path.parts and not path.name.startswith("temp_")]
             clips = [file for file in group_files if file["name"].lower() == "master.mp4"]
+            meta = self._read_json(folder / "run.json")
+            if not clips and meta.get("status") in {"deleted", "expired"}:
+                groups.append({"name": folder.name, "path": str(folder), "title": meta.get("title") or folder.name, "caption": "file expired/dihapus otomatis", "timestamp": meta.get("deleted_at") or meta.get("timestamp") or datetime.fromtimestamp(folder.stat().st_mtime).isoformat(timespec="seconds"), "video_quality": str(meta.get("video_quality", "720")), "landscape_blur": bool(meta.get("landscape_blur", False)), "thumbnail": "", "saved": bool(meta.get("saved")), "saved_clips": [], "clips": [], "files": [], "status": meta.get("status"), "file_exists": False})
             if clips:
-                meta = self._read_json(folder / "run.json")
                 clip_meta = [self._read_json(Path(file["path"]).with_name("data.json")) for file in clips]
                 title = next((item.get("source_title") for item in clip_meta if item.get("source_title")), "")
                 description = next((item.get("source_description") for item in clip_meta if item.get("source_description")), "")
@@ -338,6 +341,8 @@ class WebJobManager:
         meta_path = target / "run.json"
         meta = self._read_json(meta_path)
         meta["saved"] = True
+        meta["status"] = "saved"
+        meta["saved_at"] = datetime.now().isoformat(timespec="seconds")
         clips = payload.get("clips") or []
         if not isinstance(clips, list):
             return {"status": "error", "message": "Invalid clips payload"}
@@ -349,7 +354,8 @@ class WebJobManager:
         keep = set(meta.get("saved_clips", [])) | set(valid_clips)
         meta["saved_clips"] = sorted(keep)
         meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-        self.log_activity({"action": "queue_add", "detail": f"{len(valid_clips)} clip dari {target.name}"})
+        self._enforce_saved_retention()
+        self.log_activity({"action": "gallery_save", "detail": f"{len(valid_clips)} clip dari {target.name}"})
         return {"status": "saved"}
 
     def _run(self, url, num_clips, add_captions, add_hook, subtitle_language, instruction, landscape_blur, run_dir, screen_size="9:16", source_credit=True):
@@ -358,7 +364,7 @@ class WebJobManager:
             cfg = self._config().config
             prompt = self._with_indonesian_instruction(cfg.get("system_prompt"), instruction)
             run_dir.mkdir(parents=True, exist_ok=True)
-            self._write_run_meta(run_dir, url, {"video_quality": str(cfg.get("video_quality", "720")), "landscape_blur": landscape_blur, "screen_size": screen_size})
+            self._write_run_meta(run_dir, url, {"video_quality": str(cfg.get("video_quality", "720")), "landscape_blur": landscape_blur, "screen_size": screen_size, "add_hook": add_hook, "add_captions": add_captions, "subtitle_language": subtitle_language, "status": "staged", "file_exists": True})
             self._add_log(f"Output folder: {run_dir}")
             self._add_log("Preparing AI/video processor")
             subtitle_style = {**cfg.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 65, "bottom_margin": 400}), "position": cfg.get("subtitle_position", "auto")}
@@ -399,7 +405,8 @@ class WebJobManager:
             self._add_log(f"Landscape blur: {'on' if landscape_blur else 'off'}")
             self._add_log("Processor started")
             core.process(url, num_clips=num_clips, add_captions=add_captions, add_hook=add_hook)
-            self._write_run_meta(run_dir, url, {**self._summarize_run(run_dir), "video_quality": quality, "landscape_blur": landscape_blur, "screen_size": screen_size})
+            self._write_run_meta(run_dir, url, {**self._summarize_run(run_dir), "video_quality": quality, "landscape_blur": landscape_blur, "screen_size": screen_size, "add_hook": add_hook, "add_captions": add_captions, "subtitle_language": subtitle_language, "status": "staged", "file_exists": True})
+            self._enforce_retention()
             self._status = "complete"
             self._message = "Complete"
             self._progress = 1.0
@@ -480,6 +487,68 @@ class WebJobManager:
         source_description = next((clip.get("source_description") for clip in clips if clip.get("source_description")), "")
         channel_name = next((clip.get("channel_name") for clip in clips if clip.get("channel_name")), "")
         return {"title": source_title or run_dir.name, "caption": source_description or f"{len(clips)} klip diekspor", "channel_name": channel_name, "saved": False}
+
+    def _has_staged_outputs(self):
+        output_dir = self._output_root()
+        if not output_dir.exists():
+            return False
+        for folder in output_dir.iterdir():
+            if not folder.is_dir() or folder.name == "_temp":
+                continue
+            meta = self._read_json(folder / "run.json")
+            if meta.get("status") in {"deleted", "expired"} or meta.get("file_exists") is False:
+                continue
+            saved = set(meta.get("saved_clips", []))
+            clips = [path for path in folder.rglob("master.mp4") if path.is_file() and "_temp" not in path.parts]
+            if any(str(path) not in saved for path in clips):
+                return True
+        return False
+
+    def _enforce_retention(self, max_active=10):
+        output_dir = self._output_root()
+        sessions = []
+        for folder in output_dir.iterdir() if output_dir.exists() else []:
+            if not folder.is_dir() or folder.name == "_temp":
+                continue
+            meta_path = folder / "run.json"
+            meta = self._read_json(meta_path)
+            if meta.get("status") in {"deleted", "expired"} or meta.get("file_exists") is False:
+                continue
+            sessions.append((folder.stat().st_mtime, folder, meta_path, meta))
+        for _, folder, meta_path, meta in sorted(sessions, reverse=True)[max_active:]:
+            for path in sorted(folder.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+                if path == meta_path:
+                    continue
+                if path.is_file():
+                    path.unlink(missing_ok=True)
+                elif path.is_dir():
+                    try:
+                        path.rmdir()
+                    except OSError:
+                        pass
+            meta.update({"status": "expired", "deleted_at": datetime.now().isoformat(timespec="seconds"), "file_exists": False})
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._add_log(f"Expired old session: {folder.name}")
+
+    def _enforce_saved_retention(self, max_saved=10):
+        output_dir = self._output_root()
+        saved_sessions = []
+        for folder in output_dir.iterdir() if output_dir.exists() else []:
+            meta_path = folder / "run.json"
+            meta = self._read_json(meta_path)
+            if not folder.is_dir() or not meta.get("saved_clips"):
+                continue
+            stamp = meta.get("saved_at") or meta.get("timestamp") or ""
+            saved_sessions.append((stamp, folder, meta_path, meta))
+        for _, folder, meta_path, meta in sorted(saved_sessions, reverse=True)[max_saved:]:
+            saved = set(meta.get("saved_clips", []))
+            for clip in saved:
+                clip_path = Path(clip)
+                if clip_path.exists() and folder in clip_path.parents:
+                    shutil.rmtree(clip_path.parent, ignore_errors=True)
+            meta.update({"status": "expired", "saved_clips": [], "deleted_at": datetime.now().isoformat(timespec="seconds"), "file_exists": any(folder.rglob("master.mp4"))})
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._add_log(f"Expired saved gallery item: {folder.name}")
 
     def _thumbnail(self, files):
         video = next((file for file in files if file["name"].lower().endswith(".mp4")), None)

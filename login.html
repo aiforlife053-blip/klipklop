@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="id">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Masuk KlipKlop</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+        <link rel="stylesheet" href="/static/styles.css?v=20260708-5" />
+        <style>
+            .auth-tab-active { background:#f15a24 !important; color:#fff !important; }
+            .auth-tab-inactive { background:transparent !important; color:#aab3c2 !important; }
+            .auth-submit { background:#f15a24 !important; color:#fff !important; }
+            .auth-input { background:#222b3b !important; color:#fff !important; -webkit-text-fill-color:#fff !important; caret-color:#fff; }
+            .auth-input:focus { border-color:#f15a24 !important; box-shadow:none !important; }
+            input.auth-input:-webkit-autofill,
+            input.auth-input:-webkit-autofill:hover,
+            input.auth-input:-webkit-autofill:focus { -webkit-box-shadow:0 0 0 1000px #222b3b inset !important; -webkit-text-fill-color:#fff !important; transition:background-color 9999s ease-in-out 0s; }
+        </style>
+    </head>
+    <body class="min-h-dvh bg-[#182231] text-white antialiased" style="font-family: Urbanist, sans-serif;">
+        <main class="grid min-h-dvh lg:grid-cols-[1.05fr_.95fr]">
+            <section
+                class="hidden lg:flex flex-col justify-between border-r border-white/10 bg-[#111827] p-10"
+            >
+                <div class="flex items-center gap-3 font-extrabold text-2xl">
+                    <img
+                        src="/logo%20klipklop.png?v=3"
+                        class="h-10 w-10 rounded-xl object-contain"
+                        alt="KlipKlop"
+                    /><span>KlipKlop</span>
+                </div>
+                <div class="max-w-xl space-y-5">
+                    <p class="text-sm font-semibold text-[#f15a24]">
+                        Creator clipping workspace
+                    </p>
+                    <h1
+                        class="text-5xl font-extrabold tracking-tight leading-tight"
+                    >
+                        Masuk, generate 1 klip terbaik, upload langsung.
+                    </h1>
+                    <p class="text-lg leading-8 text-slate-300">
+                        Akun dipakai untuk mengamankan dashboard, riwayat
+                        upload, dan koneksi sosial.
+                    </p>
+                </div>
+                <p class="text-sm text-slate-500">KlipKlop Web</p>
+            </section>
+            <section class="flex items-center justify-center p-6">
+                <div
+                    class="w-full max-w-sm rounded-2xl border border-white/10 bg-[#111827] p-5 shadow-2xl shadow-black/30"
+                >
+                    <div
+                        class="mb-7 lg:hidden flex items-center gap-3 font-extrabold text-xl"
+                    >
+                        <img
+                            src="/logo%20klipklop.png?v=3"
+                            class="h-9 w-9 rounded-xl object-contain"
+                            alt="KlipKlop"
+                        /><span>KlipKlop</span>
+                    </div>
+                    <div class="mb-6">
+                        <h2
+                            id="title"
+                            class="text-2xl font-extrabold tracking-tight"
+                        >
+                            Masuk
+                        </h2>
+                        <p id="subtitle" class="mt-2 text-sm text-slate-300">
+                            Lanjutkan ke dashboard KlipKlop.
+                        </p>
+                    </div>
+                    <div
+                        class="mb-5 grid grid-cols-2 rounded-2xl bg-[#222b3b] p-1 text-sm font-bold"
+                    >
+                        <button
+                            id="tab-login"
+                            class="auth-tab-active rounded-xl px-3 py-2.5 transition"
+                            type="button"
+                        >
+                            Masuk</button
+                        ><button
+                            id="tab-signup"
+                            class="auth-tab-inactive rounded-xl px-3 py-2.5 transition"
+                            type="button"
+                        >
+                            Daftar
+                        </button>
+                    </div>
+                    <form id="form" class="space-y-4">
+                        <label
+                            class="block text-sm font-semibold text-slate-200"
+                            >Email<input
+                                id="email"
+                                class="auth-input mt-1 w-full rounded-xl border border-white/10 px-4 py-3 outline-none"
+                                type="email"
+                                autocomplete="email"
+                                required /></label
+                        ><label
+                            class="block text-sm font-semibold text-slate-200"
+                            >Password<input
+                                id="password"
+                                class="auth-input mt-1 w-full rounded-xl border border-white/10 px-4 py-3 outline-none"
+                                type="password"
+                                autocomplete="current-password"
+                                required /></label
+                        ><button
+                            id="submit"
+                            class="auth-submit w-full rounded-xl px-4 py-3 font-extrabold transition"
+                            type="submit"
+                        >
+                            Masuk
+                        </button>
+                        <p
+                            id="error"
+                            class="min-h-5 text-sm font-semibold text-red-300"
+                        ></p>
+                    </form>
+                </div>
+            </section>
+        </main>
+        <script src="/static/src/login.js?v=20260708-4"></script>
+    </body>
+</html>

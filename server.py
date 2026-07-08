@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -25,7 +25,7 @@ if sys.version_info < (3, 11) and os.name == "nt" and os.environ.get("KLIPKLOP_P
         raise SystemExit("Python 3.11+ required. Run: py -3.12 server.py")
 
 from job_manager import WebJobManager
-from social_auth import get_youtube_credentials, is_youtube_connected, start_youtube_oauth, check_youtube_oauth_status, TOKEN_FILE
+from social_auth import delete_youtube_token, is_youtube_connected, start_youtube_oauth, check_youtube_oauth_status
 from youtube_uploader import delete_youtube_video, list_existing_youtube_videos, upload_youtube_video
 
 
@@ -55,6 +55,9 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         if parsed.path == "/login":
             self._login_page()
             return
+        if parsed.path.startswith("/static/") or parsed.path == "/logo%20klipklop.png":
+            self._static(parsed.path)
+            return
         if not self._authenticated():
             self._redirect_login() if not parsed.path.startswith("/api/") else self._json({"status": "error", "message": "Unauthorized"}, 401)
             return
@@ -67,7 +70,7 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/download":
             self._download(parsed.query)
         elif parsed.path == "/api/social/status":
-            self._json(is_youtube_connected())
+            self._json(is_youtube_connected(self._current_user()))
         elif parsed.path == "/api/activity":
             self._json(MANAGER.list_activities())
         else:
@@ -123,7 +126,7 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._json(MANAGER.clear_activities())
         elif parsed.path == "/api/social/youtube/connect":
             try:
-                result = start_youtube_oauth()
+                result = start_youtube_oauth(self._current_user())
                 self._json(result)
             except Exception as e:
                 self._json({"status": "error", "message": str(e)}, 400)
@@ -134,20 +137,18 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._json({"status": "error", "message": str(e)}, 400)
         elif parsed.path == "/api/social/youtube/disconnect":
-            import os
-            if os.path.exists(TOKEN_FILE):
-                os.remove(TOKEN_FILE)
+            delete_youtube_token(self._current_user())
             self._json({"status": "ok"})
         elif parsed.path == "/api/social/youtube/upload":
             self._upload_youtube(payload)
         elif parsed.path == "/api/social/youtube/check":
             try:
-                self._json({"status": "ok", "existing": list_existing_youtube_videos(payload.get("video_ids") or [])})
+                self._json({"status": "ok", "existing": list_existing_youtube_videos(payload.get("video_ids") or [], self._current_user())})
             except Exception as e:
                 self._json({"status": "error", "message": str(e)}, 400)
         elif parsed.path == "/api/social/youtube/delete":
             try:
-                result = {"status": "ok", **delete_youtube_video(str(payload.get("video_id") or ""))}
+                result = {"status": "ok", **delete_youtube_video(str(payload.get("video_id") or ""), self._current_user())}
                 MANAGER.log_activity({"action": "youtube_delete", "detail": result.get("video_id", "")})
                 self._json(result)
             except Exception as e:
@@ -155,7 +156,7 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         else:
             self._json({"status": "error", "message": "Not found"}, 404)
 
-    def _authenticated(self):
+    def _current_user(self):
         raw = self.headers.get("Cookie", "")
         token = ""
         for part in raw.split(";"):
@@ -164,16 +165,19 @@ class WebKlipHandler(BaseHTTPRequestHandler):
                 token = value
                 break
         if not token:
-            return False
+            return ""
         _, _, secret = _supabase_config()
         try:
             body = base64.urlsafe_b64decode(token.encode()).decode()
             email, ts, sig = body.rsplit(":", 2)
             age = __import__("time").time() - int(ts)
         except Exception:
-            return False
+            return ""
         expected = hmac.new(secret.encode(), f"{email}:{ts}".encode(), hashlib.sha256).hexdigest()
-        return "@" in email and 0 <= age <= SESSION_TTL and hmac.compare_digest(sig, expected)
+        return email if "@" in email and 0 <= age <= SESSION_TTL and hmac.compare_digest(sig, expected) else ""
+
+    def _authenticated(self):
+        return bool(self._current_user())
 
     def _login(self):
         payload, err = self._payload(max_size=4096)
@@ -274,6 +278,17 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def _login_page(self):
+        login_file = ROOT / "login.html"
+        if login_file.exists():
+            raw = login_file.read_bytes()
+            self.send_response(200)
+            self._add_security_headers()
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(raw)
+            return
         raw = '''<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Masuk KlipKlop</title><script src="https://cdn.tailwindcss.com"></script></head><body class="min-h-dvh bg-[#182231] text-white antialiased"><main class="grid min-h-dvh lg:grid-cols-[1.05fr_.95fr]"><section class="hidden lg:flex flex-col justify-between border-r border-white/10 bg-[#111827] p-10"><div class="flex items-center gap-3 font-extrabold text-2xl"><img src="/logo%20klipklop.png?v=3" class="h-10 w-10 rounded-xl object-contain" alt="KlipKlop"><span>KlipKlop</span></div><div class="max-w-xl space-y-5"><p class="text-sm font-semibold text-[#f15a24]">Creator clipping workspace</p><h1 class="text-5xl font-extrabold tracking-tight leading-tight">Masuk, generate 1 klip terbaik, upload langsung.</h1><p class="text-lg leading-8 text-slate-300">Akun dipakai untuk mengamankan dashboard, riwayat upload, dan koneksi sosial.</p></div><p class="text-sm text-slate-500">KlipKlop Web</p></section><section class="flex items-center justify-center p-6"><div class="w-full max-w-sm rounded-2xl border border-white/10 bg-[#111827] p-5 shadow-2xl shadow-black/30"><div class="mb-7 lg:hidden flex items-center gap-3 font-extrabold text-xl"><img src="/logo%20klipklop.png?v=3" class="h-9 w-9 rounded-xl object-contain" alt="KlipKlop"><span>KlipKlop</span></div><div class="mb-6"><h2 id="title" class="text-2xl font-extrabold tracking-tight">Masuk</h2><p id="subtitle" class="mt-2 text-sm text-slate-300">Lanjutkan ke dashboard KlipKlop.</p></div><div class="mb-5 grid grid-cols-2 rounded-2xl bg-[#222b3b] p-1 text-sm font-bold"><button id="tab-login" class="rounded-xl bg-[#f15a24] px-3 py-2.5 text-white transition" type="button">Masuk</button><button id="tab-signup" class="rounded-xl px-3 py-2.5 text-slate-300 transition" type="button">Daftar</button></div><form id="form" class="space-y-4"><label class="block text-sm font-semibold text-slate-200" for="email">Email</label><input id="email" class="w-full rounded-2xl bg-[#222b3b] border border-[#3a4558] px-3.5 py-3 text-sm outline-none transition focus:border-[#f15a24] focus:ring-2 focus:ring-[#f15a24]/25" placeholder="nama@email.com" type="email" autocomplete="username" required><label class="block text-sm font-semibold text-slate-200" for="password">Password</label><input id="password" class="w-full rounded-2xl bg-[#222b3b] border border-[#3a4558] px-3.5 py-3 text-sm outline-none transition focus:border-[#f15a24] focus:ring-2 focus:ring-[#f15a24]/25" placeholder="Minimal 6 karakter" type="password" autocomplete="current-password" required><p id="err" class="min-h-5 text-sm text-red-300" role="alert"></p><button id="submit" class="w-full rounded-2xl bg-[#f15a24] py-3 font-bold text-white transition hover:bg-[#ff6a33] disabled:cursor-not-allowed disabled:opacity-60">Masuk</button></form></div></section></main><script>let mode='login';function setMode(next){mode=next;const isSignup=mode==='signup';title.textContent=isSignup?'Daftar':'Masuk';subtitle.textContent=isSignup?'Buat akun baru untuk akses dashboard.':'Lanjutkan ke dashboard KlipKlop.';submit.textContent=isSignup?'Buat akun':'Masuk';tab_login.className=isSignup?'rounded-xl px-3 py-2.5 text-slate-300 transition':'rounded-xl bg-[#f15a24] px-3 py-2.5 text-white transition';tab_signup.className=isSignup?'rounded-xl bg-[#f15a24] px-3 py-2.5 text-white transition':'rounded-xl px-3 py-2.5 text-slate-300 transition'}const tab_login=document.getElementById('tab-login'),tab_signup=document.getElementById('tab-signup');tab_login.onclick=()=>setMode('login');tab_signup.onclick=()=>setMode('signup');form.onsubmit=async e=>{e.preventDefault();const email=document.getElementById('email').value.trim();const password=document.getElementById('password').value;err.textContent='';submit.disabled=true;const r=await fetch(mode==='signup'?'/api/signup':'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});submit.disabled=false;if(r.ok) location.href='/'; else {const msg=(await r.json()).message||'Gagal';err.textContent=msg==='Email not confirmed'?'Email belum dikonfirmasi. Cek inbox Supabase atau matikan Confirm email.':msg}};</script></body></html>'''.encode("utf-8")
         self.send_response(200)
         self._add_security_headers()
@@ -293,7 +308,7 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         description = str(payload.get("description") or "").strip()
         privacy = str(payload.get("privacy") or "private").strip()
         try:
-            result = upload_youtube_video(target, title, description, privacy)
+            result = upload_youtube_video(target, title, description, privacy, self._current_user())
             MANAGER.log_activity({"action": "youtube_upload", "detail": result.get("video_id", target.name)})
             self._json({"status": "ok", **result})
         except Exception as e:
@@ -401,9 +416,11 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._json({"status": "error", "message": "File not found"}, 404)
             return
         raw = target.read_bytes()
+        safe_name = quote(target.name.replace('"', '').replace('\r', '').replace('\n', ''))
         self.send_response(200)
+        self._add_security_headers()
         self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Content-Disposition", f'attachment; filename="{target.name}"')
+        self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{safe_name}")
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)

@@ -1,14 +1,19 @@
 import os
 import json
 import socket
+import secrets
 import threading
+import time
 import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 
-CLIENT_SECRET_FILE = "client_secret.json"
-TOKEN_FILE = "token_youtube.json"
+ROOT = Path(__file__).resolve().parent
+CLIENT_SECRET_FILE = str(ROOT / "client_secret.json")
+TOKEN_FILE = str(ROOT / "token_youtube.json")
+TOKEN_DIR = ROOT / "tokens"
 SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
 
 # Non-blocking OAuth state
@@ -17,6 +22,14 @@ _auth_lock = threading.Lock()
 
 AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
+
+
+def _token_file(user_key=None):
+    if not user_key:
+        return TOKEN_FILE
+    safe = ''.join(ch if ch.isalnum() else '_' for ch in str(user_key).lower()).strip('_')[:120] or 'user'
+    TOKEN_DIR.mkdir(exist_ok=True)
+    return str(TOKEN_DIR / f"youtube_{safe}.json")
 
 
 def _load_client_config():
@@ -39,11 +52,19 @@ def _find_free_port():
 class _CallbackHandler(BaseHTTPRequestHandler):
     auth_code = None
     error = None
+    expected_state = None
 
     def do_GET(self):
         qs = urllib.parse.urlparse(self.path).query
         params = urllib.parse.parse_qs(qs)
-        if "code" in params:
+        state = params.get("state", [""])[0]
+        if not secrets.compare_digest(state, _CallbackHandler.expected_state or ""):
+            _CallbackHandler.error = "invalid_state"
+            self.send_response(400)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"<html><body><h2>Invalid OAuth state. Please reconnect.</h2></body></html>")
+        elif "code" in params:
             _CallbackHandler.auth_code = params["code"][0]
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -77,7 +98,7 @@ def _exchange_code(code, redirect_uri, client_id, client_secret):
         return json.loads(resp.read().decode())
 
 
-def start_youtube_oauth() -> dict:
+def start_youtube_oauth(user_key=None) -> dict:
     """Generate OAuth URL and start local callback server in background. Returns immediately."""
     with _auth_lock:
         if _auth_state.get("status") == "waiting":
@@ -89,6 +110,7 @@ def start_youtube_oauth() -> dict:
     port = _find_free_port()
     redirect_uri = f"http://localhost:{port}/"
 
+    oauth_state = secrets.token_urlsafe(24)
     params = urllib.parse.urlencode({
         "client_id": client_id,
         "redirect_uri": redirect_uri,
@@ -97,6 +119,7 @@ def start_youtube_oauth() -> dict:
         "access_type": "offline",
         "include_granted_scopes": "true",
         "prompt": "consent",
+        "state": oauth_state,
     })
     auth_url = f"{AUTH_ENDPOINT}?{params}"
 
@@ -106,19 +129,21 @@ def start_youtube_oauth() -> dict:
         _auth_state["error"] = None
 
     def _run():
+        server = None
         try:
             _CallbackHandler.auth_code = None
             _CallbackHandler.error = None
+            _CallbackHandler.expected_state = oauth_state
             server = HTTPServer(("localhost", port), _CallbackHandler)
-            server.timeout = 120
-            while _CallbackHandler.auth_code is None and _CallbackHandler.error is None:
+            server.timeout = 1
+            deadline = time.monotonic() + 120
+            while _CallbackHandler.auth_code is None and _CallbackHandler.error is None and time.monotonic() < deadline:
                 server.handle_request()
-            server.server_close()
 
-            if _CallbackHandler.error:
+            if _CallbackHandler.error or not _CallbackHandler.auth_code:
                 with _auth_lock:
                     _auth_state["status"] = "error"
-                    _auth_state["error"] = _CallbackHandler.error
+                    _auth_state["error"] = _CallbackHandler.error or "OAuth timeout. Silakan connect ulang."
                 return
 
             token_data = _exchange_code(_CallbackHandler.auth_code, redirect_uri, client_id, client_secret)
@@ -130,15 +155,19 @@ def start_youtube_oauth() -> dict:
                 client_secret=client_secret,
                 scopes=SCOPES,
             )
-            with open(TOKEN_FILE, "w") as f:
+            token_file = _token_file(user_key)
+            with open(token_file, "w") as f:
                 f.write(creds.to_json())
-            print(f"Token disimpan di {TOKEN_FILE}")
+            print(f"Token disimpan di {token_file}")
             with _auth_lock:
                 _auth_state["status"] = "connected"
         except Exception as e:
             with _auth_lock:
                 _auth_state["status"] = "error"
                 _auth_state["error"] = str(e)
+        finally:
+            if server:
+                server.server_close()
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()
@@ -150,25 +179,33 @@ def check_youtube_oauth_status() -> dict:
         return {"status": _auth_state["status"], "error": _auth_state.get("error")}
 
 
-def get_youtube_credentials() -> Credentials:
+def get_youtube_credentials(user_key=None) -> Credentials:
     creds = None
-    if os.path.exists(TOKEN_FILE):
-        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+    token_file = _token_file(user_key)
+    if os.path.exists(token_file):
+        creds = Credentials.from_authorized_user_file(token_file, SCOPES)
     if creds and creds.valid:
         return creds
     if creds and creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        with open(TOKEN_FILE, "w") as f:
+        with open(token_file, "w") as f:
             f.write(creds.to_json())
         return creds
     raise FileNotFoundError("Token tidak ditemukan atau expired. Silakan Connect ulang.")
 
 
-def is_youtube_connected() -> dict:
-    if not os.path.exists(TOKEN_FILE):
+def delete_youtube_token(user_key=None):
+    token_file = _token_file(user_key)
+    if os.path.exists(token_file):
+        os.remove(token_file)
+
+
+def is_youtube_connected(user_key=None) -> dict:
+    token_file = _token_file(user_key)
+    if not os.path.exists(token_file):
         return {"connected": False}
     try:
-        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+        creds = Credentials.from_authorized_user_file(token_file, SCOPES)
         return {"connected": bool(creds.refresh_token), "expired": bool(creds.expired)}
     except Exception as e:
         return {"connected": False, "error": str(e)}
