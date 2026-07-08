@@ -8,6 +8,7 @@ let processingActive = false;
 let completionNotified = false;
 let latestProgress = 0;
 let latestMessage = 'Menyiapkan AI...';
+let currentSettings = {};
 
 function initCustomSelects() {
   document.querySelectorAll('select').forEach(select => {
@@ -130,13 +131,14 @@ async function loadSettings() {
 }
 
 function applySettings(data, keepApiKey) {
+  currentSettings = data || {};
   setValue('base-url', data.base_url || 'https://generativelanguage.googleapis.com/v1beta/openai');
   if (!keepApiKey) setValue('api-key', '');
   const keyInput = $('api-key');
   if (keyInput) keyInput.placeholder = data.api_key_saved ? 'API key tersimpan' : 'Gemini API key';
   setValue('model', data.model || 'gemini-2.5-flash');
-  setValue('subtitle-engine', data.subtitle_engine || 'local');
-  setValue('local-whisper-model', data.local_whisper?.model || 'medium');
+  setValue('subtitle-engine', 'local');
+  setValue('local-whisper-model', 'small');
   setValue('caption-base-url', data.caption_base_url || 'https://api.openai.com/v1');
   setValue('caption-model', data.caption_model || 'whisper-1');
   setValue('caption-api-key', '');
@@ -145,10 +147,29 @@ function applySettings(data, keepApiKey) {
   setValue('subtitle-language', data.subtitle_language || 'id');
   setValue('video-quality', data.video_quality || '720');
   setValue('video-quality-main', data.video_quality || '720');
-  setChecked('landscape-blur', !!data.landscape_blur);
+  setChecked('landscape-blur', data.landscape_blur ?? true);
   setValue('subtitle-font', data.subtitle_style?.font || 'Plus Jakarta Sans');
   setValue('subtitle-size', data.subtitle_style?.size || 65);
   setValue('output-dir', data.output_dir || '');
+  setChecked('watermark-enabled', !!data.watermark?.enabled);
+  setValue('watermark-image', data.watermark?.image_path || '');
+  setValue('watermark-opacity', Math.round((data.watermark?.opacity ?? 0.8) * 100));
+  setValue('watermark-scale', Math.round((data.watermark?.scale ?? 0.15) * 100));
+  setChecked('credit-enabled', data.credit_watermark?.enabled ?? true);
+  setValue('credit-text', data.credit_watermark?.text || 'sc : {channel}');
+  setValue('credit-color', data.credit_watermark?.color || '#ffffff');
+  setValue('credit-opacity', Math.round((data.credit_watermark?.opacity ?? 0.55) * 100));
+  setValue('credit-size', Math.round((data.credit_watermark?.size ?? 0.032) * 1000));
+  setChecked('hook-enabled', data.hook_style?.enabled ?? true);
+  setValue('hook-text-color', data.hook_style?.text_color || '#0033ff');
+  setValue('hook-bg-color', data.hook_style?.background_color || '#ffffff');
+  setValue('hook-font-size', Math.round((data.hook_style?.font_size ?? 0.054) * 1000));
+  setValue('hook-radius', data.hook_style?.corner_radius ?? 28);
+  setValue('hook-duration', data.hook_style?.duration ?? 5);
+  setChecked('blur-enabled', data.blur_background?.enabled ?? true);
+  setValue('blur-zoom', Math.round((data.blur_background?.zoom ?? 1.08) * 100));
+  setValue('blur-strength', data.blur_background?.strength ?? 30);
+  updateWatermarkLabels();
   setCookieStatus(data.cookies);
   toggleSubtitleEngineFields();
   updateCompactStatus('Idle');
@@ -157,6 +178,29 @@ function applySettings(data, keepApiKey) {
 function toggleSubtitleEngineFields() {
   const fields = $('api-whisper-fields');
   if (fields) fields.classList.toggle('hidden', getValue('subtitle-engine', 'local') === 'local');
+}
+
+function updateWatermarkLabels() {
+  setText('watermark-opacity-label', `${getValue('watermark-opacity', '80')}%`);
+  setText('watermark-scale-label', `${getValue('watermark-scale', '15')}%`);
+  const image = getValue('watermark-image');
+  const name = image ? image.split(/[\\/]/).pop() : 'Belum ada gambar';
+  setText('watermark-file-name', name);
+}
+
+async function uploadWatermarkFile(file) {
+  if (!file) return;
+  const content = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+  const result = await api('/api/watermark/upload', { method: 'POST', body: JSON.stringify({ name: file.name, content }) });
+  if (result.status !== 'ok') throw new Error(result.message || 'Gagal upload watermark');
+  setValue('watermark-image', result.path);
+  updateWatermarkLabels();
+  updateConfigPreview('watermark');
 }
 
 function setCookieStatus(cookies) {
@@ -182,24 +226,56 @@ function settingsPayload(extra = {}) {
   return {
     base_url: getValue('base-url'),
     model: getValue('model'),
-    subtitle_engine: getValue('subtitle-engine', 'local'),
+    subtitle_engine: 'local',
     local_whisper: {
       enabled: true,
-      model: getValue('local-whisper-model', 'medium'),
+      model: 'small',
       device: 'cpu',
       compute_type: 'int8',
     },
     caption_base_url: getValue('caption-base-url', 'https://api.openai.com/v1'),
     caption_api_key: getValue('caption-api-key'),
     caption_model: getValue('caption-model', 'whisper-1'),
-    subtitle_language: getValue('subtitle-language', 'id'),
+    subtitle_language: 'id',
     video_quality: getValue('video-quality-main', getValue('video-quality', '720')),
-    landscape_blur: getChecked('landscape-blur', false),
+    landscape_blur: getChecked('landscape-blur', true) && getChecked('blur-enabled', true),
     subtitle_style: {
-      font: getValue('subtitle-font', 'Plus Jakarta Sans'),
-      size: Number(getValue('subtitle-size', '58') || 58),
+      font: 'Plus Jakarta Sans',
+      size: 58,
     },
     output_dir: getValue('output-dir'),
+    watermark: {
+      enabled: getChecked('watermark-enabled', false),
+      image_path: getValue('watermark-image'),
+      opacity: Number(getValue('watermark-opacity', '80')) / 100,
+      scale: Number(getValue('watermark-scale', '15')) / 100,
+      position_x: Number($('preview-target')?.dataset.x || 85) / 100,
+      position_y: Number($('preview-target')?.dataset.y || 5) / 100,
+    },
+    credit_watermark: {
+      enabled: getChecked('credit-enabled', true),
+      text: getValue('credit-text', 'sc : {channel}'),
+      color: getValue('credit-color', '#ffffff'),
+      opacity: Number(getValue('credit-opacity', '55')) / 100,
+      size: Number(getValue('credit-size', '32')) / 1000,
+      position_x: Number($('preview-target')?.dataset.x || 6) / 100,
+      position_y: Number($('preview-target')?.dataset.y || 23) / 100,
+    },
+    hook_style: {
+      enabled: getChecked('hook-enabled', true),
+      text_color: getValue('hook-text-color', '#0033ff'),
+      background_color: getValue('hook-bg-color', '#ffffff'),
+      font_size: Number(getValue('hook-font-size', '54')) / 1000,
+      corner_radius: Number(getValue('hook-radius', '28')),
+      duration: Number(getValue('hook-duration', '5')),
+      position_x: Number($('preview-target')?.dataset.x || 50) / 100,
+      position_y: Number($('preview-target')?.dataset.y || 20) / 100,
+    },
+    blur_background: {
+      enabled: getChecked('blur-enabled', true),
+      zoom: Number(getValue('blur-zoom', '108')) / 100,
+      strength: Number(getValue('blur-strength', '30')),
+    },
     ...extra,
   };
 }
@@ -238,7 +314,7 @@ async function clearApiKey() {
   } catch (error) { showError(error.message); }
 }
 
-function getScreenSize() { const selected = document.querySelector('input[name="screen_size"]:checked'); return selected ? selected.value : '9:16'; }
+function getScreenSize() { return '9:16'; }
 function setScreenSize(value) {
   if (!['9:16', '16:9'].includes(value)) value = '9:16';
   document.querySelectorAll('[data-screen-card]').forEach((card) => {
@@ -259,17 +335,17 @@ function saveInstruction() { savedInstruction = getValue('instruction').slice(0,
 function cancelInstruction() { setValue('instruction', savedInstruction); updateInstructionCount(); $('instruction-modal').classList.add('hidden'); }
 function toggleProfileMenu() { const menu = $('profile-menu'); if (menu) menu.classList.toggle('hidden'); }
 
-function startPayload(captionsOn = getChecked('captions', true)) {
+function startPayload() {
   return {
     url: getValue('youtube-url'),
-    num_clips: 3,
-    add_captions: captionsOn,
-    enable_captions: captionsOn,
+    num_clips: 1,
+    add_captions: true,
+    enable_captions: true,
     add_hook: true,
     hook_mode: true,
-    screen_size: getScreenSize(),
-    subtitle_language: getValue('subtitle-language', 'id'),
-    landscape_blur: getChecked('landscape-blur', false),
+    screen_size: '9:16',
+    subtitle_language: 'id',
+    landscape_blur: getChecked('landscape-blur', true) && getChecked('blur-enabled', true),
     source_credit: true,
     instruction: savedInstruction,
   };
@@ -287,10 +363,8 @@ async function startProcessing() {
   completionNotified = false;
   await renderOutputs();
   try {
-    const captionsOn = getChecked('captions', true);
     await saveSettings();
-    setChecked('captions', captionsOn);
-    const result = await api('/api/start', { method: 'POST', body: JSON.stringify(startPayload(captionsOn)) });
+    const result = await api('/api/start', { method: 'POST', body: JSON.stringify(startPayload()) });
     if (result.status !== 'started') throw new Error(result.message || 'Gagal mulai');
     showSuccess('Generate dimulai');
     pollTimer = setInterval(pollStatus, 800);
@@ -413,7 +487,7 @@ function updateCompactStatus(message) {
   const el = $('compact-status');
   if (!el) return;
   const clip = (String(message || '').match(/Clip (\d+\/\d+)/) || [])[1]?.replace('/', ' dari ') || '-';
-  el.innerHTML = `Status: ${escapeHtml(message || 'Idle')}<br />Clip: ${escapeHtml(clip)} | Quality: ${escapeHtml(getValue('video-quality-main', '720'))}p | Mode: ${getChecked('landscape-blur', false) ? 'Blur' : 'Crop'}`;
+  el.innerHTML = `Status: ${escapeHtml(message || 'Idle')}<br />Clip: ${escapeHtml(clip)} | Quality: ${escapeHtml(getValue('video-quality-main', '720'))}p | 9:16 ${getChecked('landscape-blur', true) ? '+ Blur' : '+ Crop'}`;
 }
 
 function updateLogPanel(data) {
@@ -505,12 +579,12 @@ function renderEmptyHome() {
   </div>
   <h3 class="text-[19px] font-semibold text-black mb-2.5 tracking-tight">Siap Membuat Klip Viral Terbaik?</h3>
   <p class="text-[13px] text-gray-500 leading-relaxed max-w-md mx-auto">
-    Tempel link YouTube di panel kiri. AI akan memilih 3 momen dengan potensi viral tertinggi.
+    Tempel link YouTube di panel kiri. AI akan memilih 1 momen dengan potensi viral tertinggi.
   </p>`;
 }
 
 function withPendingClips(group) { const saved = new Set(group.saved_clips || []); return { ...group, clips: (group.clips || []).filter((clip) => !saved.has(clip.path)) }; }
-function metaLine(group, count) { return `${count} klip tersedia | ${group.video_quality || '720'}p | ${group.landscape_blur ? 'Blur Background' : 'Crop'} | ${formatTime(group.timestamp)}`; }
+function metaLine(group, count) { return `${count} klip tersedia | ${group.video_quality || '720'}p | 9:16 ${group.landscape_blur ? '+ Blur' : '+ Crop'} | ${formatTime(group.timestamp)}`; }
 function clipDuration(clip) { return clip.duration_seconds ? `Durasi: ${Math.round(clip.duration_seconds)}s` : 'Durasi: -'; }
 function uploadDescription(clip, group) { const source = clip.channel_name || group.channel_name || ''; return `${clip.description || group.caption || ''}${source ? `\n\nsc: ${source}` : ''}`.trim(); }
 
@@ -551,7 +625,7 @@ function renderHistoryClip(file) {
   const deleteAttr = `data-delete-output="${escapeAttr(file.path)}" data-delete-kind="clip"`;
   const status = state.status === 'failed' ? `<p class="text-[10px] text-red-400 mt-1">${escapeHtml(state.error || 'Upload gagal')}</p>` : url ? `<a class="text-[10px] text-green-400 mt-1 truncate" href="${escapeAttr(url)}" target="_blank">${escapeHtml(url)}</a>` : '';
   return `<article class="bg-white border border-gray-200 rounded-xl p-2 flex flex-col w-full max-w-[210px] overflow-hidden">
-    <button type="button" class="relative bg-gray-100 rounded-lg aspect-[4/3] overflow-hidden mb-2 cursor-zoom-in" data-video-open="${escapeAttr(href)}">
+    <button type="button" class="relative bg-gray-100 rounded-lg aspect-[4/3] overflow-hidden mb-2 cursor-zoom-in" data-video-open="${escapeAttr(href)}" data-title="${escapeAttr(file.title || file.name)}" data-description="${escapeAttr(uploadDescription(file, file.group || {}))}" data-duration="${escapeAttr(clipDuration(file))}" data-youtube-upload="${escapeAttr(file.path)}" data-delete-output="${escapeAttr(file.path)}" data-delete-kind="clip">
       <video class="w-full h-full object-cover pointer-events-none" src="${href}" muted preload="metadata"></video>
     </button>
     <h3 class="font-semibold text-[12px] leading-snug text-gray-950 mb-1 whitespace-normal break-words">${escapeHtml(file.title || file.name)}</h3>
@@ -575,7 +649,7 @@ function renderSessionRow(group) {
 function renderFileLink(file) {
   const href = `/api/download?path=${encodeURIComponent(file.path)}`;
   return `<article class="bg-white border border-gray-200 rounded-xl p-3 flex flex-col w-[260px] shrink-0 overflow-hidden">
-    <button type="button" class="relative bg-gray-100 rounded-lg aspect-[4/3] overflow-hidden mb-2 cursor-zoom-in" data-video-open="${escapeAttr(href)}">
+    <button type="button" class="relative bg-gray-100 rounded-lg aspect-[4/3] overflow-hidden mb-2 cursor-zoom-in" data-video-open="${escapeAttr(href)}" data-title="${escapeAttr(file.title || file.name)}" data-description="${escapeAttr(uploadDescription(file, file.group || {}))}" data-duration="${escapeAttr(clipDuration(file))}" data-youtube-upload="${escapeAttr(file.path)}" data-delete-output="${escapeAttr(file.path)}" data-delete-kind="clip">
       <video class="w-full h-full object-cover pointer-events-none" src="${href}" muted preload="metadata"></video>
     </button>
     <div class="flex flex-col flex-1 min-h-0">
@@ -592,26 +666,22 @@ function renderFileLink(file) {
 
 function renderExportSession(group) {
   const clips = group.clips || [];
-  const status = $('compact-status')?.innerHTML || 'Status: Idle<br>Clip: - | Quality: 480p | Mode: Blur';
-  return `<section class="border-0 p-6 bg-transparent w-full max-w-full min-h-[calc(100vh-90px)] overflow-hidden flex flex-col"><div class="mb-8"><h2 class="text-[20px] font-semibold text-black mb-2 tracking-tight">Hasil Klip</h2><p class="text-[13px] text-gray-500 leading-relaxed mb-4 max-w-3xl">Klip yang sudah selesai akan muncul di sini satu per satu saat proses masih berjalan.</p><div class="gallery-warning-badge">Simpan klip ke Galeri dulu untuk mengaktifkan download. Hapus atau simpan semua klip sebelum generate baru.</div></div><div class="flex flex-wrap gap-4 justify-center">${clips.map((clip, index) => renderExportCard(group, clip, index)).join('')}</div><div class="mt-10 text-left w-full max-w-5xl mx-auto"><h3 class="font-semibold text-[16px] leading-snug text-gray-950 whitespace-normal break-words">${escapeHtml(group.title)}</h3><p class="text-[12px] text-gray-500 whitespace-normal break-words mt-2">${escapeHtml(metaLine(group, clips.length))}</p></div><div class="flex items-end justify-between gap-4 text-[13px] text-gray-500 mt-auto pt-10"><div>${status}</div><button class="border border-gray-200 px-4 py-2.5 rounded-xl text-[13px] font-semibold text-gray-700 hover:bg-gray-50 bg-white" type="button" data-show-json="true">JSON</button></div></section>`;
+  const status = $('compact-status')?.innerHTML || 'Status: Idle<br>Clip: - | Quality: 480p | 9:16';
+  return `<section class="border-0 p-6 bg-transparent w-full max-w-full min-h-[calc(100vh-90px)] overflow-hidden flex flex-col"><div class="mb-8"><h2 class="text-[20px] font-semibold text-black mb-2 tracking-tight">Hasil Klip</h2><p class="text-[13px] text-gray-500 leading-relaxed mb-4 max-w-3xl">Klip yang sudah selesai akan muncul di sini satu per satu saat proses masih berjalan.</p><div class="gallery-warning-badge">Simpan klip ke Galeri dulu untuk mengaktifkan download. Hapus atau simpan semua klip sebelum generate baru.</div></div><div class="flex flex-wrap gap-4 justify-center">${clips.map((clip, index) => renderExportCard(group, clip, index)).join('')}</div><div class="mt-10 text-left w-full max-w-5xl mx-auto"><h3 class="font-semibold text-[16px] leading-snug text-gray-950 whitespace-normal break-words">${escapeHtml(group.title)}</h3><p class="text-[12px] text-gray-500 whitespace-normal break-words mt-2">${escapeHtml(metaLine(group, clips.length))}</p></div><div class="flex items-end justify-between gap-4 text-[13px] text-gray-500 mt-auto pt-10"><div>${status}</div><button class="border border-gray-200 px-4 py-2.5 rounded-xl text-[13px] font-semibold text-gray-700 hover:bg-gray-50 bg-white" type="button" data-show-json="true">JSON Payload</button></div></section>`;
 }
 
 function renderExportCard(group, clip, index = 0) {
   if (!clip || !clip.path) return '';
   const href = `/api/download?path=${encodeURIComponent(clip.path)}`;
-  return `<article class="bg-white border border-gray-200 rounded-xl p-3 flex flex-col w-[260px] shrink-0 overflow-hidden">
-    <button type="button" class="relative bg-gray-100 rounded-lg aspect-[4/3] overflow-hidden mb-2 cursor-zoom-in" data-video-open="${escapeAttr(href)}">
+  return `<article class="bg-white border border-gray-200 rounded-xl p-2 flex flex-col w-full max-w-[210px] overflow-hidden">
+    <button type="button" class="relative bg-gray-100 rounded-lg aspect-[4/3] overflow-hidden mb-2 cursor-zoom-in" data-video-open="${escapeAttr(href)}" data-title="${escapeAttr(clip.title || `Klip ${index + 1}`)}" data-description="${escapeAttr(uploadDescription(clip, group))}" data-duration="${escapeAttr(clipDuration(clip))}" data-save-output="${escapeAttr(group.path)}" data-save-one="${escapeAttr(clip.path)}" data-youtube-upload="${escapeAttr(clip.path)}" data-save-session="${escapeAttr(group.path)}" data-delete-output="${escapeAttr(clip.path)}" data-delete-kind="clip">
       <video class="w-full h-full object-cover pointer-events-none" src="${href}" muted preload="metadata"></video>
     </button>
     <div class="flex flex-col flex-1 min-h-0">
       <h3 class="font-semibold text-[13px] leading-snug text-gray-950 mb-1 whitespace-normal break-words">${escapeHtml(clip.title || `Klip ${index + 1}`)}</h3>
       <p class="text-[12px] text-gray-500 mb-2 leading-relaxed whitespace-normal break-words overflow-hidden" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${escapeHtml(clip.description || group.caption)}</p>
       <p class="text-[11px] text-gray-400 mb-3 mt-auto">${clipDuration(clip)}</p>
-      <div class="grid grid-cols-3 gap-1.5">
-        <button class="rounded-lg bg-[#ea580c] text-white py-2 text-[10px] font-semibold hover:bg-[#c2410c] transition" type="button" data-save-output="${escapeAttr(group.path)}" data-save-one="${escapeAttr(clip.path)}">Simpan</button>
-        <button class="rounded-lg bg-white border border-gray-200 py-2 text-[10px] font-semibold text-gray-900 hover:bg-gray-50 transition" type="button" data-youtube-upload="${escapeAttr(clip.path)}" data-save-session="${escapeAttr(group.path)}" data-save-one="${escapeAttr(clip.path)}" data-title="${escapeAttr(clip.title || `Klip ${index + 1}`)}" data-description="${escapeAttr(uploadDescription(clip, group))}">Upload</button>
-        <button class="rounded-lg bg-white border border-gray-200 py-2 text-[10px] font-semibold text-gray-900 hover:bg-gray-50 transition" type="button" data-delete-output="${escapeAttr(clip.path)}" data-delete-kind="clip">Hapus</button>
-      </div>
+      <button class="rounded-lg border border-gray-200 bg-white py-2 text-[11px] font-semibold text-gray-900 hover:bg-gray-50 transition" type="button" data-video-open="${escapeAttr(href)}" data-title="${escapeAttr(clip.title || `Klip ${index + 1}`)}" data-description="${escapeAttr(uploadDescription(clip, group))}" data-duration="${escapeAttr(clipDuration(clip))}" data-save-output="${escapeAttr(group.path)}" data-save-one="${escapeAttr(clip.path)}" data-youtube-upload="${escapeAttr(clip.path)}" data-save-session="${escapeAttr(group.path)}" data-delete-output="${escapeAttr(clip.path)}" data-delete-kind="clip">Lihat detail</button>
     </div>
   </article>`;
 }
@@ -672,25 +742,23 @@ async function saveOutput(path, oneClip) {
 function toggleSession(path) { document.querySelectorAll('[data-session-files]').forEach((el) => el.classList.toggle('hidden', el.dataset.sessionFiles !== path || !el.classList.contains('hidden'))); }
 function formatTime(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? (value || '') : date.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }); }
 function showPage(name) {
+  if (!['home', 'history', 'console', 'settings'].includes(name)) name = 'home';
   if (location.hash !== `#${name}`) window.history.replaceState(null, '', `#${name}`);
-  const home = $('page-home'); const history = $('page-history'); const consolePage = $('page-console'); const social = $('page-social'); const settings = $('page-settings');
-  if (!home || !history || !consolePage || !social || !settings) return;
+  const home = $('page-home'); const history = $('page-history'); const consolePage = $('page-console'); const settings = $('page-settings');
+  if (!home || !history || !consolePage || !settings) return;
   home.classList.toggle('hidden', name !== 'home');
   history.classList.toggle('hidden', name !== 'history');
   consolePage.classList.toggle('hidden', name !== 'console');
-  social.classList.toggle('hidden', name !== 'social');
   settings.classList.toggle('hidden', name !== 'settings');
   setNavActive('nav-home', name === 'home');
   setNavActive('nav-history', name === 'history');
   setNavActive('nav-console', name === 'console');
-  setNavActive('nav-social', name === 'social');
   setNavActive('nav-settings', name === 'settings');
 
-  if (name === 'home') pollStatus();
+  if (name === 'home') { pollStatus(); renderOutputs(); }
   if (name === 'history') { renderOutputs(); syncYoutubeDeleted(); }
   if (name === 'console') refreshLogPanel();
-  if (name === 'settings') loadSettings();
-  if (name === 'social') loadSocialStatus();
+  if (name === 'settings') { loadSettings(); loadSocialStatus(); }
 }
 
 function setNavActive(id, active) {
@@ -701,13 +769,27 @@ function setNavActive(id, active) {
     : 'px-3 py-2 rounded-xl text-gray-500 hover:bg-gray-50 hover:text-gray-900 transition';
 }
 
-function openVideoModal(src) {
+function openVideoModal(src, trigger) {
   const modal = $('video-modal');
   const player = $('video-modal-player');
   if (!modal || !player) return;
   player.src = src;
+  setText('video-modal-title', trigger?.dataset.title || 'Klip');
+  setText('video-modal-description', trigger?.dataset.description || '-');
+  setText('video-modal-duration', trigger?.dataset.duration || 'Durasi: -');
+  copyDataset('video-modal-save', trigger, ['saveOutput', 'saveOne']);
+  copyDataset('video-modal-upload', trigger, ['youtubeUpload', 'saveSession', 'saveOne', 'title', 'description']);
+  copyDataset('video-modal-delete', trigger, ['deleteOutput', 'deleteKind']);
   modal.classList.remove('hidden');
   player.play().catch(() => {});
+}
+
+function copyDataset(targetId, source, keys) {
+  const target = $(targetId);
+  if (!target) return;
+  Object.keys(target.dataset).forEach((key) => delete target.dataset[key]);
+  keys.forEach((key) => { if (source?.dataset[key]) target.dataset[key] = source.dataset[key]; });
+  target.classList.toggle('hidden', !source || !keys.some((key) => source.dataset[key]));
 }
 function closeVideoModal() {
   const modal = $('video-modal');
@@ -725,6 +807,85 @@ function closeModal(id) {
   if (id === 'confirm-modal' && pendingConfirm) pendingConfirm(false);
 }
 
+function openConfigModal(name) {
+  const titles = { watermark: 'Configure Watermark', credit: 'Configure SC', hook: 'Configure Hook', blur: 'Configure BG Blur' };
+  const positions = {
+    watermark: currentSettings.watermark,
+    credit: currentSettings.credit_watermark,
+    hook: currentSettings.hook_style,
+  };
+  const target = $('preview-target');
+  if (target) {
+    target.dataset.x = String(Math.round((positions[name]?.position_x ?? 0.32) * 100));
+    target.dataset.y = String(Math.round((positions[name]?.position_y ?? 0.17) * 100));
+  }
+  setText('config-title', titles[name] || 'Configure');
+  document.querySelectorAll('[data-config-panel]').forEach((panel) => panel.classList.toggle('hidden', panel.dataset.configPanel !== name));
+  $('config-modal')?.classList.remove('hidden');
+  updateConfigPreview(name);
+}
+
+function updateConfigPreview(name = document.querySelector('[data-config-panel]:not(.hidden)')?.dataset.configPanel || 'credit') {
+  const target = $('preview-target');
+  if (!target) return;
+  target.style.left = `${Number(target.dataset.x || 32)}%`;
+  target.style.top = `${Number(target.dataset.y || 17)}%`;
+  target.style.opacity = '1';
+  target.style.background = 'transparent';
+  target.style.backgroundImage = '';
+  target.style.backgroundSize = '';
+  target.style.backgroundPosition = '';
+  target.style.width = '';
+  target.style.height = '';
+  target.style.display = '';
+  target.style.borderRadius = '0';
+  target.style.padding = '0';
+  target.textContent = '9:16 Video';
+  if (name === 'watermark') { 
+    const image = getValue('watermark-image'); 
+    target.textContent = image ? '' : 'Watermark'; 
+    target.style.color = '#ffffff'; 
+    target.style.display = 'grid'; 
+    target.style.placeItems = 'center'; 
+    target.style.background = '#ffffff55'; 
+    target.style.backgroundImage = image ? `url("${image.replace(/\\/g, '/')}")` : ''; 
+    target.style.backgroundSize = 'contain'; 
+    target.style.backgroundPosition = 'center'; 
+    target.style.backgroundRepeat = 'no-repeat'; 
+    const scale = Number(getValue('watermark-scale', '15'));
+    target.style.width = `${scale * 2}px`; 
+    target.style.height = `${scale * 2}px`; 
+    target.style.opacity = String(Number(getValue('watermark-opacity', '80')) / 100); 
+    target.style.fontSize = `${Math.max(6, scale * 0.4)}px`;
+    target.style.overflow = 'hidden';
+  }
+  if (name === 'credit') { target.textContent = getValue('credit-text', 'sc : {channel}'); target.style.color = getValue('credit-color', '#ffffff'); target.style.opacity = String(Number(getValue('credit-opacity', '55')) / 100); target.style.fontSize = `${Number(getValue('credit-size', '32')) / 2}px`; }
+  if (name === 'hook') { target.textContent = getValue('hook-sample', 'HOOK'); target.style.color = getValue('hook-text-color', '#0033ff'); target.style.background = getValue('hook-bg-color', '#ffffff'); target.style.borderRadius = `${getValue('hook-radius', '28')}px`; target.style.fontSize = `${Number(getValue('hook-font-size', '54')) / 2}px`; target.style.padding = '8px 12px'; }
+  if (name === 'blur') { target.textContent = `${getValue('blur-zoom', '108')}% zoom / blur ${getValue('blur-strength', '30')}`; target.style.fontSize = '13px'; }
+}
+
+function enablePreviewDrag() {
+  const preview = $('config-preview');
+  const target = $('preview-target');
+  if (!preview || !target) return;
+  target.addEventListener('pointerdown', (event) => {
+    const targetRect = target.getBoundingClientRect();
+    const offsetX = event.clientX - targetRect.left;
+    const offsetY = event.clientY - targetRect.top;
+    target.setPointerCapture(event.pointerId);
+    const move = (moveEvent) => {
+      const rect = preview.getBoundingClientRect();
+      const width = (target.offsetWidth / rect.width) * 100;
+      const height = (target.offsetHeight / rect.height) * 100;
+      target.dataset.x = String(Math.max(0, Math.min(100 - width, ((moveEvent.clientX - offsetX - rect.left) / rect.width) * 100)));
+      target.dataset.y = String(Math.max(0, Math.min(100 - height, ((moveEvent.clientY - offsetY - rect.top) / rect.height) * 100)));
+      updateConfigPreview();
+    };
+    target.addEventListener('pointermove', move);
+    target.addEventListener('pointerup', () => target.removeEventListener('pointermove', move), { once: true });
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const pendingToast = sessionStorage.getItem('klipklop_toast');
   if (pendingToast) {
@@ -733,6 +894,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   const save = $('save-settings'); const showJson = $('show-json'); const stop = $('stop-button'); const jsonClose = $('json-close'); const videoClose = $('video-modal-close'); const clearKey = $('clear-api-key'); const start = $('process-button'); const profile = $('profile-button'); const logoutButton = $('logout-button'); const logClear = $('log-clear'); const instruction = $('instruction'); const instructionSave = $('instruction-save'); const instructionCancel = $('instruction-cancel'); const qualityMain = $('video-quality-main'); const qualitySettings = $('video-quality'); const blur = $('landscape-blur');
   if (save) save.addEventListener('click', saveSettings);
+  $('config-save')?.addEventListener('click', saveSettings);
+  $('config-close')?.addEventListener('click', () => $('config-modal')?.classList.add('hidden'));
   if (showJson) showJson.addEventListener('click', showPayloadJson);
   if (stop) stop.addEventListener('click', stopProcessing);
   if (jsonClose) jsonClose.addEventListener('click', () => $('json-modal')?.classList.add('hidden'));
@@ -753,12 +916,13 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('[data-screen-card]').forEach((card) => card.addEventListener('click', () => setScreenSize(card.dataset.screenCard)));
   document.addEventListener('input', updatePayloadJson);
   document.addEventListener('change', updatePayloadJson);
-  ['instruction-modal', 'settings-modal', 'json-modal', 'confirm-modal'].forEach((id) => {
+  ['instruction-modal', 'settings-modal', 'config-modal', 'json-modal', 'confirm-modal'].forEach((id) => {
     const modal = $(id);
     if (modal) modal.addEventListener('click', (event) => { if (event.target === modal) closeModal(id); });
   });
   $('video-modal')?.addEventListener('click', (event) => { if (event.target === $('video-modal')) closeVideoModal(); });
   document.addEventListener('click', (event) => {
+    const configButton = event.target.closest('[data-config-open]');
     const videoButton = event.target.closest('[data-video-open]');
     const deleteButton = event.target.closest('[data-delete-output]');
     const saveButton = event.target.closest('[data-save-output]');
@@ -767,8 +931,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const sessionButton = event.target.closest('[data-session-toggle]');
     const downloadLink = event.target.closest('[data-download-output]');
     const jsonButton = event.target.closest('[data-show-json]');
-    if (jsonButton) showPayloadJson();
-    if (videoButton) openVideoModal(videoButton.dataset.videoOpen);
+    if (configButton) { openConfigModal(configButton.dataset.configOpen); return; }
+    if (jsonButton) { showPayloadJson(); return; }
+    if (videoButton) { openVideoModal(videoButton.dataset.videoOpen, videoButton); return; }
     if (deleteButton) deleteOutput(deleteButton.dataset.deleteOutput, deleteButton.dataset.deleteKind);
     if (saveButton) saveOutput(saveButton.dataset.saveOutput, saveButton.dataset.saveOne);
     if (youtubeButton) uploadYoutube(youtubeButton);
@@ -804,6 +969,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
   initCustomSelects();
+  enablePreviewDrag();
+  document.querySelectorAll('#config-modal input').forEach((input) => input.addEventListener('input', () => { updateWatermarkLabels(); updateConfigPreview(); }));
+  $('watermark-file-button')?.addEventListener('click', () => $('watermark-file')?.click());
+  $('watermark-file')?.addEventListener('change', async (event) => { try { await uploadWatermarkFile(event.target.files?.[0]); } catch (error) { showError(error.message); } });
 
   document.addEventListener('click', () => {
     document.querySelectorAll('.custom-select-wrapper div').forEach(menu => {

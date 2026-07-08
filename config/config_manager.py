@@ -39,9 +39,9 @@ class ConfigManager:
                 "installation_id": str(uuid.uuid4()),
                 "face_tracking_mode": "center",
                 "video_quality": "720",
-                "landscape_blur": False,
+                "landscape_blur": True,
                 "subtitle_engine": "local",
-                "local_whisper": {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"},
+                "local_whisper": {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"},
                 "subtitle_style": {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360},
                 "subtitle_position": "auto",
                 "mediapipe_settings": {
@@ -60,12 +60,19 @@ class ConfigManager:
                     "opacity": 0.8,
                     "scale": 0.15
                 },
+                "credit_watermark": {"enabled": True, "text": "sc : {channel}", "color": "#FFFFFF", "size": 0.032, "opacity": 0.55, "position_x": 0.06, "position_y": 0.23},
+                "hook_style": {"enabled": True, "font_size": 0.054, "text_color": "#0033ff", "background_color": "#ffffff", "corner_radius": 28, "duration": 5.0, "position_x": 0.5, "position_y": 0.2},
+                "blur_background": {"enabled": True, "zoom": 1.08, "strength": 30},
                 "ai_providers": self._get_default_ai_providers(),
             }
             for key, value in defaults.items():
                 if key not in config:
                     config[key] = value
                     dirty = True
+            if not config.get("_blur_default_migrated"):
+                config["landscape_blur"] = True
+                config["_blur_default_migrated"] = True
+                dirty = True
             if dirty:
                 self.save_config(config)
             return config
@@ -90,11 +97,14 @@ class ConfigManager:
                 "opacity": 0.8,
                 "scale": 0.15
             },
+            "credit_watermark": {"enabled": True, "text": "sc : {channel}", "color": "#FFFFFF", "size": 0.032, "opacity": 0.55, "position_x": 0.06, "position_y": 0.23},
+            "hook_style": {"enabled": True, "font_size": 0.054, "text_color": "#0033ff", "background_color": "#ffffff", "corner_radius": 28, "duration": 5.0, "position_x": 0.5, "position_y": 0.2},
+                "blur_background": {"enabled": True, "zoom": 1.08, "strength": 30},
             "face_tracking_mode": "center",
             "video_quality": "720",
-            "landscape_blur": False,
+            "landscape_blur": True,
             "subtitle_engine": "local",
-            "local_whisper": {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"},
+            "local_whisper": {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"},
             "subtitle_style": {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360},
             "subtitle_position": "auto",
             "mediapipe_settings": {

@@ -168,7 +168,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
         bottom: 0;
         z-index: 60;
         display: grid !important;
-        grid-template-columns: repeat(6, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 4px !important;
         padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
         background: var(--panel);
@@ -212,6 +212,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
     }
     #page-home > section {
         order: 2 !important;
+        width: 100% !important;
         min-height: 360px;
         height: auto !important;
         padding: 16px !important;

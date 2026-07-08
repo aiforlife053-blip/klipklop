@@ -27,18 +27,32 @@ def test_rejects_non_dict_start_payload(tmp_path):
     assert result["status"] == "error"
 
 
-def test_rejects_api_captions_without_caption_key(tmp_path):
-    manager = mod.WebJobManager(app_dir=tmp_path)
+def test_api_caption_setting_is_ignored_for_local_default(tmp_path):
+    class Manager(mod.WebJobManager):
+        def _run(self, url, num_clips, add_captions, add_hook, subtitle_language, instruction):
+            self.captured = {"add_captions": add_captions}
+            self.thread = None
+    manager = Manager(app_dir=tmp_path)
     manager.save_settings({"subtitle_engine": "api"})
     result = manager.start({"url": "https://www.youtube.com/watch?v=abc", "add_captions": True})
-    assert result["status"] == "error"
-    assert "API Whisper" in result["message"]
+    thread = manager.thread
+    if thread:
+        thread.join(1)
+    assert result["status"] == "started"
+    assert manager.captured["add_captions"] is True
 
 
-def test_rejects_unsupported_screen_size(tmp_path):
-    manager = mod.WebJobManager(app_dir=tmp_path)
+def test_unsupported_screen_size_is_ignored(tmp_path):
+    class Manager(mod.WebJobManager):
+        def _run(self, url, num_clips, add_captions, add_hook, subtitle_language, instruction):
+            self.captured = {"url": url}
+            self.thread = None
+    manager = Manager(app_dir=tmp_path)
     result = manager.start({"url": "https://www.youtube.com/watch?v=abc", "screen_size": "1:1"})
-    assert result == {"status": "error", "message": "Unsupported screen size: only 9:16 and 16:9 are supported"}
+    thread = manager.thread
+    if thread:
+        thread.join(1)
+    assert result["status"] == "started"
 
 
 def test_rejects_when_busy(tmp_path):
@@ -189,32 +203,32 @@ class InstantJobManager(mod.WebJobManager):
         self.thread = None
 
 
-def test_enable_captions_alias_can_disable_caption_guard(tmp_path):
+def test_enable_captions_alias_cannot_disable_captions(tmp_path):
     manager = InstantJobManager(app_dir=tmp_path)
     result = manager.start({"url": "https://www.youtube.com/watch?v=abc", "enable_captions": False})
     thread = manager.thread
     assert result == {"status": "started"}
     if thread:
         thread.join(1)
-    assert manager.captured["add_captions"] is False
+    assert manager.captured["add_captions"] is True
 
 
-def test_num_clips_is_forced_to_three(tmp_path):
+def test_num_clips_is_forced_to_one(tmp_path):
     manager = InstantJobManager(app_dir=tmp_path)
     manager.start({"url": "https://www.youtube.com/watch?v=abc", "add_captions": False, "num_clips": 999})
     thread = manager.thread
     if thread:
         thread.join(1)
-    assert manager.captured["num_clips"] == 3
+    assert manager.captured["num_clips"] == 1
 
 
-def test_invalid_num_clips_still_generates_three_clips(tmp_path):
+def test_invalid_num_clips_still_generates_one_clip(tmp_path):
     manager = InstantJobManager(app_dir=tmp_path)
     manager.start({"url": "https://www.youtube.com/watch?v=abc", "add_captions": False, "num_clips": "bad"})
     thread = manager.thread
     if thread:
         thread.join(1)
-    assert manager.captured["num_clips"] == 3
+    assert manager.captured["num_clips"] == 1
 
 
 def test_instruction_is_trimmed_and_limited(tmp_path):
@@ -236,7 +250,7 @@ def test_youtube_url_alias_starts_job(tmp_path):
     assert manager.captured["url"] == "https://www.youtube.com/watch?v=abc"
 
 
-def test_sixteen_by_nine_screen_size_is_supported(tmp_path):
+def test_sixteen_by_nine_screen_size_is_ignored(tmp_path):
     manager = InstantJobManager(app_dir=tmp_path)
     result = manager.start({"url": "https://www.youtube.com/watch?v=abc", "add_captions": False, "screen_size": "16:9"})
     thread = manager.thread
@@ -251,7 +265,7 @@ class LegacySevenArgJobManager(mod.WebJobManager):
         self.thread = None
 
 
-def test_legacy_seven_arg_run_gets_landscape_blur(tmp_path):
+def test_legacy_seven_arg_run_gets_landscape_blur_enabled(tmp_path):
     manager = LegacySevenArgJobManager(app_dir=tmp_path)
     result = manager.start({"url": "https://www.youtube.com/watch?v=abc", "add_captions": False, "landscape_blur": True})
     thread = manager.thread
@@ -327,6 +341,7 @@ def test_ass_subtitle_groups_words_in_dynamic_chunks(tmp_path):
 class NoSubtitleCore(AutoClipperCore):
     def __init__(self):
         self.output_dir = "out"
+        self.use_download_sections = False
 
     def set_progress(self, stage, progress):
         pass

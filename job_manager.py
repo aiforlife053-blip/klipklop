@@ -58,22 +58,14 @@ class WebJobManager:
                 return {"status": "busy", "message": "Processing is already running"}
         if self._has_staged_outputs():
             return {"status": "busy", "message": "Simpan atau hapus klip di Beranda sebelum generate baru"}
-        num_clips = 3
-        add_captions = self._as_bool(payload.get("enable_captions", payload.get("add_captions", True)), True)
+        num_clips = 1
+        add_captions = True
         add_hook = True
-        subtitle_language = str(payload.get("subtitle_language", self._config().config.get("subtitle_language", "id")) or "id")[:12]
+        subtitle_language = "id"
         instruction = str(payload.get("instruction", "")).strip()[:1000]
-        landscape_blur = self._as_bool(payload.get("landscape_blur", self._config().config.get("landscape_blur", False)), False)
+        landscape_blur = self._as_bool(payload.get("landscape_blur", self._config().config.get("landscape_blur", True)), True)
         source_credit = self._as_bool(payload.get("source_credit", True), True)
-        screen_size = str(payload.get("screen_size", "9:16") or "9:16")
-        if screen_size not in {"9:16", "16:9"}:
-            return {"status": "error", "message": "Unsupported screen size: only 9:16 and 16:9 are supported"}
-        cfg = self._config().config
-        caption_key = cfg.get("ai_providers", {}).get("caption_maker", {}).get("api_key")
-        subtitle_engine = cfg.get("subtitle_engine", "local")
-        if add_captions and subtitle_engine == "api" and not caption_key:
-            return {"status": "error", "message": "Subtitle Engine API Whisper butuh Caption Maker/Whisper API key. Pilih Local faster-whisper atau isi key."}
-
+        screen_size = "9:16"
         with self._lock:
             if self.thread and self.thread.is_alive():
                 return {"status": "busy", "message": "Processing is already running"}
@@ -173,9 +165,13 @@ class WebJobManager:
             "video_quality": str(cfg.get("video_quality", "720")),
             "landscape_blur": bool(cfg.get("landscape_blur", False)),
             "subtitle_engine": cfg.get("subtitle_engine", "local"),
-            "local_whisper": cfg.get("local_whisper", {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"}),
+            "local_whisper": cfg.get("local_whisper", {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"}),
             "subtitle_style": cfg.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360}),
             "subtitle_position": cfg.get("subtitle_position", "auto"),
+            "watermark": cfg.get("watermark", {"enabled": False}),
+            "credit_watermark": cfg.get("credit_watermark", {"enabled": True, "text": "sc : {channel}", "color": "#FFFFFF", "size": 0.032, "opacity": 0.55, "position_x": 0.06, "position_y": 0.23}),
+            "hook_style": cfg.get("hook_style", {"enabled": True, "font_size": 0.054, "text_color": "#0033ff", "background_color": "#ffffff", "corner_radius": 28, "duration": 5.0, "position_x": 0.5, "position_y": 0.2}),
+            "blur_background": cfg.get("blur_background", {"enabled": True, "zoom": 1.08, "strength": 30}),
             "output_dir": cfg.get("output_dir", str(self.output_dir)),
             "cookie_exists": cookies["exists"],
             "cookie_path": cookies["path"],
@@ -198,22 +194,15 @@ class WebJobManager:
         hook_model = str(payload.get("hook_model", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("model", "gemini-3.1-flash-tts-preview"))).strip() or "gemini-3.1-flash-tts-preview"
         hook_voice = str(payload.get("hook_voice", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("voice", "Fenrir"))).strip() or "Fenrir"
         output_dir = str(payload.get("output_dir", cfg_mgr.config.get("output_dir", str(self.output_dir)))).strip() or str(self.output_dir)
-        subtitle_language = str(payload.get("subtitle_language", cfg_mgr.config.get("subtitle_language", "id")) or "id")[:12]
-        if not re.fullmatch(r"[a-zA-Z-]{2,12}", subtitle_language):
-            subtitle_language = "id"
+        subtitle_language = "id"
         video_quality = str(payload.get("video_quality", cfg_mgr.config.get("video_quality", "720")) or "720")
-        landscape_blur = self._as_bool(payload.get("landscape_blur", cfg_mgr.config.get("landscape_blur", False)), False)
-        subtitle_engine = str(payload.get("subtitle_engine", cfg_mgr.config.get("subtitle_engine", "local")) or "local")
-        if subtitle_engine not in {"auto", "api", "local"}:
-            subtitle_engine = "local"
+        landscape_blur = self._as_bool(payload.get("landscape_blur", cfg_mgr.config.get("landscape_blur", True)), True)
+        subtitle_engine = "local"
         subtitle_position = str(payload.get("subtitle_position", cfg_mgr.config.get("subtitle_position", "auto")) or "auto")
         if subtitle_position not in {"auto", "top", "middle", "bottom"}:
             subtitle_position = "auto"
-        local_whisper = cfg_mgr.config.get("local_whisper", {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"})
-        if isinstance(payload.get("local_whisper"), dict):
-            local_whisper = {**local_whisper, **payload["local_whisper"]}
-        if str(local_whisper.get("model", "medium")) not in {"base", "small", "medium"}:
-            local_whisper["model"] = "medium"
+        local_whisper = cfg_mgr.config.get("local_whisper", {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"})
+        local_whisper["model"] = "small"
         local_whisper["enabled"] = True
         local_whisper["device"] = str(local_whisper.get("device") or "cpu")
         local_whisper["compute_type"] = str(local_whisper.get("compute_type") or "int8")
@@ -227,6 +216,28 @@ class WebJobManager:
             subtitle_style["font"] = "Plus Jakarta Sans"
         subtitle_style["size"] = max(24, min(120, self._as_int(subtitle_style.get("size"), 58)))
         subtitle_style["bottom_margin"] = max(40, min(900, self._as_int(subtitle_style.get("bottom_margin"), 360)))
+        watermark = {**cfg_mgr.config.get("watermark", {"enabled": False}), **(payload.get("watermark") if isinstance(payload.get("watermark"), dict) else {})}
+        watermark["enabled"] = self._as_bool(watermark.get("enabled", False), False)
+        watermark["image_path"] = str(watermark.get("image_path") or "")
+        watermark["opacity"] = max(0.0, min(1.0, float(watermark.get("opacity", 0.8) or 0.8)))
+        watermark["scale"] = max(0.02, min(0.6, float(watermark.get("scale", 0.15) or 0.15)))
+        credit_watermark = {**cfg_mgr.config.get("credit_watermark", {"enabled": True}), **(payload.get("credit_watermark") if isinstance(payload.get("credit_watermark"), dict) else {})}
+        credit_watermark["enabled"] = self._as_bool(credit_watermark.get("enabled", True), True)
+        credit_watermark["text"] = str(credit_watermark.get("text") or "sc : {channel}")[:120]
+        credit_watermark["color"] = str(credit_watermark.get("color") or "#FFFFFF")[:16]
+        credit_watermark["size"] = max(0.015, min(0.08, float(credit_watermark.get("size", 0.032) or 0.032)))
+        credit_watermark["opacity"] = max(0.0, min(1.0, float(credit_watermark.get("opacity", 0.55) or 0.55)))
+        hook_style = {**cfg_mgr.config.get("hook_style", {}), **(payload.get("hook_style") if isinstance(payload.get("hook_style"), dict) else {})}
+        hook_style["enabled"] = self._as_bool(hook_style.get("enabled", True), True)
+        hook_style["font_size"] = max(0.025, min(0.12, float(hook_style.get("font_size", 0.054) or 0.054)))
+        hook_style["text_color"] = str(hook_style.get("text_color") or "#0033ff")[:16]
+        hook_style["background_color"] = str(hook_style.get("background_color") or "#ffffff")[:16]
+        hook_style["corner_radius"] = max(0, min(80, self._as_int(hook_style.get("corner_radius"), 28)))
+        hook_style["duration"] = max(1.0, min(10.0, float(hook_style.get("duration", 5.0) or 5.0)))
+        blur_background = {**cfg_mgr.config.get("blur_background", {"enabled": True, "zoom": 1.08, "strength": 30}), **(payload.get("blur_background") if isinstance(payload.get("blur_background"), dict) else {})}
+        blur_background["enabled"] = self._as_bool(blur_background.get("enabled", True), True)
+        blur_background["zoom"] = max(1.0, min(1.4, float(blur_background.get("zoom", 1.08) or 1.08)))
+        blur_background["strength"] = max(10, min(60, self._as_int(blur_background.get("strength"), 30)))
         providers = cfg_mgr.config.setdefault("ai_providers", {})
         for name in ("highlight_finder", "youtube_title_maker"):
             current = providers.setdefault(name, {})
@@ -263,6 +274,10 @@ class WebJobManager:
         cfg_mgr.config["subtitle_position"] = subtitle_position
         cfg_mgr.config["local_whisper"] = local_whisper
         cfg_mgr.config["subtitle_style"] = subtitle_style
+        cfg_mgr.config["watermark"] = watermark
+        cfg_mgr.config["credit_watermark"] = credit_watermark
+        cfg_mgr.config["hook_style"] = hook_style
+        cfg_mgr.config["blur_background"] = blur_background
         cfg_mgr.config["output_dir"] = output_dir
         cfg_mgr.save()
         settings = self.get_settings()
@@ -384,6 +399,7 @@ class WebJobManager:
             self._sync_core_cookie_file()
             cfg = self._config().config
             prompt = self._with_indonesian_instruction(cfg.get("system_prompt"), instruction)
+            add_hook = add_hook and bool(cfg.get("hook_style", {"enabled": True}).get("enabled", True))
             run_dir.mkdir(parents=True, exist_ok=True)
             self._write_run_meta(run_dir, url, {"video_quality": str(cfg.get("video_quality", "720")), "landscape_blur": landscape_blur, "screen_size": screen_size, "add_hook": add_hook, "add_captions": add_captions, "subtitle_language": subtitle_language, "status": "staged", "file_exists": True})
             self._add_log(f"Output folder: {run_dir}")
@@ -399,8 +415,8 @@ class WebJobManager:
                 temperature=cfg.get("temperature", 1.0),
                 system_prompt=prompt,
                 watermark_settings=cfg.get("watermark", {"enabled": False}),
-                credit_watermark_settings={"enabled": source_credit, "position_x": 0.06, "position_y": 0.23, "opacity": 0.95, "size": 0.032},
-                hook_style_settings=cfg.get("hook_style", {}),
+                credit_watermark_settings={**cfg.get("credit_watermark", {"enabled": True, "position_x": 0.06, "position_y": 0.23, "opacity": 0.55, "size": 0.032}), "enabled": source_credit and bool(cfg.get("credit_watermark", {"enabled": True}).get("enabled", True))},
+                hook_style_settings={**cfg.get("hook_style", {}), "blur_background": cfg.get("blur_background", {"enabled": True, "zoom": 1.08, "strength": 30})},
                 face_tracking_mode=cfg.get("face_tracking_mode", "center"),
                 mediapipe_settings=cfg.get("mediapipe_settings", {}),
                 ai_providers=cfg.get("ai_providers"),
@@ -409,8 +425,8 @@ class WebJobManager:
                 landscape_blur=landscape_blur,
                 screen_size=screen_size,
                 subtitle_style=subtitle_style,
-                subtitle_engine=cfg.get("subtitle_engine", "local"),
-                local_whisper=cfg.get("local_whisper", {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"}),
+                subtitle_engine="local",
+                local_whisper=cfg.get("local_whisper", {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"}),
                 cancel_check=lambda: self._cancel_requested,
                 log_callback=self._set_message,
                 progress_callback=self._set_progress,

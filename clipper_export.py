@@ -755,7 +755,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if cache_file.exists():
             self.log("  ✓ Using cached hook TTS")
             return str(cache_file)
-        from google import genai
+        import google.genai as genai
         from google.genai import types
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
@@ -1358,6 +1358,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         pos_x = self.credit_watermark_settings.get("position_x", 0.5)
         pos_y = self.credit_watermark_settings.get("position_y", 0.95)
         opacity = self.credit_watermark_settings.get("opacity", 0.7)
+        color = str(self.credit_watermark_settings.get("color", "#FFFFFF")).lstrip("#") or "FFFFFF"
         
         font_size = max(22, int(video_height * size))
         
@@ -1366,7 +1367,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         y_pixels = int(pos_y * video_height)
         
         # Prepare credit text
-        credit_text = f"sc: {self.channel_name}"
+        credit_text = str(self.credit_watermark_settings.get("text") or "sc : {channel}").replace("{channel}", self.channel_name)
         # Escape special characters for FFmpeg drawtext
         credit_text_escaped = credit_text.replace("'", "'\\''").replace(":", "\\:")
         
@@ -1392,7 +1393,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f"drawtext=fontfile='{font_file}':"
                 f"text='{credit_text_escaped}':"
                 f"fontsize={font_size}:"
-                f"fontcolor=white@{opacity}:"
+                f"fontcolor=0x{color}@{opacity}:"
                 f"borderw=3:"
                 f"bordercolor=black@0.75:"
                 f"x={x_pixels}:"
@@ -1403,7 +1404,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             filter_str = (
                 f"drawtext=text='{credit_text_escaped}':"
                 f"fontsize={font_size}:"
-                f"fontcolor=white@{opacity}:"
+                f"fontcolor=0x{color}@{opacity}:"
                 f"borderw=3:"
                 f"bordercolor=black@0.75:"
                 f"x={x_pixels}:"

@@ -94,8 +94,8 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         # Different endpoints have different payload size limits
         if parsed.path == "/api/settings":
             payload, err = self._payload(max_size=65536)  # 64KB
-        elif parsed.path == "/api/cookies":
-            payload, err = self._payload(max_size=524288)  # 512KB
+        elif parsed.path in {"/api/cookies", "/api/watermark/upload"}:
+            payload, err = self._payload(max_size=10485760)  # 10MB
         elif parsed.path in ["/api/start", "/api/delete", "/api/save"]:
             payload, err = self._payload(max_size=16384)  # 16KB
         else:
@@ -108,6 +108,8 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._json(MANAGER.save_settings(payload))
         elif parsed.path == "/api/cookies":
             self._json(MANAGER.save_cookies(payload.get("content", payload.get("cookie_text", ""))))
+        elif parsed.path == "/api/watermark/upload":
+            self._upload_watermark(payload)
         elif parsed.path == "/api/start":
             result = MANAGER.start(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
@@ -157,6 +159,26 @@ class WebKlipHandler(BaseHTTPRequestHandler):
                 self._json({"status": "error", "message": str(e)}, 400)
         else:
             self._json({"status": "error", "message": "Not found"}, 404)
+
+    def _upload_watermark(self, payload):
+        name = Path(str(payload.get("name") or "watermark.png")).name
+        suffix = Path(name).suffix.lower()
+        if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+            self._json({"status": "error", "message": "Format watermark harus PNG/JPG/WEBP"}, 400)
+            return
+        try:
+            raw = base64.b64decode(str(payload.get("content") or ""), validate=True)
+        except Exception:
+            self._json({"status": "error", "message": "File watermark invalid"}, 400)
+            return
+        if not raw or len(raw) > 400_000:
+            self._json({"status": "error", "message": "Watermark maksimal 400KB"}, 400)
+            return
+        folder = ROOT / "static" / "watermarks"
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / f"watermark{suffix}"
+        target.write_bytes(raw)
+        self._json({"status": "ok", "path": str(target), "url": f"/static/watermarks/{target.name}"})
 
     def _current_user(self):
         raw = self.headers.get("Cookie", "")

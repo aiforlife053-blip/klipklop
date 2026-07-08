@@ -106,6 +106,7 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         self.watermark_settings = watermark_settings or {"enabled": False}
         self.credit_watermark_settings = credit_watermark_settings or {"enabled": False}
         self.hook_style_settings = hook_style_settings or {}
+        self.blur_background_settings = self.hook_style_settings.get("blur_background", {}) if isinstance(self.hook_style_settings, dict) else {}
         self.video_info = {}
         self.channel_name = ""
         self.face_tracking_mode = face_tracking_mode
@@ -123,7 +124,7 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         self.use_download_sections = self.optimize_mode in {"local", "hosting_2cpu", "fast_cpu"}
         self.subtitle_style = subtitle_style or {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360}
         self.subtitle_engine = subtitle_engine or "local"
-        self.local_whisper = local_whisper or {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"}
+        self.local_whisper = local_whisper or {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"}
         self._local_whisper_model = None
         resolutions = {"16:9": {"480": "854:480", "720": "1280:720", "1080": "1920:1080"}, "9:16": {"480": "540:960", "720": "720:1280", "1080": "1080:1920"}}
         self.output_resolution = resolutions[self.screen_size].get(self.video_quality, resolutions[self.screen_size]["720"])

@@ -484,10 +484,14 @@ class PortraitMixin:
 
     def convert_to_portrait_blur_with_progress(self, input_path: str, output_path: str, progress_callback):
         width, height = (int(part) for part in getattr(self, "output_resolution", "720:1280").split(":"))
+        blur_settings = getattr(self, "blur_background_settings", {}) or {}
+        zoom = max(1.0, min(1.4, float(blur_settings.get("zoom", 1.08) or 1.08)))
+        strength = max(10, min(60, int(blur_settings.get("strength", 30) or 30)))
+        foreground_width = int(width * zoom)
         filter_complex = (
             f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height},boxblur=30:3[bg];"
-            f"[0:v]scale={width}:-2[fg];"
+            f"crop={width}:{height},boxblur={strength}:3[bg];"
+            f"[0:v]scale={foreground_width}:-2[fg];"
             f"[bg][fg]overlay=(W-w)/2:(H-h)/2"
         )
         cmd = [
