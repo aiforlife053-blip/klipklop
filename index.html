@@ -375,11 +375,11 @@
                                     Proses Klip
                                 </button>
                                 <button
-                                    id="show-json"
+                                    id="stop-button"
                                     type="button"
-                                    class="border border-gray-200 px-3.5 py-2.5 rounded-xl text-[13px] font-semibold text-gray-700 hover:bg-gray-50 bg-white"
+                                    class="hidden border border-gray-200 px-3.5 py-2.5 rounded-xl text-[13px] font-semibold text-gray-700 hover:bg-gray-50 bg-white"
                                 >
-                                    JSON
+                                    Stop
                                 </button>
                             </div>
                             <div
@@ -966,6 +966,14 @@
                 </div>
             </div>
         </div>
+
+        <button
+            id="show-json"
+            type="button"
+            class="fixed right-5 bottom-5 z-[80] border border-gray-200 px-4 py-2.5 rounded-xl text-[13px] font-semibold text-gray-700 hover:bg-gray-50 bg-white shadow-lg"
+        >
+            JSON
+        </button>
 
         <div
             id="json-modal"

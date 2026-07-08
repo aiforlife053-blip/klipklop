@@ -97,11 +97,14 @@ label > div.border, aside div.border {
     color: var(--text) !important;
     border-color: var(--line) !important;
 }
-input.bg-white, select.bg-white, textarea.bg-white, input:focus, select:focus, textarea:focus {
+input.bg-white, select.bg-white, textarea.bg-white, input:focus, select:focus, textarea:focus, input:-webkit-autofill {
     background-color: var(--surface) !important;
     color: var(--text) !important;
     border-color: var(--line) !important;
     box-shadow: none !important;
+    -webkit-box-shadow: 0 0 0 1000px var(--surface) inset !important;
+    -webkit-text-fill-color: var(--text) !important;
+    caret-color: var(--text) !important;
     --tw-ring-shadow: 0 0 #0000 !important;
 }
 input::placeholder, textarea::placeholder {
@@ -126,9 +129,13 @@ button[class*="bg-[#ea580c]"], a[class*="bg-[#ea580c]"], button[class*="bg-red-6
 .peer:checked ~ div {
     border-color: var(--accent) !important;
 }
-.custom-select-wrapper [class*="bg-orange-50"] {
+.custom-select-option-selected,
+.custom-select-wrapper [data-selected="true"] {
     background-color: var(--accent) !important;
     color: #fff !important;
+}
+.custom-select-option-idle:hover {
+    background-color: var(--surface-2) !important;
 }
 [data-session-toggle] {
     background-color: transparent !important;

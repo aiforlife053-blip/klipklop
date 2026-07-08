@@ -37,6 +37,7 @@ class WebJobManager:
         self._activities = []
         self._job_start_time = None
         self._job_timeout = 3600  # 1 hour default timeout
+        self._cancel_requested = False
 
     def start(self, payload):
         if not isinstance(payload, dict):
@@ -80,6 +81,7 @@ class WebJobManager:
             self._message = "Starting"
             self._progress = 0.0
             self._error = ""
+            self._cancel_requested = False
             self._add_log(f"Task {datetime.now().strftime('%d %b %Y %H:%M:%S')} | {url}", "Task")
             self._add_log("Job started")
             self._add_log(f"URL accepted: {url}")
@@ -112,6 +114,15 @@ class WebJobManager:
             "error": self._public_text(self._error),
             "logs": self._logs[-500:],
         }
+
+    def stop(self):
+        if not (self.thread and self.thread.is_alive()):
+            return {"status": "idle"}
+        self._cancel_requested = True
+        self._status = "stopping"
+        self._message = "Stopping"
+        self._add_log("Stop requested")
+        return {"status": "stopping"}
 
     def clear_logs(self):
         self._logs = []
@@ -389,6 +400,7 @@ class WebJobManager:
                 subtitle_style=subtitle_style,
                 subtitle_engine=cfg.get("subtitle_engine", "local"),
                 local_whisper=cfg.get("local_whisper", {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"}),
+                cancel_check=lambda: self._cancel_requested,
                 log_callback=self._set_message,
                 progress_callback=self._set_progress,
             )
@@ -404,12 +416,19 @@ class WebJobManager:
             self._add_log(f"Landscape blur: {'on' if landscape_blur else 'off'}")
             self._add_log("Processor started")
             core.process(url, num_clips=num_clips, add_captions=add_captions, add_hook=add_hook)
+            if self._cancel_requested:
+                raise InterruptedError("Stopped")
             self._write_run_meta(run_dir, url, {**self._summarize_run(run_dir), "video_quality": quality, "landscape_blur": landscape_blur, "screen_size": screen_size, "add_hook": add_hook, "add_captions": add_captions, "subtitle_language": subtitle_language, "status": "staged", "file_exists": True})
             self._enforce_retention()
             self._status = "complete"
             self._message = "Complete"
             self._progress = 1.0
             self._add_log("Complete", "Done")
+        except InterruptedError:
+            self._status = "idle"
+            self._message = "Stopped"
+            self._error = ""
+            self._add_log("Stopped", "Done")
         except TimeoutError as exc:
             self._status = "error"
             self._message = "Processing timed out"

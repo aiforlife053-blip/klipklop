@@ -6,6 +6,8 @@ let smoothProgressTarget = 0;
 let smoothProgressTimer = null;
 let processingActive = false;
 let completionNotified = false;
+let latestProgress = 0;
+let latestMessage = 'Menyiapkan AI...';
 
 function initCustomSelects() {
   document.querySelectorAll('select').forEach(select => {
@@ -49,8 +51,9 @@ function initCustomSelects() {
         const optBtn = document.createElement('button');
         optBtn.type = 'button';
         const isSelected = opt.value === select.value;
-        optBtn.className = `w-full px-3 py-2 rounded-lg text-left text-[13px] transition font-medium ` +
-          (isSelected ? `bg-orange-50 text-[#ea580c]` : `text-gray-700 hover:bg-gray-50`);
+        optBtn.dataset.selected = isSelected ? 'true' : 'false';
+        optBtn.className = `w-full px-3 py-2 rounded-lg text-left text-[13px] transition font-medium custom-select-option ` +
+          (isSelected ? `custom-select-option-selected` : `custom-select-option-idle`);
         optBtn.textContent = opt.textContent;
         optBtn.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -275,6 +278,7 @@ function startPayload(captionsOn = getChecked('captions', true)) {
 async function startProcessing() {
   const button = $('process-button');
   if (button) button.disabled = true;
+  updateProcessingUi(true);
   refreshLogPanel();
   clearInterval(pollTimer);
   smoothProgress = 0;
@@ -294,6 +298,7 @@ async function startProcessing() {
   } catch (error) {
     processingActive = false;
     if (button) button.disabled = false;
+    updateProcessingUi(false);
     showError(error.message);
     setText('status-text', 'Gagal memproses');
     await renderOutputs();
@@ -304,15 +309,18 @@ async function pollStatus() {
   try {
     const data = await api('/api/status');
     const progressPct = Math.round((data.progress || 0) * 100);
+    latestProgress = data.progress || 0;
     if (data.status === 'error') {
       processingActive = false;
       showError(data.error || data.message || 'Terjadi kesalahan');
       setText('status-text', 'Gagal');
       updateCompactStatus('Gagal');
     } else {
-      processingActive = ['started', 'processing', 'running'].includes(data.status);
+      const wasProcessing = processingActive;
+      processingActive = ['started', 'processing', 'running', 'stopping'].includes(data.status);
       const rawMsg = data.error || data.message || data.status;
       const message = cleanStatusText(rawMsg);
+      latestMessage = message;
 
       let displayMsg = message;
       if (processingActive) {
@@ -321,19 +329,12 @@ async function pollStatus() {
       setText('status-text', displayMsg);
       updateCompactStatus(message);
 
-      if (processingActive) {
-        const homePanel = $('home-results-panel');
-        if (homePanel) {
-          const loaderPct = homePanel.querySelector('.loader-percentage');
-          if (!loaderPct) {
-            homePanel.className = 'flex h-full flex-col items-center justify-center text-center max-w-xl mx-auto w-full';
-            homePanel.innerHTML = renderProcessingLoader(data.progress || 0, message);
-          } else {
-            loaderPct.textContent = `${progressPct}%`;
-            const loaderMsg = $('loading-status-text');
-            if (loaderMsg) loaderMsg.textContent = message;
-          }
-        }
+      if (processingActive) await renderOutputs();
+      if (wasProcessing && !processingActive && data.status === 'idle') {
+        clearInterval(pollTimer);
+        $('process-button').disabled = false;
+        updateProcessingUi(false);
+        await renderOutputs();
       }
     }
     updateLogPanel(data);
@@ -346,15 +347,41 @@ async function pollStatus() {
       processingActive = false;
       clearInterval(pollTimer);
       $('process-button').disabled = false;
+      updateProcessingUi(false);
       await renderOutputs();
     }
   } catch (error) {
     processingActive = false;
     clearInterval(pollTimer);
     $('process-button').disabled = false;
+    updateProcessingUi(false);
     showError(error.message);
     setText('status-text', 'Error koneksi');
     await renderOutputs();
+  }
+}
+
+function updateProcessingUi(active) {
+  const button = $('process-button');
+  const stop = $('stop-button');
+  if (button) {
+    button.textContent = active ? 'Generating' : 'Proses Klip';
+    button.disabled = !!active;
+  }
+  if (stop) stop.classList.toggle('hidden', !active);
+}
+
+async function stopProcessing() {
+  const stop = $('stop-button');
+  if (stop) stop.disabled = true;
+  try {
+    await api('/api/stop', { method: 'POST', body: '{}' });
+    setText('status-text', 'Menghentikan...');
+    await pollStatus();
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    if (stop) stop.disabled = false;
   }
 }
 
@@ -450,13 +477,13 @@ async function renderOutputs() {
   if (historyPanel) historyPanel.innerHTML = renderHistoryBoard(savedClips);
   if (!homePanel) return;
 
+  const pendingGroups = groups.map(withPendingClips).filter((group) => group.clips.length);
   if (processingActive) {
-    homePanel.className = 'flex h-full flex-col items-center justify-center text-center max-w-xl mx-auto w-full';
-    homePanel.innerHTML = renderProcessingLoader(0, 'Menyiapkan AI...');
+    homePanel.className = pendingGroups.length ? 'space-y-5 w-full' : 'flex h-full flex-col items-center justify-center text-center max-w-xl mx-auto w-full';
+    homePanel.innerHTML = pendingGroups.length ? `${renderInlineProcessingLoader(latestProgress, latestMessage)}${pendingGroups.map(renderExportSession).join('')}` : renderProcessingLoader(latestProgress, latestMessage);
     return;
   }
 
-  const pendingGroups = groups.map(withPendingClips).filter((group) => group.clips.length);
   if (pendingGroups.length) {
     homePanel.className = 'space-y-5 w-full';
     homePanel.innerHTML = pendingGroups.map(renderExportSession).join('');
@@ -464,6 +491,10 @@ async function renderOutputs() {
     homePanel.className = 'flex h-full flex-col items-center justify-center text-center max-w-xl mx-auto w-full';
     homePanel.innerHTML = renderEmptyHome();
   }
+}
+
+function renderInlineProcessingLoader(progress = 0, message = 'Menyiapkan AI...') {
+  return `<section class="mb-4 rounded-2xl border border-[#3a4558] bg-[#111827] p-4 text-center">${renderProcessingLoader(progress, message)}</section>`;
 }
 
 function renderEmptyHome() {
@@ -562,7 +593,7 @@ function renderFileLink(file) {
 function renderExportSession(group) {
   const clips = group.clips || [];
   const status = $('compact-status')?.innerHTML || 'Status: Idle<br>Clip: - | Quality: 480p | Mode: Blur';
-  return `<section class="border-0 p-6 bg-transparent w-full max-w-full h-full overflow-hidden flex flex-col"><div class="mb-6"><h2 class="text-[20px] font-semibold text-black mb-0.5 tracking-tight">Hasil Klip</h2><div class="gallery-warning-badge">Simpan klip ke Galeri dulu untuk mengaktifkan download. Hapus atau simpan semua klip sebelum generate baru.</div></div><div class="flex flex-wrap gap-4 justify-center">${clips.map((clip, index) => renderExportCard(group, clip, index)).join('')}</div><div class="mt-4 text-center"><h3 class="font-semibold text-[16px] leading-snug text-gray-950 whitespace-normal break-words">${escapeHtml(group.title)}</h3><p class="text-[12px] text-gray-500 whitespace-normal break-words mt-1">${escapeHtml(metaLine(group, clips.length))}</p></div><div class="text-[13px] text-gray-500 mt-auto pt-6">${status}</div></section>`;
+  return `<section class="border-0 p-6 bg-transparent w-full max-w-full min-h-[calc(100vh-90px)] overflow-hidden flex flex-col"><div class="mb-8"><h2 class="text-[20px] font-semibold text-black mb-2 tracking-tight">Hasil Klip</h2><p class="text-[13px] text-gray-500 leading-relaxed mb-4 max-w-3xl">Klip yang sudah selesai akan muncul di sini satu per satu saat proses masih berjalan.</p><div class="gallery-warning-badge">Simpan klip ke Galeri dulu untuk mengaktifkan download. Hapus atau simpan semua klip sebelum generate baru.</div></div><div class="flex flex-wrap gap-4 justify-center">${clips.map((clip, index) => renderExportCard(group, clip, index)).join('')}</div><div class="mt-4 text-center"><h3 class="font-semibold text-[16px] leading-snug text-gray-950 whitespace-normal break-words">${escapeHtml(group.title)}</h3><p class="text-[12px] text-gray-500 whitespace-normal break-words mt-1">${escapeHtml(metaLine(group, clips.length))}</p></div><div class="text-[13px] text-gray-500 mt-auto pt-10">${status}</div></section>`;
 }
 
 function renderExportCard(group, clip, index = 0) {
@@ -700,9 +731,10 @@ document.addEventListener('DOMContentLoaded', () => {
     sessionStorage.removeItem('klipklop_toast');
     showSuccess(pendingToast);
   }
-  const save = $('save-settings'); const showJson = $('show-json'); const jsonClose = $('json-close'); const videoClose = $('video-modal-close'); const clearKey = $('clear-api-key'); const start = $('process-button'); const profile = $('profile-button'); const logoutButton = $('logout-button'); const logClear = $('log-clear'); const instruction = $('instruction'); const instructionSave = $('instruction-save'); const instructionCancel = $('instruction-cancel'); const qualityMain = $('video-quality-main'); const qualitySettings = $('video-quality'); const blur = $('landscape-blur');
+  const save = $('save-settings'); const showJson = $('show-json'); const stop = $('stop-button'); const jsonClose = $('json-close'); const videoClose = $('video-modal-close'); const clearKey = $('clear-api-key'); const start = $('process-button'); const profile = $('profile-button'); const logoutButton = $('logout-button'); const logClear = $('log-clear'); const instruction = $('instruction'); const instructionSave = $('instruction-save'); const instructionCancel = $('instruction-cancel'); const qualityMain = $('video-quality-main'); const qualitySettings = $('video-quality'); const blur = $('landscape-blur');
   if (save) save.addEventListener('click', saveSettings);
   if (showJson) showJson.addEventListener('click', showPayloadJson);
+  if (stop) stop.addEventListener('click', stopProcessing);
   if (jsonClose) jsonClose.addEventListener('click', () => $('json-modal')?.classList.add('hidden'));
   if (videoClose) videoClose.addEventListener('click', closeVideoModal);
   if (clearKey) clearKey.addEventListener('click', clearApiKey);

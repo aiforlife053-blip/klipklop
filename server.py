@@ -111,6 +111,8 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/start":
             result = MANAGER.start(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/stop":
+            self._json(MANAGER.stop())
         elif parsed.path == "/api/delete":
             result = MANAGER.delete_output(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
