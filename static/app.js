@@ -183,6 +183,8 @@ function toggleSubtitleEngineFields() {
 function updateWatermarkLabels() {
   setText('watermark-opacity-label', `${getValue('watermark-opacity', '80')}%`);
   setText('watermark-scale-label', `${getValue('watermark-scale', '15')}%`);
+  setText('credit-opacity-label', `${getValue('credit-opacity', '55')}%`);
+  setText('credit-size-label', `${getValue('credit-size', '32')}`);
   const image = getValue('watermark-image');
   const name = image ? image.split(/[\\/]/).pop() : 'Belum ada gambar';
   setText('watermark-file-name', name);
@@ -765,7 +767,7 @@ function setNavActive(id, active) {
   const el = $(id);
   if (!el) return;
   el.className = active
-    ? 'px-3 py-2 rounded-xl bg-[#2a3446] text-[#f15a24] transition'
+    ? 'px-3 py-2 rounded-xl bg-[#fff0e6] text-[#ea580c] transition'
     : 'px-3 py-2 rounded-xl text-gray-500 hover:bg-gray-50 hover:text-gray-900 transition';
 }
 

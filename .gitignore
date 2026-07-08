@@ -14,3 +14,5 @@ testsprite_tests\tmp\config.json
 client_secret*.json
 token*.json
 upload_queue.json
+
+tokens/
