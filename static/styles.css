@@ -97,6 +97,13 @@ label > div.border, aside div.border {
     color: var(--text) !important;
     border-color: var(--line) !important;
 }
+input.bg-white, select.bg-white, textarea.bg-white, input:focus, select:focus, textarea:focus {
+    background-color: var(--surface) !important;
+    color: var(--text) !important;
+    border-color: var(--line) !important;
+    box-shadow: none !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+}
 input::placeholder, textarea::placeholder {
     color: var(--muted) !important;
 }

@@ -738,60 +738,56 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     def add_hook_with_progress(self, input_path: str, hook_text: str, output_path: str, progress_callback) -> float:
         """Add hook scene at the beginning with progress tracking"""
         
-        if not self.tts_client:
-            raise Exception("Hook Maker API key belum diisi")
-        # Report TTS character usage
-        self.report_tokens(0, 0, 0, len(hook_text))
-        
-        # Generate TTS audio (10% progress)
         progress_callback(0.1)
-        try:
-            tts_response = self.tts_client.audio.speech.create(
-                model=self.tts_model,
-                voice="nova",
-                input=hook_text,
-                speed=1.0
-            )
-        except APIConnectionError as e:
-            self.log(f"  ❌ TTS API Connection Error: Could not connect to {self.tts_client.base_url}")
-            raise Exception(f"TTS API connection failed!\n\nCould not connect to: {self.tts_client.base_url}\nError: {e}")
-        except RateLimitError as e:
-            self.log(f"  ❌ TTS API Rate Limit: {e}")
-            raise Exception(f"TTS API rate limit exceeded!\n\nPlease wait a moment and try again.\nDetails: {e}")
-        except APIStatusError as e:
-            self.log(f"  ❌ TTS API Error (HTTP {e.status_code}): {e.message}")
-            self.log(f"     Model: {self.tts_model}, Base URL: {self.tts_client.base_url}")
-            raise Exception(
-                f"TTS (Hook) API Error!\n\n"
-                f"Status: {e.status_code}\n"
-                f"Message: {e.message}\n"
-                f"Model: {self.tts_model}\n"
-                f"Base URL: {self.tts_client.base_url}\n\n"
-                f"Check your Hook Maker API settings."
-            )
-        except Exception as e:
-            self.log(f"  ❌ TTS API Unexpected Error: {type(e).__name__}: {e}")
-            raise Exception(f"TTS (Hook) generation failed!\n\nError: {type(e).__name__}: {e}\nModel: {self.tts_model}")
-        
-        tts_file = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
-        with open(tts_file, 'wb') as f:
-            f.write(tts_response.content)
-        
-        progress_callback(0.2)
-        
-        # Get TTS duration using ffprobe
-        probe_cmd = [
-            self.ffmpeg_path, "-i", tts_file,
-            "-f", "null", "-"
-        ]
-        result = subprocess.run(probe_cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
-        duration_match = re.search(r"Duration: (\d+):(\d+):(\d+\.\d+)", result.stderr)
-        
-        if duration_match:
-            h, m, s = duration_match.groups()
-            hook_duration = int(h) * 3600 + int(m) * 60 + float(s) + 0.5
+        if self.tts_client:
+            self.report_tokens(0, 0, 0, len(hook_text))
+            try:
+                tts_response = self.tts_client.audio.speech.create(
+                    model=self.tts_model,
+                    voice="nova",
+                    input=hook_text,
+                    speed=1.0
+                )
+            except APIConnectionError as e:
+                self.log(f"  ❌ TTS API Connection Error: Could not connect to {self.tts_client.base_url}")
+                raise Exception(f"TTS API connection failed!\n\nCould not connect to: {self.tts_client.base_url}\nError: {e}")
+            except RateLimitError as e:
+                self.log(f"  ❌ TTS API Rate Limit: {e}")
+                raise Exception(f"TTS API rate limit exceeded!\n\nPlease wait a moment and try again.\nDetails: {e}")
+            except APIStatusError as e:
+                self.log(f"  ❌ TTS API Error (HTTP {e.status_code}): {e.message}")
+                self.log(f"     Model: {self.tts_model}, Base URL: {self.tts_client.base_url}")
+                raise Exception(
+                    f"TTS (Hook) API Error!\n\n"
+                    f"Status: {e.status_code}\n"
+                    f"Message: {e.message}\n"
+                    f"Model: {self.tts_model}\n"
+                    f"Base URL: {self.tts_client.base_url}\n\n"
+                    f"Check your Hook Maker API settings."
+                )
+            except Exception as e:
+                self.log(f"  ❌ TTS API Unexpected Error: {type(e).__name__}: {e}")
+                raise Exception(f"TTS (Hook) generation failed!\n\nError: {type(e).__name__}: {e}\nModel: {self.tts_model}")
+            tts_file = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
+            with open(tts_file, 'wb') as f:
+                f.write(tts_response.content)
+            probe_cmd = [self.ffmpeg_path, "-i", tts_file, "-f", "null", "-"]
+            result = subprocess.run(probe_cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
+            duration_match = re.search(r"Duration: (\d+):(\d+):(\d+\.\d+)", result.stderr)
+            if duration_match:
+                h, m, s = duration_match.groups()
+                hook_duration = int(h) * 3600 + int(m) * 60 + float(s) + 0.5
+            else:
+                hook_duration = 3.0
         else:
+            self.log("  ⊘ Hook Maker voice skipped; using silent hook")
             hook_duration = 3.0
+            tts_file = str(self.temp_dir / f"silent_hook_{int(time.time() * 1000)}.mp3")
+            silent_cmd = [self.ffmpeg_path, "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", str(hook_duration), "-q:a", "9", "-acodec", "libmp3lame", tts_file]
+            result = self._run_ffmpeg_subprocess(silent_cmd)
+            if result.returncode != 0:
+                raise Exception("Failed to create silent hook audio")
+        progress_callback(0.2)
         
         # Format hook text
         hook_upper = hook_text.upper()
