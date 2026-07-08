@@ -69,8 +69,8 @@ export default function DashboardLayout() {
   return (
     <div className="bg-background text-foreground h-screen overflow-hidden flex flex-col antialiased">
       <header className="bg-white border-b border-border px-4 py-3 flex items-center justify-between sticky top-0 z-50">
-        <div className="flex items-center space-x-2 text-black font-extrabold text-[16px] tracking-tight">
-          <img src="/logo%20klipklop.png?v=3" className="h-8 w-8 rounded-md object-contain" alt="KlipKlop Logo" />
+        <div className="flex items-center space-x-2 text-black font-extrabold text-[20px] tracking-tight">
+          <img src="/logo%20klipklop.png?v=3" className="h-10 w-10 rounded-md object-contain" alt="KlipKlop Logo" />
           <span className="text-black leading-none">KlipKlop</span>
         </div>
         <nav className="flex items-center gap-1 text-[13px] font-semibold">
@@ -92,12 +92,7 @@ export default function DashboardLayout() {
           >
             Konsol
           </Link>
-          <Link 
-            to="/settings"
-            className={`px-3 py-2 rounded-xl transition ${activeTab === 'settings' ? 'bg-primary/10 text-primary' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}
-          >
-            Pengaturan
-          </Link>
+         
           <Link 
             to="/preview"
             className={`px-3 py-2 rounded-xl transition ${activeTab === 'preview' ? 'bg-primary/10 text-primary' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}
