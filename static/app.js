@@ -197,7 +197,7 @@ function settingsPayload(extra = {}) {
     landscape_blur: getChecked('landscape-blur', false),
     subtitle_style: {
       font: getValue('subtitle-font', 'Plus Jakarta Sans'),
-      size: Number(getValue('subtitle-size', '65') || 65),
+      size: Number(getValue('subtitle-size', '58') || 58),
     },
     output_dir: getValue('output-dir'),
     ...extra,
@@ -265,8 +265,8 @@ function startPayload(captionsOn = getChecked('captions', true)) {
     num_clips: 3,
     add_captions: captionsOn,
     enable_captions: captionsOn,
-    add_hook: getChecked('add-hook', false),
-    hook_mode: getChecked('add-hook', false),
+    add_hook: true,
+    hook_mode: true,
     screen_size: getScreenSize(),
     subtitle_language: getValue('subtitle-language', 'id'),
     landscape_blur: getChecked('landscape-blur', false),
@@ -593,7 +593,7 @@ function renderFileLink(file) {
 function renderExportSession(group) {
   const clips = group.clips || [];
   const status = $('compact-status')?.innerHTML || 'Status: Idle<br>Clip: - | Quality: 480p | Mode: Blur';
-  return `<section class="border-0 p-6 bg-transparent w-full max-w-full min-h-[calc(100vh-90px)] overflow-hidden flex flex-col"><div class="mb-8"><h2 class="text-[20px] font-semibold text-black mb-2 tracking-tight">Hasil Klip</h2><p class="text-[13px] text-gray-500 leading-relaxed mb-4 max-w-3xl">Klip yang sudah selesai akan muncul di sini satu per satu saat proses masih berjalan.</p><div class="gallery-warning-badge">Simpan klip ke Galeri dulu untuk mengaktifkan download. Hapus atau simpan semua klip sebelum generate baru.</div></div><div class="flex flex-wrap gap-4 justify-center">${clips.map((clip, index) => renderExportCard(group, clip, index)).join('')}</div><div class="mt-4 text-center"><h3 class="font-semibold text-[16px] leading-snug text-gray-950 whitespace-normal break-words">${escapeHtml(group.title)}</h3><p class="text-[12px] text-gray-500 whitespace-normal break-words mt-1">${escapeHtml(metaLine(group, clips.length))}</p></div><div class="text-[13px] text-gray-500 mt-auto pt-10">${status}</div></section>`;
+  return `<section class="border-0 p-6 bg-transparent w-full max-w-full min-h-[calc(100vh-90px)] overflow-hidden flex flex-col"><div class="mb-8"><h2 class="text-[20px] font-semibold text-black mb-2 tracking-tight">Hasil Klip</h2><p class="text-[13px] text-gray-500 leading-relaxed mb-4 max-w-3xl">Klip yang sudah selesai akan muncul di sini satu per satu saat proses masih berjalan.</p><div class="gallery-warning-badge">Simpan klip ke Galeri dulu untuk mengaktifkan download. Hapus atau simpan semua klip sebelum generate baru.</div></div><div class="flex flex-wrap gap-4 justify-center">${clips.map((clip, index) => renderExportCard(group, clip, index)).join('')}</div><div class="mt-10 text-left w-full max-w-5xl mx-auto"><h3 class="font-semibold text-[16px] leading-snug text-gray-950 whitespace-normal break-words">${escapeHtml(group.title)}</h3><p class="text-[12px] text-gray-500 whitespace-normal break-words mt-2">${escapeHtml(metaLine(group, clips.length))}</p></div><div class="flex items-end justify-between gap-4 text-[13px] text-gray-500 mt-auto pt-10"><div>${status}</div><button class="border border-gray-200 px-4 py-2.5 rounded-xl text-[13px] font-semibold text-gray-700 hover:bg-gray-50 bg-white" type="button" data-show-json="true">JSON</button></div></section>`;
 }
 
 function renderExportCard(group, clip, index = 0) {
@@ -766,6 +766,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const youtubeDeleteButton = event.target.closest('[data-youtube-delete]');
     const sessionButton = event.target.closest('[data-session-toggle]');
     const downloadLink = event.target.closest('[data-download-output]');
+    const jsonButton = event.target.closest('[data-show-json]');
+    if (jsonButton) showPayloadJson();
     if (videoButton) openVideoModal(videoButton.dataset.videoOpen);
     if (deleteButton) deleteOutput(deleteButton.dataset.deleteOutput, deleteButton.dataset.deleteKind);
     if (saveButton) saveOutput(saveButton.dataset.saveOutput, saveButton.dataset.saveOne);

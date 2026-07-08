@@ -1,5 +1,9 @@
+import hashlib
+import json
 import os
+import shutil
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from openai import OpenAI
 
@@ -78,14 +82,19 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
                 timeout=600.0,
             ) if cm_config.get("api_key") else None
             self.whisper_model = cm_config.get("model", "whisper-1")
+            tts_config = self.ai_providers.get("hook_maker", {})
             self.tts_client = None
-            self.tts_model = tts_model
+            self.tts_api_key = tts_config.get("api_key") or hf_config.get("api_key") or ""
+            self.tts_model = tts_config.get("model", "gemini-3.1-flash-tts-preview")
+            self.tts_voice = tts_config.get("voice", "Fenrir")
         else:
             self.highlight_client = client
             self.caption_client = client
             self.tts_client = None
+            self.tts_api_key = ""
             self.model = model
-            self.tts_model = tts_model
+            self.tts_model = "gemini-3.1-flash-tts-preview"
+            self.tts_voice = "Fenrir"
             self.whisper_model = "whisper-1"
 
         self.client = client
@@ -110,7 +119,9 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         self.video_quality = str(video_quality or "720")
         self.landscape_blur = bool(landscape_blur)
         self.screen_size = "16:9" if str(screen_size) == "16:9" else "9:16"
-        self.subtitle_style = subtitle_style or {"font": "Plus Jakarta Sans", "size": 65, "bottom_margin": 400}
+        self.optimize_mode = str((self.ai_providers or {}).get("optimize_mode") or os.environ.get("KLIPKLOP_OPTIMIZE_MODE") or "local").lower()
+        self.use_download_sections = self.optimize_mode in {"local", "hosting_2cpu", "fast_cpu"}
+        self.subtitle_style = subtitle_style or {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360}
         self.subtitle_engine = subtitle_engine or "local"
         self.local_whisper = local_whisper or {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"}
         self._local_whisper_model = None
@@ -126,11 +137,36 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         self.mp_drawing = None
         self.temp_dir = self.output_dir / "_temp"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
+        self.cache_dir = Path(os.environ.get("KLIPKLOP_CACHE_DIR") or self.output_dir.parent / "cache")
+
+    def _video_cache_dir(self, url: str) -> Path:
+        parsed = urlparse(url)
+        video_id = parse_qs(parsed.query).get("v", [""])[0] if parsed.query else ""
+        key = video_id or hashlib.sha1(url.encode("utf-8")).hexdigest()[:16]
+        cache_root = getattr(self, "cache_dir", Path(os.environ.get("KLIPKLOP_CACHE_DIR") or Path(self.output_dir).parent / "cache"))
+        path = cache_root / key
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _cache_key(self, value: str) -> str:
+        return hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
 
     def process(self, url: str, num_clips: int = 5, add_captions: bool = True, add_hook: bool = True):
         try:
+            cache_dir = self._video_cache_dir(url)
+            cached_srt = cache_dir / "transcript.srt"
+            cached_info = cache_dir / "video_info.json"
             self.set_progress("Downloading subtitle...", 0.1)
-            srt_path, video_info = self.download_subtitle_only(url)
+            use_sections = getattr(self, "use_download_sections", True)
+            if use_sections and cached_srt.exists():
+                srt_path = str(cached_srt)
+                video_info = json.loads(cached_info.read_text(encoding="utf-8")) if cached_info.exists() else {"title": "video"}
+                self.log("  ✓ Using cached SRT")
+            else:
+                srt_path, video_info = self.download_subtitle_only(url)
+                if use_sections and srt_path:
+                    shutil.copyfile(srt_path, cached_srt)
+                    cached_info.write_text(json.dumps(video_info or {}, ensure_ascii=False, indent=2), encoding="utf-8")
             self.video_info = video_info or {}
             self.channel_name = video_info.get("channel", "") if video_info else ""
             if self.is_cancelled():
@@ -143,19 +179,41 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
             else:
                 transcript = self.parse_srt(srt_path)
             self.set_progress("Finding highlights...", 0.3)
-            highlights = self.find_highlights(transcript, video_info, num_clips)
+            highlights_cache = cache_dir / f"highlights.{self._cache_key(str(num_clips) + getattr(self, 'system_prompt', '') + str(transcript))}.json"
+            if use_sections and highlights_cache.exists():
+                highlights = json.loads(highlights_cache.read_text(encoding="utf-8"))
+                self.log("  ✓ Using cached highlights")
+            else:
+                highlights = self.find_highlights(transcript, video_info, num_clips)
+                if use_sections:
+                    highlights_cache.write_text(json.dumps(highlights, ensure_ascii=False, indent=2), encoding="utf-8")
             if self.is_cancelled():
                 return
             if not highlights:
                 raise Exception("No valid highlights found!")
-            if not source_path:
-                self.set_progress("Downloading source video/audio once...", 0.32)
-                source_path = self.download_video_only(url)
             total_clips = len(highlights)
-            for i, highlight in enumerate(highlights, 1):
-                if self.is_cancelled():
-                    return
-                self.process_clip(source_path, highlight, i, total_clips, add_captions=add_captions, add_hook=add_hook, pre_cut=False)
+            if use_sections and srt_path:
+                for i, highlight in enumerate(highlights, 1):
+                    if self.is_cancelled():
+                        return
+                    self.set_progress(f"Clip {i}/{total_clips}: Downloading section...", 0.32 + (0.08 * (i - 1) / total_clips))
+                    section_path = str(self.temp_dir / f"section_{i:03d}.mp4")
+                    clip_source = self.download_video_section(url, highlight["start_time"], highlight["end_time"], section_path)
+                    try:
+                        self.process_clip(clip_source, highlight, i, total_clips, add_captions=add_captions, add_hook=add_hook, pre_cut=True)
+                    finally:
+                        try:
+                            Path(clip_source).unlink(missing_ok=True)
+                        except Exception:
+                            pass
+            else:
+                if not source_path:
+                    self.set_progress("Downloading source video/audio once...", 0.32)
+                    source_path = self.download_video_only(url)
+                for i, highlight in enumerate(highlights, 1):
+                    if self.is_cancelled():
+                        return
+                    self.process_clip(source_path, highlight, i, total_clips, add_captions=add_captions, add_hook=add_hook, pre_cut=False)
             self.set_progress("Complete!", 1.0)
             self.log(f"\n✅ Created {total_clips} clips in: {self.output_dir}")
         finally:

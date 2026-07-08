@@ -10,20 +10,22 @@
 1. Tambah dependency `google-genai` ke `requirements.txt`.
 2. Tambah konfigurasi TTS Gemini:
    - model default: `gemini-3.1-flash-tts-preview`
-   - voice default: `Kore`
+   - voice default: `Fenrir`
    - API key reuse dari provider Gemini yang sudah tersimpan.
 3. Di `clipper_core.py`, aktifkan `tts_client`/helper Gemini TTS saat API key tersedia.
 4. Di `clipper_export.py`, ganti jalur hook voice:
    - generate audio `.wav` dari Gemini TTS.
    - pakai prompt pendek, contoh: `Say energetically in Indonesian: ...`
-   - fallback ke silent hook jika TTS gagal, supaya export tetap jalan.
+   - jika TTS gagal, jangan buat hook sama sekali; lanjut proses video utama tanpa hook.
 5. Cache audio hook per teks bila perlu untuk mengurangi request berulang.
+6. Hook default selalu aktif di payload/backend, tanpa pilihan manual dari UI.
 
 ## Perubahan Hook Visual
-1. Kecilkan ukuran font hook.
-2. Ubah warna teks hook dari kuning ke `#247BA0`.
-3. Pertahankan box putih agar tetap terbaca.
-4. Pastikan layout hook tetap aman untuk 9:16 dan 16:9.
+1. Hook visual hanya dibuat kalau Gemini TTS berhasil.
+2. Kecilkan ukuran font hook.
+3. Ubah warna teks hook dari kuning ke `#247BA0`.
+4. Pertahankan box putih agar tetap terbaca.
+5. Pastikan layout hook tetap aman untuk 9:16 dan 16:9.
 
 ## Perubahan Subtitle
 1. Fix bug chunk terakhir tidak masuk saat word timestamp tersedia.
@@ -50,6 +52,7 @@
    - judul `Hasil Klip`.
    - deskripsi singkat di bawahnya.
    - warning di bawah deskripsi dengan jarak lega.
+7. Hapus menu/toggle hook dari panel kiri; hook selalu default aktif.
 
 ## File Target
 - `requirements.txt`
@@ -78,4 +81,4 @@
 ## Risiko
 - Gemini TTS preview bisa berubah kuota/format response.
 - Voice Indonesia belum selalu natural; prompt perlu diuji.
-- Jika TTS gagal, fallback silent tetap dipakai agar export tidak gagal total.
+- Jika TTS gagal, hook akan dilewati; export tetap lanjut tanpa opening hook.

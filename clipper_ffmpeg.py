@@ -19,7 +19,7 @@ from utils.logger import debug_log
 
 
 class FfmpegMixin:
-    _CPU_FALLBACK_ARGS = ['-c:v', 'libx264', '-preset', 'fast', '-crf', '18']
+    _CPU_FALLBACK_ARGS = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23']
     _GPU_ENCODER_NAMES = (
         'h264_nvenc', 'hevc_nvenc',
         'h264_qsv', 'hevc_qsv',
@@ -53,7 +53,8 @@ class FfmpegMixin:
         if self.gpu_enabled and self.gpu_encoder_args:
             return self.gpu_encoder_args
         else:
-            # Default CPU encoding
+            if getattr(self, "optimize_mode", "local") in {"local", "hosting_2cpu", "fast_cpu"}:
+                return ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23']
             return ['-c:v', 'libx264', '-preset', 'fast', '-crf', '18']
 
     def _is_gpu_encoder_error(cls, stderr: str) -> bool:

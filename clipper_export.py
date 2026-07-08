@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import json
 import os
 import re
@@ -157,13 +159,14 @@ class ExportMixin:
             hook_text = highlight.get("hook_text", highlight["title"])
             hook_duration = self.add_hook_with_progress(str(current_output), hook_text, str(hooked_file),
                 lambda p: clip_progress("Adding hook...", current_step, p))
-            
-            # Verify hooked file was created
-            if not hooked_file.exists():
-                raise Exception(f"Failed to create hooked video: {hooked_file}")
-            
-            self.log(f"  ✓ Added hook ({hook_duration:.1f}s)")
-            current_output = hooked_file
+            if hook_duration > 0:
+                if not hooked_file.exists():
+                    raise Exception(f"Failed to create hooked video: {hooked_file}")
+                self.log(f"  ✓ Added hook ({hook_duration:.1f}s)")
+                current_output = hooked_file
+            else:
+                self.log("  ⊘ Skipped hook")
+                add_hook = False
             current_step += 1
         else:
             self.log("  ⊘ Skipped hook (disabled)")
@@ -661,9 +664,9 @@ class ExportMixin:
         
         style = getattr(self, "subtitle_style", {}) or {}
         font = str(style.get("font") or "Plus Jakarta Sans").replace(",", " ")
-        size = int(style.get("size") or 65)
+        size = int(style.get("size") or 58)
         alignment = 2
-        bottom_margin = 520
+        bottom_margin = int(style.get("bottom_margin") or 360)
         ass_content = f"""[Script Info]
 Title: Auto-generated captions
 ScriptType: v4.00+
@@ -674,7 +677,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{size},&H00FFFFFF,&H000000FF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,1,4,2,{alignment},60,60,{bottom_margin},1
+Style: Default,{font},{size},&H00FFFFFF,&H00FFFFFF,&H00A07B24,&H00A07B24,-1,0,0,0,100,100,0,0,3,8,0,{alignment},80,80,{bottom_margin},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -703,6 +706,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 if should_flush:
                     chunks.append(chunk)
                     chunk = []
+            if chunk:
+                chunks.append(chunk)
             for chunk in chunks:
                 events.append({
                     'start': self.format_time(chunk[0]['start'] + time_offset),
@@ -719,25 +724,79 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 text = segment.get('text', '').strip()
                 
                 if text:
-                    events.append({
-                        'start': self.format_time(start),
-                        'end': self.format_time(end),
-                        'text': text
-                    })
+                    words = text.split()
+                    parts = [' '.join(words[i:i + 4]) for i in range(0, len(words), 4)] or [text]
+                    span = max(0.25, (end - start) / len(parts))
+                    for index, part in enumerate(parts):
+                        part_start = start + index * span
+                        part_end = end if index == len(parts) - 1 else min(end, part_start + span)
+                        events.append({
+                            'start': self.format_time(part_start),
+                            'end': self.format_time(part_end),
+                            'text': part
+                        })
         
         # Write events to ASS file
         for event in events:
-            ass_content += f"Dialogue: 0,{event['start']},{event['end']},Default,,0,0,0,,{event['text']}\n"
+            text = str(event['text']).replace('{', '').replace('}', '').replace('\n', ' ')
+            ass_content += f"Dialogue: 0,{event['start']},{event['end']},Default,,0,0,0,,{text}\n"
         
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(ass_content)
         return len(events)
 
+    def _generate_gemini_tts(self, hook_text: str) -> str:
+        api_key = getattr(self, "tts_api_key", "")
+        if not api_key:
+            raise RuntimeError("Gemini TTS API key kosong")
+        cache_root = Path(os.environ.get("KLIPKLOP_CACHE_DIR") or self.output_dir.parent / "cache") / "tts"
+        cache_root.mkdir(parents=True, exist_ok=True)
+        cache_file = cache_root / f"{hashlib.sha1((getattr(self, 'tts_voice', 'Fenrir') + hook_text).encode('utf-8')).hexdigest()}.wav"
+        if cache_file.exists():
+            self.log("  ✓ Using cached hook TTS")
+            return str(cache_file)
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=getattr(self, "tts_model", "gemini-3.1-flash-tts-preview"),
+            contents=f"Say energetically in Indonesian: {hook_text}",
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name=getattr(self, "tts_voice", "Fenrir")
+                        )
+                    )
+                )
+            )
+        )
+        data = response.candidates[0].content.parts[0].inline_data.data
+        audio = base64.b64decode(data) if isinstance(data, str) else data
+        with open(cache_file, 'wb') as f:
+            f.write(audio)
+        return str(cache_file)
+
     def add_hook_with_progress(self, input_path: str, hook_text: str, output_path: str, progress_callback) -> float:
         """Add hook scene at the beginning with progress tracking"""
         
         progress_callback(0.1)
-        if self.tts_client:
+        if getattr(self, "tts_api_key", ""):
+            try:
+                tts_file = self._generate_gemini_tts(hook_text)
+            except Exception as e:
+                self.log(f"  ⊘ Hook skipped; Gemini TTS failed: {e}")
+                return 0
+            probe_cmd = [self.ffmpeg_path, "-i", tts_file, "-f", "null", "-"]
+            result = subprocess.run(probe_cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
+            duration_match = re.search(r"Duration: (\d+):(\d+):(\d+\.\d+)", result.stderr)
+            if duration_match:
+                h, m, s = duration_match.groups()
+                hook_duration = int(h) * 3600 + int(m) * 60 + float(s) + 0.5
+            else:
+                hook_duration = 3.0
+        elif self.tts_client:
             self.report_tokens(0, 0, 0, len(hook_text))
             try:
                 tts_response = self.tts_client.audio.speech.create(
@@ -778,13 +837,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             else:
                 hook_duration = 3.0
         else:
-            self.log("  ⊘ Hook voice skipped; using silent hook")
-            hook_duration = 3.0
-            tts_file = str(self.temp_dir / f"silent_hook_{int(time.time() * 1000)}.mp3")
-            silent_cmd = [self.ffmpeg_path, "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", str(hook_duration), "-q:a", "9", "-acodec", "libmp3lame", tts_file]
-            result = self._run_ffmpeg_subprocess(silent_cmd)
-            if result.returncode != 0:
-                raise Exception("Failed to create silent hook audio")
+            self.log("  ⊘ Hook skipped; Gemini TTS API key empty")
+            return 0
         progress_callback(0.2)
         
         # Format hook text
@@ -853,8 +907,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         from PIL import Image, ImageDraw, ImageFont
 
         style = self.hook_style_settings or {}
-        font_size_frac = float(style.get("font_size", 0.054))
-        font_color_hex = style.get("font_color", "#FFD700")
+        font_size_frac = float(style.get("font_size", 0.044))
+        font_color_hex = style.get("font_color", "#247BA0")
         bg_color_hex = style.get("bg_color", "#FFFFFF")
         corner_radius = int(style.get("corner_radius", 0))
         pos_x = float(style.get("position_x", 0.5))
@@ -1080,7 +1134,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         for path in (tts_file, hook_video, main_reencoded, concat_list,
                      bg_video, overlay_video, overlay_png):
             try:
-                if path and os.path.exists(path):
+                if path and os.path.exists(path) and "cache\\tts" not in path and "cache/tts" not in path.replace("\\", "/"):
                     os.unlink(path)
             except Exception:
                 pass

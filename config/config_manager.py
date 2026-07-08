@@ -42,7 +42,7 @@ class ConfigManager:
                 "landscape_blur": False,
                 "subtitle_engine": "local",
                 "local_whisper": {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"},
-                "subtitle_style": {"font": "Plus Jakarta Sans", "size": 65, "bottom_margin": 400},
+                "subtitle_style": {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360},
                 "subtitle_position": "auto",
                 "mediapipe_settings": {
                     "lip_activity_threshold": 0.15,
@@ -95,7 +95,7 @@ class ConfigManager:
             "landscape_blur": False,
             "subtitle_engine": "local",
             "local_whisper": {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"},
-            "subtitle_style": {"font": "Plus Jakarta Sans", "size": 65, "bottom_margin": 400},
+            "subtitle_style": {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360},
             "subtitle_position": "auto",
             "mediapipe_settings": {
                 "lip_activity_threshold": 0.15,
@@ -131,6 +131,11 @@ class ConfigManager:
                 "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
                 "api_key": "",
                 "model": "gemini-2.5-flash"
+            },
+            "hook_maker": {
+                "api_key": "",
+                "model": "gemini-3.1-flash-tts-preview",
+                "voice": "Fenrir"
             }
         }
     
@@ -155,6 +160,11 @@ class ConfigManager:
                 "base_url": base_url,
                 "api_key": api_key,
                 "model": model
+            },
+            "hook_maker": {
+                "api_key": api_key,
+                "model": "gemini-3.1-flash-tts-preview",
+                "voice": "Fenrir"
             }
         }
         

@@ -60,7 +60,7 @@ class WebJobManager:
             return {"status": "busy", "message": "Simpan atau hapus klip di Beranda sebelum generate baru"}
         num_clips = 3
         add_captions = self._as_bool(payload.get("enable_captions", payload.get("add_captions", True)), True)
-        add_hook = self._as_bool(payload.get("add_hook", payload.get("hook_mode", False)), False)
+        add_hook = True
         subtitle_language = str(payload.get("subtitle_language", self._config().config.get("subtitle_language", "id")) or "id")[:12]
         instruction = str(payload.get("instruction", "")).strip()[:1000]
         landscape_blur = self._as_bool(payload.get("landscape_blur", self._config().config.get("landscape_blur", False)), False)
@@ -157,6 +157,8 @@ class WebJobManager:
         model = provider.get("model", cfg.get("model", GEMINI_MODEL))
         cookies = self.cookie_status()
         caption_provider = cfg.get("ai_providers", {}).get("caption_maker", {})
+        hook_provider = cfg.get("ai_providers", {}).get("hook_maker", {})
+        hook_key_saved = bool(hook_provider.get("api_key") or provider.get("api_key") or cfg.get("api_key"))
         return {
             "base_url": base_url,
             "api_key": "",
@@ -172,7 +174,7 @@ class WebJobManager:
             "landscape_blur": bool(cfg.get("landscape_blur", False)),
             "subtitle_engine": cfg.get("subtitle_engine", "local"),
             "local_whisper": cfg.get("local_whisper", {"enabled": True, "model": "medium", "device": "cpu", "compute_type": "int8"}),
-            "subtitle_style": cfg.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 65, "bottom_margin": 400}),
+            "subtitle_style": cfg.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360}),
             "subtitle_position": cfg.get("subtitle_position", "auto"),
             "output_dir": cfg.get("output_dir", str(self.output_dir)),
             "cookie_exists": cookies["exists"],
@@ -193,6 +195,8 @@ class WebJobManager:
         caption_base_url = str(payload.get("caption_base_url", cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("base_url", "https://api.openai.com/v1"))).strip() or "https://api.openai.com/v1"
         caption_api_key = str(payload.get("caption_api_key", "")).strip()
         caption_model = str(payload.get("caption_model", cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("model", "whisper-1"))).strip() or "whisper-1"
+        hook_model = str(payload.get("hook_model", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("model", "gemini-3.1-flash-tts-preview"))).strip() or "gemini-3.1-flash-tts-preview"
+        hook_voice = str(payload.get("hook_voice", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("voice", "Fenrir"))).strip() or "Fenrir"
         output_dir = str(payload.get("output_dir", cfg_mgr.config.get("output_dir", str(self.output_dir)))).strip() or str(self.output_dir)
         subtitle_language = str(payload.get("subtitle_language", cfg_mgr.config.get("subtitle_language", "id")) or "id")[:12]
         if not re.fullmatch(r"[a-zA-Z-]{2,12}", subtitle_language):
@@ -215,14 +219,14 @@ class WebJobManager:
         local_whisper["compute_type"] = str(local_whisper.get("compute_type") or "int8")
         if video_quality not in {"480", "720", "1080"}:
             video_quality = "720"
-        subtitle_style = cfg_mgr.config.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 65, "bottom_margin": 400})
+        subtitle_style = cfg_mgr.config.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360})
         if isinstance(payload.get("subtitle_style"), dict):
             subtitle_style = {**subtitle_style, **payload["subtitle_style"]}
         subtitle_style["font"] = str(subtitle_style.get("font") or "Plus Jakarta Sans")[:80]
         if subtitle_style["font"] not in {"Plus Jakarta Sans", "Poppins", "Arial"}:
             subtitle_style["font"] = "Plus Jakarta Sans"
-        subtitle_style["size"] = max(24, min(120, self._as_int(subtitle_style.get("size"), 65)))
-        subtitle_style["bottom_margin"] = max(40, min(900, self._as_int(subtitle_style.get("bottom_margin"), 400)))
+        subtitle_style["size"] = max(24, min(120, self._as_int(subtitle_style.get("size"), 58)))
+        subtitle_style["bottom_margin"] = max(40, min(900, self._as_int(subtitle_style.get("bottom_margin"), 360)))
         providers = cfg_mgr.config.setdefault("ai_providers", {})
         for name in ("highlight_finder", "youtube_title_maker"):
             current = providers.setdefault(name, {})
@@ -239,6 +243,13 @@ class WebJobManager:
             caption_current["api_key"] = ""
         elif caption_api_key:
             caption_current["api_key"] = caption_api_key
+        hook_current = providers.setdefault("hook_maker", {})
+        hook_current["model"] = hook_model
+        hook_current["voice"] = hook_voice
+        if clear_api_key:
+            hook_current["api_key"] = ""
+        elif api_key:
+            hook_current["api_key"] = api_key
         cfg_mgr.config["base_url"] = base_url
         cfg_mgr.config["model"] = model
         if clear_api_key:
@@ -377,7 +388,7 @@ class WebJobManager:
             self._write_run_meta(run_dir, url, {"video_quality": str(cfg.get("video_quality", "720")), "landscape_blur": landscape_blur, "screen_size": screen_size, "add_hook": add_hook, "add_captions": add_captions, "subtitle_language": subtitle_language, "status": "staged", "file_exists": True})
             self._add_log(f"Output folder: {run_dir}")
             self._add_log("Preparing AI/video processor")
-            subtitle_style = {**cfg.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 65, "bottom_margin": 400}), "position": cfg.get("subtitle_position", "auto")}
+            subtitle_style = {**cfg.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360}), "position": cfg.get("subtitle_position", "auto")}
             core = AutoClipperCore(
                 client=None,
                 ffmpeg_path=get_ffmpeg_path(),
