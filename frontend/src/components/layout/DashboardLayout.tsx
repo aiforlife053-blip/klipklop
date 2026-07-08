@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { api } from '@/lib/api';
 
@@ -6,6 +7,10 @@ export default function DashboardLayout() {
   const location = useLocation();
   const activeTab = location.pathname.split('/')[1] || 'home';
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [showTicketModal, setShowTicketModal] = useState(false);
+  const [ticketSubject, setTicketSubject] = useState('');
+  const [ticketMessage, setTicketMessage] = useState('');
+  const [ticketStatus, setTicketStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
 
   const [status, setStatus] = useState<any>(null);
   const [settings, setSettings] = useState<any>({
@@ -66,6 +71,31 @@ export default function DashboardLayout() {
     }
   };
 
+  const handleSendTicket = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ticketMessage.trim()) return;
+    setTicketStatus('sending');
+    try {
+      await api('/api/activity', {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'ticket',
+          detail: `[${ticketSubject || 'Keluh Kesah'}] ${ticketMessage}`
+        })
+      });
+      setTicketStatus('sent');
+      setTimeout(() => {
+        setShowTicketModal(false);
+        setTicketSubject('');
+        setTicketMessage('');
+        setTicketStatus('idle');
+      }, 1500);
+    } catch (err) {
+      console.error('Failed to send ticket:', err);
+      setTicketStatus('error');
+    }
+  };
+
   return (
     <div className="bg-background text-foreground h-screen overflow-hidden flex flex-col antialiased">
       <header className="bg-white border-b border-border px-4 py-3 flex items-center justify-between sticky top-0 z-50">
@@ -122,6 +152,16 @@ export default function DashboardLayout() {
                   <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                   Pengaturan
                 </Link>
+                <button 
+                  onClick={() => {
+                    setIsProfileOpen(false);
+                    setShowTicketModal(true);
+                  }}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-slate-700 hover:bg-slate-50 transition text-left"
+                >
+                  <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
+                  Ticket & Keluh Kesah
+                </button>
                 <div className="h-px bg-slate-100 my-1"></div>
                 <button 
                   onClick={() => {
@@ -145,6 +185,86 @@ export default function DashboardLayout() {
           <Outlet context={{ settings, setSettings, status }} />
         </main>
       </div>
+
+      {/* Ticket / Keluh Kesah Modal */}
+      {showTicketModal && createPortal(
+        <div className="fixed inset-0 z-[9999] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setShowTicketModal(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-100 p-6 space-y-4 animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-[16px] leading-tight">Ticket & Keluh Kesah</h3>
+                  <p className="text-[12px] text-slate-500">Masukanmu langsung ke tim developer KlipKlop</p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setShowTicketModal(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {ticketStatus === 'sent' ? (
+              <div className="py-8 text-center space-y-2">
+                <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto text-xl animate-bounce">
+                  ✅
+                </div>
+                <h4 className="font-bold text-slate-900 text-[15px]">Terima Kasih!</h4>
+                <p className="text-[13px] text-slate-500">Keluh kesah dan saranmu berhasil dikirim.</p>
+              </div>
+            ) : (
+              <form onSubmit={handleSendTicket} className="space-y-3 pt-1">
+                <div>
+                  <label className="block text-[12px] font-semibold text-slate-700 mb-1">Subjek / Kategori</label>
+                  <input 
+                    type="text"
+                    value={ticketSubject}
+                    onChange={(e) => setTicketSubject(e.target.value)}
+                    placeholder="Contoh: Fitur Subtitle / Bug Export / Request Fitur"
+                    className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 bg-slate-50/50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[12px] font-semibold text-slate-700 mb-1">Detail Keluh Kesah</label>
+                  <textarea 
+                    rows={4}
+                    required
+                    value={ticketMessage}
+                    onChange={(e) => setTicketMessage(e.target.value)}
+                    placeholder="Tuliskan kendala, kritik, atau saran yang kamu rasakan..."
+                    className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 bg-slate-50/50 resize-none"
+                  />
+                </div>
+                {ticketStatus === 'error' && (
+                  <p className="text-[12px] text-red-500 font-medium">Gagal mengirim ticket. Coba lagi ya.</p>
+                )}
+                <div className="flex justify-end gap-2 pt-2">
+                  <button 
+                    type="button" 
+                    onClick={() => setShowTicketModal(false)}
+                    className="px-4 py-2 border border-slate-200 rounded-xl font-semibold text-[13px] text-slate-700 hover:bg-slate-50 transition"
+                  >
+                    Batal
+                  </button>
+                  <button 
+                    type="submit" 
+                    disabled={ticketStatus === 'sending' || !ticketMessage.trim()}
+                    className="px-4 py-2 bg-primary hover:bg-orange-600 disabled:opacity-50 text-white font-semibold rounded-xl text-[13px] transition shadow-sm"
+                  >
+                    {ticketStatus === 'sending' ? 'Mengirim...' : 'Kirim Ticket'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

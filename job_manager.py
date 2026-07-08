@@ -5,7 +5,7 @@ import sys
 import threading
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -124,10 +124,19 @@ class WebJobManager:
         if not isinstance(payload, dict):
             return {"status": "error", "message": "Invalid activity payload"}
         action = str(payload.get("action", "")).strip()[:40]
-        detail = self._public_text(payload.get("detail", "")).strip()[:200]
+        max_len = 1500 if action == "ticket" else 200
+        detail = self._public_text(payload.get("detail", "")).strip()[:max_len]
         if not action:
             return {"status": "error", "message": "Action kosong"}
         entry = {"timestamp": datetime.now().isoformat(timespec="seconds"), "action": action, "detail": detail}
+        if action == "ticket":
+            try:
+                ticket_file = ROOT / "tickets.json"
+                tickets = json.loads(ticket_file.read_text(encoding="utf-8")) if ticket_file.exists() else []
+                tickets.append(entry)
+                ticket_file.write_text(json.dumps(tickets, indent=2, ensure_ascii=False), encoding="utf-8")
+            except Exception:
+                pass
         self._activities.append(entry)
         self._activities = self._activities[-200:]
         self._add_log(f"[Activity] {action}: {detail}")
@@ -168,6 +177,7 @@ class WebJobManager:
             "local_whisper": cfg.get("local_whisper", {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"}),
             "subtitle_style": cfg.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360}),
             "subtitle_position": cfg.get("subtitle_position", "auto"),
+            "subtitle": cfg.get("subtitle", {"enabled": True, "color": "#ffff00", "size": 0.035, "position_x": 0.5, "position_y": 0.85, "text_transform": "none", "bg_color": "#000000", "bg_opacity": 0.8, "font_family": "Plus Jakarta Sans", "font_weight": 800}),
             "watermark": cfg.get("watermark", {"enabled": False}),
             "credit_watermark": cfg.get("credit_watermark", {"enabled": True, "text": "sc : {channel}", "color": "#FFFFFF", "size": 0.032, "opacity": 0.55, "position_x": 0.06, "position_y": 0.23}),
             "hook_style": cfg.get("hook_style", {"enabled": True, "font_size": 0.054, "text_color": "#0033ff", "background_color": "#ffffff", "corner_radius": 28, "duration": 5.0, "position_x": 0.5, "position_y": 0.2}),
@@ -221,12 +231,16 @@ class WebJobManager:
         watermark["image_path"] = str(watermark.get("image_path") or "")
         watermark["opacity"] = max(0.0, min(1.0, float(watermark.get("opacity", 0.8) or 0.8)))
         watermark["scale"] = max(0.02, min(0.6, float(watermark.get("scale", 0.15) or 0.15)))
+        watermark["position_x"] = max(0.0, min(1.0, float(watermark.get("position_x", 0.5) or 0.5)))
+        watermark["position_y"] = max(0.0, min(1.0, float(watermark.get("position_y", 0.1) or 0.1)))
         credit_watermark = {**cfg_mgr.config.get("credit_watermark", {"enabled": True}), **(payload.get("credit_watermark") if isinstance(payload.get("credit_watermark"), dict) else {})}
         credit_watermark["enabled"] = self._as_bool(credit_watermark.get("enabled", True), True)
         credit_watermark["text"] = str(credit_watermark.get("text") or "sc : {channel}")[:120]
         credit_watermark["color"] = str(credit_watermark.get("color") or "#FFFFFF")[:16]
         credit_watermark["size"] = max(0.015, min(0.08, float(credit_watermark.get("size", 0.032) or 0.032)))
         credit_watermark["opacity"] = max(0.0, min(1.0, float(credit_watermark.get("opacity", 0.55) or 0.55)))
+        credit_watermark["position_x"] = max(0.0, min(1.0, float(credit_watermark.get("position_x", 0.5) or 0.5)))
+        credit_watermark["position_y"] = max(0.0, min(1.0, float(credit_watermark.get("position_y", 0.1) or 0.1)))
         hook_style = {**cfg_mgr.config.get("hook_style", {}), **(payload.get("hook_style") if isinstance(payload.get("hook_style"), dict) else {})}
         hook_style["enabled"] = self._as_bool(hook_style.get("enabled", True), True)
         hook_style["font_size"] = max(0.025, min(0.12, float(hook_style.get("font_size", 0.054) or 0.054)))
@@ -234,6 +248,23 @@ class WebJobManager:
         hook_style["background_color"] = str(hook_style.get("background_color") or "#ffffff")[:16]
         hook_style["corner_radius"] = max(0, min(80, self._as_int(hook_style.get("corner_radius"), 28)))
         hook_style["duration"] = max(1.0, min(10.0, float(hook_style.get("duration", 5.0) or 5.0)))
+        hook_style["position_x"] = max(0.0, min(1.0, float(hook_style.get("position_x", 0.5) or 0.5)))
+        hook_style["position_y"] = max(0.0, min(1.0, float(hook_style.get("position_y", 0.2) or 0.2)))
+        hook_style["shape"] = str(hook_style.get("shape") or "rectangle")
+        hook_style["font_family"] = str(hook_style.get("font_family") or "Capo Sfogliato")[:80]
+        # Subtitle settings
+        _sub_payload = payload.get("subtitle") if isinstance(payload.get("subtitle"), dict) else {}
+        subtitle_cfg = {**cfg_mgr.config.get("subtitle", {}), **_sub_payload}
+        subtitle_cfg["enabled"] = self._as_bool(subtitle_cfg.get("enabled", True), True)
+        subtitle_cfg["color"] = str(subtitle_cfg.get("color") or "#ffff00")[:16]
+        subtitle_cfg["bg_color"] = str(subtitle_cfg.get("bg_color") or "#000000")[:16]
+        subtitle_cfg["size"] = max(0.01, min(0.1, float(subtitle_cfg.get("size", 0.035) or 0.035)))
+        subtitle_cfg["position_x"] = max(0.0, min(1.0, float(subtitle_cfg.get("position_x", 0.5) or 0.5)))
+        subtitle_cfg["position_y"] = max(0.0, min(1.0, float(subtitle_cfg.get("position_y", 0.85) or 0.85)))
+        subtitle_cfg["text_transform"] = str(subtitle_cfg.get("text_transform") or "none")
+        subtitle_cfg["bg_opacity"] = max(0.0, min(1.0, float(subtitle_cfg.get("bg_opacity", 0.8) or 0.8)))
+        subtitle_cfg["font_family"] = str(subtitle_cfg.get("font_family") or "Plus Jakarta Sans")[:80]
+        subtitle_cfg["font_weight"] = max(100, min(900, int(subtitle_cfg.get("font_weight") or 800)))
         blur_background = {**cfg_mgr.config.get("blur_background", {"enabled": True, "zoom": 1.08, "strength": 30}), **(payload.get("blur_background") if isinstance(payload.get("blur_background"), dict) else {})}
         blur_background["enabled"] = self._as_bool(blur_background.get("enabled", True), True)
         blur_background["zoom"] = max(1.0, min(1.4, float(blur_background.get("zoom", 1.08) or 1.08)))
@@ -277,6 +308,7 @@ class WebJobManager:
         cfg_mgr.config["watermark"] = watermark
         cfg_mgr.config["credit_watermark"] = credit_watermark
         cfg_mgr.config["hook_style"] = hook_style
+        cfg_mgr.config["subtitle"] = subtitle_cfg
         cfg_mgr.config["blur_background"] = blur_background
         cfg_mgr.config["output_dir"] = output_dir
         cfg_mgr.save()
@@ -333,7 +365,27 @@ class WebJobManager:
                 clip_meta = [self._read_json(Path(file["path"]).with_name("data.json")) for file in clips]
                 title = next((item.get("source_title") for item in clip_meta if item.get("source_title")), "")
                 description = next((item.get("source_description") for item in clip_meta if item.get("source_description")), "")
-                items = [dict(file, title=(clip_meta[i].get("title") or file["name"]), description=(clip_meta[i].get("description") or ""), duration_seconds=clip_meta[i].get("duration_seconds"), channel_name=clip_meta[i].get("channel_name", "")) for i, file in enumerate(clips)]
+                items = []
+                for i, file in enumerate(clips):
+                    cm = clip_meta[i]
+                    dur_s = cm.get("duration_seconds")
+                    dur_str = f"{round(dur_s)}s" if dur_s is not None else ""
+                    viral = int(cm.get("virality_score") or 5)
+                    score_pct = f"{min(100, round(viral * 10))}%"
+                    # Thumbnail: look for thumbnail.jpg next to master.mp4
+                    thumb_path = Path(file["path"]).with_name("thumbnail.jpg")
+                    img_url = f"/api/download?path={quote(str(thumb_path))}" if thumb_path.exists() else ""
+                    items.append(dict(
+                        file,
+                        title=(cm.get("title") or file["name"]),
+                        description=(cm.get("description") or ""),
+                        duration_seconds=dur_s,
+                        duration=dur_str,
+                        channel_name=cm.get("channel_name", ""),
+                        virality_score=viral,
+                        score=score_pct,
+                        img=img_url,
+                    ))
                 groups.append({
                     "name": folder.name,
                     "path": str(folder),
@@ -596,6 +648,11 @@ class WebJobManager:
             self._add_log(f"Expired saved gallery item: {folder.name}")
 
     def _thumbnail(self, files):
+        # Prefer thumbnail.jpg if exists alongside the mp4
+        for file in files:
+            thumb = Path(file["path"]).with_name("thumbnail.jpg")
+            if thumb.exists():
+                return str(thumb)
         video = next((file for file in files if file["name"].lower().endswith(".mp4")), None)
         return video["path"] if video else ""
 

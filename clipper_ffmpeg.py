@@ -14,11 +14,12 @@ import numpy as np
 from openai import APIConnectionError, APIError, APIStatusError, RateLimitError
 
 from clipper_shared import SUBPROCESS_FLAGS, SubtitleNotFoundError, YTDLP_MODULE_AVAILABLE, _hex_to_rgb, yt_dlp
+from clipper_base import ClipperBase
 from utils.helpers import get_deno_path, get_ffmpeg_path, is_ytdlp_module_available
 from utils.logger import debug_log
 
 
-class FfmpegMixin:
+class FfmpegMixin(ClipperBase):
     _CPU_FALLBACK_ARGS = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23']
     _GPU_ENCODER_NAMES = (
         'h264_nvenc', 'hevc_nvenc',
@@ -54,7 +55,7 @@ class FfmpegMixin:
             return self.gpu_encoder_args
         else:
             if getattr(self, "optimize_mode", "local") in {"local", "hosting_2cpu", "fast_cpu"}:
-                return ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23']
+                return ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28']
             return ['-c:v', 'libx264', '-preset', 'fast', '-crf', '18']
 
     def _is_gpu_encoder_error(cls, stderr: str) -> bool:

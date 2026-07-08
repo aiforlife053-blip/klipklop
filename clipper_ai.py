@@ -14,11 +14,12 @@ import numpy as np
 from openai import APIConnectionError, APIError, APIStatusError, RateLimitError
 
 from clipper_shared import SUBPROCESS_FLAGS, SubtitleNotFoundError, YTDLP_MODULE_AVAILABLE, _hex_to_rgb, yt_dlp
+from clipper_base import ClipperBase
 from utils.helpers import get_deno_path, get_ffmpeg_path, is_ytdlp_module_available
 from utils.logger import debug_log
 
 
-class AiMixin:
+class AiMixin(ClipperBase):
     def get_default_prompt(self=None):
         """Get default system prompt for highlight detection"""
         return """Kamu adalah EDITOR SHORT-FORM TIER A untuk konten PODCAST viral (TikTok / Reels / Shorts).

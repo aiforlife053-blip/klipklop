@@ -14,11 +14,12 @@ import numpy as np
 from openai import APIConnectionError, APIError, APIStatusError, RateLimitError
 
 from clipper_shared import SUBPROCESS_FLAGS, SubtitleNotFoundError, YTDLP_MODULE_AVAILABLE, _hex_to_rgb, yt_dlp
+from clipper_base import ClipperBase
 from utils.helpers import get_deno_path, get_ffmpeg_path, is_ytdlp_module_available
 from utils.logger import debug_log
 
 
-class DownloadMixin:
+class DownloadMixin(ClipperBase):
     def _format_selector(self):
         quality = str(getattr(self, "video_quality", "720") or "720")
         max_height = {"480": 480, "720": 720, "1080": 1080}.get(quality, 720)

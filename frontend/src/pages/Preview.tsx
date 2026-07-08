@@ -1,12 +1,43 @@
 import { useState, useRef, useEffect, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useOutletContext, useBlocker } from 'react-router-dom';
+import { createPortal } from 'react-dom';
+import { api } from '@/lib/api';
 
 export default function Preview() {
   const { settings, setSettings } = useOutletContext<any>();
   const [activeAccordion, setActiveAccordion] = useState<string>('watermark');
   const [dragging, setDragging] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
+  const [showBlockerModal, setShowBlockerModal] = useState(false);
+  const lastSavedSettingsRef = useRef<string>('');
   const draggingRef = useRef<string | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+
+  // Block navigation when dirty
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      isDirty && currentLocation.pathname !== nextLocation.pathname
+  );
+
+  useEffect(() => {
+    if (blocker.state === 'blocked') {
+      setShowBlockerModal(true);
+    }
+  }, [blocker.state]);
+
+  // Block browser tab close/refresh when dirty
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isDirty]);
 
   // --- Drag and Drop Handlers ---
   const handleDragStart = (e: ReactMouseEvent | ReactTouchEvent | MouseEvent | TouchEvent, element: string) => {
@@ -66,6 +97,35 @@ export default function Preview() {
     };
   }, []);
 
+  const handleSaveSettings = async () => {
+    setSaveState('saving');
+    try {
+      await api('/api/settings', {
+        method: 'POST',
+        body: JSON.stringify(settings),
+      });
+      setSaveState('saved');
+      setLastSaved(new Date());
+      setIsDirty(false);
+      lastSavedSettingsRef.current = JSON.stringify(settings);
+      setTimeout(() => setSaveState('idle'), 2000);
+    } catch (e) {
+      setSaveState('error');
+      setTimeout(() => setSaveState('idle'), 3000);
+    }
+  };
+
+  // Track unsaved changes
+  useEffect(() => {
+    if (!lastSavedSettingsRef.current) {
+      // First load — mark as clean baseline
+      lastSavedSettingsRef.current = JSON.stringify(settings);
+      return;
+    }
+    const current = JSON.stringify(settings);
+    setIsDirty(current !== lastSavedSettingsRef.current);
+  }, [settings]);
+
   const AccordionHeader = ({ id, title, icon, enabled, onToggle }: any) => (
     <div 
       className={`flex items-center justify-between p-4 cursor-pointer transition-all ${activeAccordion === id ? 'bg-orange-50/50' : 'hover:bg-slate-50'}`}
@@ -89,10 +149,106 @@ export default function Preview() {
       
       {/* Settings Panel: Configuration Accordions (50%) */}
       <div className="w-[50%] shrink-0 border-l border-slate-200 bg-white h-full overflow-y-auto flex flex-col z-10 shadow-[-4px_0_24px_rgba(0,0,0,0.02)]">
-        <div className="p-6 border-b border-slate-100 sticky top-0 bg-white z-20">
-          <h2 className="text-[20px] font-bold text-slate-900 tracking-tight">Studio Editor</h2>
-          <p className="text-[13px] text-slate-500 mt-1">Konfigurasi overlay dan efek klip. Drag elemen langsung di preview!</p>
+        <div className="p-5 border-b border-slate-100 sticky top-0 bg-white z-20">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-[20px] font-bold text-slate-900 tracking-tight">Studio Editor</h2>
+              <p className="text-[13px] text-slate-500 mt-0.5">Konfigurasi overlay dan efek klip. Drag elemen langsung di preview!</p>
+              <div className="flex items-center gap-1.5 mt-1.5">
+                {isDirty ? (
+                  <>
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                    <span className="text-[11px] text-amber-600 font-semibold">Ada perubahan belum disimpan</span>
+                  </>
+                ) : lastSaved ? (
+                  <>
+                    <svg className="w-3 h-3 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7"/></svg>
+                    <span className="text-[11px] text-emerald-600 font-semibold">
+                      Tersimpan pukul {lastSaved.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-[11px] text-slate-400">Belum disimpan sesi ini</span>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={handleSaveSettings}
+              disabled={saveState === 'saving'}
+              className={`shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl text-[13px] font-semibold transition shadow-sm border ${
+                saveState === 'saved'
+                  ? 'bg-emerald-500 text-white border-emerald-500'
+                  : saveState === 'error'
+                  ? 'bg-red-500 text-white border-red-500'
+                  : isDirty
+                  ? 'bg-orange-600 hover:bg-orange-700 text-white border-orange-600 shadow-orange-200 shadow-md disabled:opacity-60'
+                  : 'bg-primary hover:bg-orange-700 text-white border-primary disabled:opacity-60'
+              }`}
+            >
+              {saveState === 'saving' && (
+                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+              )}
+              {saveState === 'saved' && (
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7"/>
+                </svg>
+              )}
+              {saveState === 'error' && (
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+              )}
+              {(saveState === 'idle') && (
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/>
+                </svg>
+              )}
+              <span>
+                {saveState === 'saving' ? 'Menyimpan...' : saveState === 'saved' ? 'Tersimpan!' : saveState === 'error' ? 'Gagal!' : isDirty ? 'Simpan Sekarang' : 'Simpan'}
+              </span>
+            </button>
+          </div>
         </div>
+
+      {/* Unsaved changes blocker modal */}
+      {showBlockerModal && createPortal(
+        <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl border border-slate-100 overflow-hidden animate-in zoom-in-95 duration-150">
+            <div className="p-6 space-y-3">
+              <div className="w-11 h-11 bg-orange-100 rounded-xl flex items-center justify-center">
+                <svg className="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+              </div>
+              <h3 className="text-[17px] font-bold text-slate-900">Ada perubahan belum disimpan!</h3>
+              <p className="text-[13px] text-slate-500 leading-relaxed">Setting yang kamu ubah belum tersimpan ke server. Kalau kamu pindah halaman sekarang, semua perubahan akan hilang.</p>
+            </div>
+            <div className="px-6 pb-6 flex gap-2.5">
+              <button
+                onClick={() => {
+                  setShowBlockerModal(false);
+                  blocker.reset?.();
+                }}
+                className="flex-1 py-2.5 border border-slate-200 rounded-xl text-[13px] font-semibold text-slate-700 hover:bg-slate-50 transition"
+              >
+                Kembali & Simpan
+              </button>
+              <button
+                onClick={() => {
+                  setShowBlockerModal(false);
+                  setIsDirty(false);
+                  blocker.proceed?.();
+                }}
+                className="flex-1 py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-xl text-[13px] font-semibold transition shadow-sm"
+              >
+                Tinggalkan
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
         <div className="flex-1 divide-y divide-slate-100">
           
@@ -306,6 +462,53 @@ export default function Preview() {
                     </select>
                   </div>
                 </div>
+
+                <div className="space-y-2 pt-1">
+                  <label className="text-[12px] font-semibold text-slate-600">Font Family</label>
+                  <select
+                    value={settings.subtitle?.font_family || 'Plus Jakarta Sans'}
+                    onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, font_family: e.target.value}})}
+                    className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-[13px] font-medium focus:outline-none focus:border-primary bg-slate-50 appearance-none cursor-pointer"
+                  >
+                    <option value="Plus Jakarta Sans">Plus Jakarta Sans</option>
+                    <option value="Poppins">Poppins</option>
+                    <option value="Inter">Inter</option>
+                    <option value="Arial">Arial</option>
+                    <option value="sans-serif">Sans-serif</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[12px] font-semibold text-slate-600">Tebal / Tipis</label>
+                    <span className="text-[12px] font-medium text-slate-400">
+                      {(() => {
+                        const w = settings.subtitle?.font_weight || 800;
+                        if (w <= 100) return 'Tipis Sekali';
+                        if (w <= 200) return 'Tipis';
+                        if (w <= 300) return 'Light';
+                        if (w <= 400) return 'Normal';
+                        if (w <= 500) return 'Medium';
+                        if (w <= 600) return 'Semi Bold';
+                        if (w <= 700) return 'Bold';
+                        if (w <= 800) return 'Extra Bold';
+                        return 'Black';
+                      })()}
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="range" min="100" max="900" step="100"
+                      value={settings.subtitle?.font_weight || 800}
+                      onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, font_weight: parseInt(e.target.value)}})}
+                      className="w-full h-1.5 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary"
+                    />
+                    <div className="flex justify-between mt-0.5">
+                      <span className="text-[9px] text-slate-300 font-medium">Tipis</span>
+                      <span className="text-[9px] text-slate-300 font-medium">Tebal</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -473,10 +676,10 @@ export default function Preview() {
               transform: 'translate(-50%, -50%)',
               color: settings.subtitle?.color || '#ffff00',
               fontSize: `${Math.max(12, (settings.subtitle?.size || 0.04) * 500)}px`,
-              fontWeight: '800',
+              fontWeight: settings.subtitle?.font_weight || 800,
               textShadow: '0px 2px 4px rgba(0,0,0,0.8)',
               whiteSpace: 'nowrap',
-              fontFamily: 'sans-serif',
+              fontFamily: `'${settings.subtitle?.font_family || 'Plus Jakarta Sans'}', sans-serif`,
               textAlign: 'center',
               textTransform: (settings.subtitle?.text_transform as any) || 'none',
               backgroundColor: `${settings.subtitle?.bg_color || '#000000'}${Math.round((settings.subtitle?.bg_opacity ?? 0.8) * 255).toString(16).padStart(2, '0')}`,
@@ -488,7 +691,14 @@ export default function Preview() {
             onMouseDown={(e) => handleDragStart(e, 'subtitle')}
             onTouchStart={(e) => handleDragStart(e, 'subtitle')}
           >
-            CONTOH SUBTITLE
+            {(() => {
+              const t = 'Contoh subtitle klip video';
+              const transform = settings.subtitle?.text_transform || 'none';
+              if (transform === 'uppercase') return t.toUpperCase();
+              if (transform === 'lowercase') return t.toLowerCase();
+              if (transform === 'capitalize') return t.replace(/\b\w/g, c => c.toUpperCase());
+              return t;
+            })()}
           </div>
 
           {/* Overlay Helper text when dragging */}

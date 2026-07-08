@@ -16,11 +16,12 @@ import numpy as np
 from openai import APIConnectionError, APIError, APIStatusError, RateLimitError
 
 from clipper_shared import SUBPROCESS_FLAGS, SubtitleNotFoundError, YTDLP_MODULE_AVAILABLE, _hex_to_rgb, yt_dlp
+from clipper_base import ClipperBase
 from utils.helpers import get_deno_path, get_ffmpeg_path, is_ytdlp_module_available
 from utils.logger import debug_log
 
 
-class ExportMixin:
+class ExportMixin(ClipperBase):
     def process_clip(self, video_path: str, highlight: dict, index: int, total_clips: int = 1, add_captions: bool = True, add_hook: bool = True, pre_cut: bool = False):
         """Process a single clip: cut, portrait, hook (optional), captions (optional)
         
@@ -315,10 +316,32 @@ class ExportMixin:
             "has_watermark": self.watermark_settings.get("enabled", False),
             "has_credit": self.credit_watermark_settings.get("enabled", False),
             "channel_name": self.channel_name,
+            "virality_score": int(highlight.get("virality_score", 5) or 5),
         }
         
         with open(clip_dir / "data.json", "w", encoding="utf-8") as f:
             json.dump(metadata, f, ensure_ascii=False, indent=2)
+        
+        # Extract thumbnail from best moment of the clip (1 second in)
+        try:
+            thumbnail_path = clip_dir / "thumbnail.jpg"
+            master_path = clip_dir / "master.mp4"
+            if master_path.exists() and not thumbnail_path.exists():
+                seek_time = min(1.0, highlight["duration_seconds"] * 0.1)
+                thumb_cmd = [
+                    self.ffmpeg_path, "-y",
+                    "-ss", str(seek_time),
+                    "-i", str(master_path),
+                    "-frames:v", "1",
+                    "-q:v", "3",
+                    str(thumbnail_path)
+                ]
+                import subprocess as _sp
+                _sp.run(thumb_cmd, capture_output=True, timeout=30)
+                if thumbnail_path.exists():
+                    self.log(f"  ✓ Thumbnail extracted: {thumbnail_path.name}")
+        except Exception as e:
+            self.log(f"  ⚠ Thumbnail extraction failed (non-fatal): {e}")
 
     def add_hook(self, input_path: str, hook_text: str, output_path: str) -> float:
         """Add hook scene at the beginning with multi-line yellow text (Fajar Sadboy style)"""

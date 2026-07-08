@@ -69,12 +69,17 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._json(MANAGER.list_outputs())
         elif parsed.path == "/api/download":
             self._download(parsed.query)
+        elif parsed.path == "/api/stream":
+            self._stream_video(parsed.query)
         elif parsed.path == "/api/social/status":
             self._json(is_youtube_connected(self._current_user()))
         elif parsed.path == "/api/activity":
             self._json(MANAGER.list_activities())
+        elif parsed.path.startswith("/api/"):
+            self._json({"status": "error", "message": "API endpoint not found"}, 404)
         else:
-            self._static(parsed.path)
+            # Frontend is served by Vite dev server (or built dist) — not by this server
+            self._json({"status": "error", "message": "Not a valid API path. Open the frontend at http://localhost:5173"}, 404)
 
     def do_POST(self):
         parsed = urlparse(self.path)
@@ -159,6 +164,22 @@ class WebKlipHandler(BaseHTTPRequestHandler):
                 self._json({"status": "error", "message": str(e)}, 400)
         else:
             self._json({"status": "error", "message": "Not found"}, 404)
+
+    def do_PUT(self):
+        """Handle PUT requests — treat PUT /api/settings same as POST /api/settings"""
+        parsed = urlparse(self.path)
+        if not self._authenticated():
+            self._json({"status": "error", "message": "Unauthorized"}, 401)
+            return
+        if parsed.path == "/api/settings":
+            payload, err = self._payload(max_size=65536)
+            if err is not None:
+                self._json(err[0], err[1])
+                return
+            self._json(MANAGER.save_settings(payload))
+        else:
+            self._json({"status": "error", "message": "Not found"}, 404)
+
 
     def _upload_watermark(self, payload):
         name = Path(str(payload.get("name") or "watermark.png")).name
@@ -428,6 +449,79 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def _stream_video(self, query):
+        """Stream video inline with Range request support for browser playback."""
+        path = parse_qs(query, keep_blank_values=True).get("path", [""])[0]
+        if not path:
+            self._json({"status": "error", "message": "Missing path"}, 400)
+            return
+        target = Path(path).resolve()
+        output_root = Path(MANAGER.get_settings()["output_dir"] or str(MANAGER.output_dir)).resolve()
+        video_exts = {".mp4", ".webm", ".mkv", ".mov", ".avi"}
+        img_exts = {".jpg", ".jpeg", ".png"}
+        allowed = video_exts | img_exts
+        if not target.exists() or output_root not in target.parents or target.suffix.lower() not in allowed:
+            self._json({"status": "error", "message": "File not found"}, 404)
+            return
+
+        suffix = target.suffix.lower()
+        if suffix in img_exts:
+            import mimetypes as _mt
+            ct = _mt.guess_type(str(target))[0] or "image/jpeg"
+            raw = target.read_bytes()
+            self.send_response(200)
+            self._add_security_headers()
+            self.send_header("Content-Type", ct)
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.end_headers()
+            self.wfile.write(raw)
+            return
+
+        # Video streaming with Range support
+        ct_map = {".mp4": "video/mp4", ".webm": "video/webm", ".mkv": "video/x-matroska", ".mov": "video/quicktime", ".avi": "video/x-msvideo"}
+        content_type = ct_map.get(suffix, "video/mp4")
+        file_size = target.stat().st_size
+        range_header = self.headers.get("Range", "")
+
+        if range_header and range_header.startswith("bytes="):
+            byte_range = range_header[6:].split("-")
+            start = int(byte_range[0]) if byte_range[0] else 0
+            end = int(byte_range[1]) if len(byte_range) > 1 and byte_range[1] else file_size - 1
+            end = min(end, file_size - 1)
+            length = end - start + 1
+            self.send_response(206)
+            self._add_security_headers()
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
+            self.send_header("Content-Length", str(length))
+            self.send_header("Accept-Ranges", "bytes")
+            self.end_headers()
+            with open(target, "rb") as f:
+                f.seek(start)
+                remaining = length
+                chunk = 65536
+                while remaining > 0:
+                    data = f.read(min(chunk, remaining))
+                    if not data:
+                        break
+                    self.wfile.write(data)
+                    remaining -= len(data)
+        else:
+            self.send_response(200)
+            self._add_security_headers()
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(file_size))
+            self.send_header("Accept-Ranges", "bytes")
+            self.end_headers()
+            with open(target, "rb") as f:
+                chunk = 65536
+                while True:
+                    data = f.read(chunk)
+                    if not data:
+                        break
+                    self.wfile.write(data)
+
     def _download(self, query):
         path = parse_qs(query, keep_blank_values=True).get("path", [""])[0]
         if not path:
@@ -435,19 +529,32 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             return
         target = Path(path).resolve()
         output_root = Path(MANAGER.get_settings()["output_dir"] or str(MANAGER.output_dir)).resolve()
-        allowed = {".mp4", ".webm", ".mkv", ".mov", ".avi", ".mp3", ".wav", ".json", ".srt", ".ass", ".txt", ".vtt"}
+        allowed = {".mp4", ".webm", ".mkv", ".mov", ".avi", ".mp3", ".wav", ".json", ".srt", ".ass", ".txt", ".vtt", ".jpg", ".jpeg", ".png"}
         if not target.exists() or output_root not in target.parents or target.suffix.lower() not in allowed:
             self._json({"status": "error", "message": "File not found"}, 404)
             return
         raw = target.read_bytes()
         safe_name = quote(target.name.replace('"', '').replace('\r', '').replace('\n', ''))
-        self.send_response(200)
-        self._add_security_headers()
-        self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{safe_name}")
-        self.send_header("Content-Length", str(len(raw)))
-        self.end_headers()
-        self.wfile.write(raw)
+        # For images, serve inline so browser can display them directly
+        img_exts = {".jpg", ".jpeg", ".png"}
+        if target.suffix.lower() in img_exts:
+            import mimetypes as _mt
+            ct = _mt.guess_type(str(target))[0] or "image/jpeg"
+            self.send_response(200)
+            self._add_security_headers()
+            self.send_header("Content-Type", ct)
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.end_headers()
+            self.wfile.write(raw)
+        else:
+            self.send_response(200)
+            self._add_security_headers()
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{safe_name}")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
 
 
 def main():
@@ -465,9 +572,9 @@ def main():
 
     url = f"http://{host}:{port}"
     server = ThreadingHTTPServer((host, port), WebKlipHandler)
-    print(f"KlipKlop Web running at {url}")
+    print(f"KlipKlop API server running at {url}")
+    print(f"Frontend (React/Vite): http://localhost:5173")
     print(f"Security mode: {security_mode}")
-    webbrowser.open(url)
     server.serve_forever()
 
 

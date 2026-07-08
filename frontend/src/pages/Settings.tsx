@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useOutletContext, useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
 
@@ -6,7 +6,39 @@ export default function Settings() {
   const { settings, setSettings } = useOutletContext<any>();
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
+  const [youtubeConnected, setYoutubeConnected] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    // Check YT connection status
+    api('/api/social/youtube/oauth-status').then((res: any) => {
+      setYoutubeConnected(res.connected);
+    }).catch(() => {});
+  }, []);
+
+  const handleConnectYoutube = async () => {
+    try {
+      const res = await api('/api/social/youtube/connect', { method: 'POST' });
+      if (res.auth_url) {
+        window.open(res.auth_url, '_blank');
+        alert('Selesaikan login di tab baru, lalu refresh halaman ini.');
+      } else {
+        alert('Gagal mendapatkan URL login YouTube.');
+      }
+    } catch (e: any) {
+      alert('Error: ' + e.message);
+    }
+  };
+
+  const handleDisconnectYoutube = async () => {
+    try {
+      await api('/api/social/youtube/disconnect', { method: 'POST' });
+      setYoutubeConnected(false);
+      alert('YouTube berhasil diputuskan.');
+    } catch (e: any) {
+      alert('Error: ' + e.message);
+    }
+  };
 
   const handleSaveSettings = async () => {
     setIsSaving(true);
@@ -104,7 +136,55 @@ export default function Settings() {
             </div>
           </div>
 
-      
+          {/* Social Auth */}
+          <div className="bg-white rounded-2xl border border-border p-6 shadow-sm space-y-5">
+            <div className="flex items-center gap-2 mb-2">
+              <svg className="w-5 h-5 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+              <h3 className="font-bold text-slate-900 text-[15px]">Koneksi Sosial Media</h3>
+            </div>
+            
+            <p className="text-[13px] text-slate-500 mb-4">Hubungkan akun sosial media untuk mempublikasikan klip langsung dari dashboard.</p>
+            
+            <div className="space-y-3">
+              {/* YouTube */}
+              <div className="flex items-center justify-between p-4 border border-slate-100 rounded-xl bg-slate-50/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-red-100 text-red-600 flex items-center justify-center rounded-full">
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.547 12 3.547 12 3.547s-7.505 0-9.377.503A3.014 3.014 0 0 0 .501 6.186C0 8.07 0 12 0 12s0 3.93.501 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                  </div>
+                  <div>
+                    <p className="text-[13px] font-bold text-slate-900">YouTube</p>
+                    <p className="text-[11px] text-slate-500">{youtubeConnected ? 'Tersambung (Siap untuk auto-upload)' : 'Belum tersambung'}</p>
+                  </div>
+                </div>
+                {youtubeConnected ? (
+                  <button onClick={handleDisconnectYoutube} className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-lg text-[12px] transition">
+                    Putuskan
+                  </button>
+                ) : (
+                  <button onClick={handleConnectYoutube} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-[12px] transition">
+                    Sambungkan
+                  </button>
+                )}
+              </div>
+
+              {/* TikTok */}
+              <div className="flex items-center justify-between p-4 border border-slate-100 rounded-xl bg-slate-50/50 opacity-60">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-black text-white flex items-center justify-center rounded-full">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 448 512"><path d="M448,209.91a210.06,210.06,0,0,1-122.77-39.25V349.38A162.55,162.55,0,1,1,185,188.31V278.2a74.62,74.62,0,1,0,52.23,71.18V0l88,0a121.18,121.18,0,0,0,1.86,22.17h0A122.18,122.18,0,0,0,381,102.39a121.43,121.43,0,0,0,67,20.14Z"/></svg>
+                  </div>
+                  <div>
+                    <p className="text-[13px] font-bold text-slate-900">TikTok</p>
+                    <p className="text-[11px] text-slate-500">Coming soon (Segera Hadir)</p>
+                  </div>
+                </div>
+                <button disabled className="px-4 py-2 bg-slate-200 text-slate-400 font-bold rounded-lg text-[12px] cursor-not-allowed">
+                  Sambungkan
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="border-t border-slate-200 pt-6 mt-8 flex flex-col md:flex-row items-center justify-between gap-4">
