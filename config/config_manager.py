@@ -127,11 +127,6 @@ class ConfigManager:
                 "api_key": "",
                 "model": "whisper-1"
             },
-            "hook_maker": {
-                "base_url": "https://api.openai.com/v1",
-                "api_key": "",
-                "model": "tts-1"
-            },
             "youtube_title_maker": {
                 "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
                 "api_key": "",
@@ -144,7 +139,6 @@ class ConfigManager:
         api_key = old_config.get("api_key", "")
         base_url = old_config.get("base_url", "https://api.openai.com/v1")
         model = old_config.get("model", "gpt-4.1")
-        tts_model = old_config.get("tts_model", "tts-1")
         
         old_config["ai_providers"] = {
             "highlight_finder": {
@@ -156,11 +150,6 @@ class ConfigManager:
                 "base_url": base_url,
                 "api_key": api_key,
                 "model": "whisper-1"
-            },
-            "hook_maker": {
-                "base_url": base_url,
-                "api_key": api_key,
-                "model": tts_model
             },
             "youtube_title_maker": {
                 "base_url": base_url,

@@ -321,11 +321,9 @@ class ExportMixin:
         """Add hook scene at the beginning with multi-line yellow text (Fajar Sadboy style)"""
         
         if not self.tts_client:
-            raise Exception("Hook Maker API key belum diisi")
-        # Report TTS character usage
+            return self.add_hook_with_progress(input_path, hook_text, output_path, lambda _: None)
         self.report_tokens(0, 0, 0, len(hook_text))
         
-        # Generate TTS audio
         try:
             tts_response = self.tts_client.audio.speech.create(
                 model=self.tts_model,
@@ -780,7 +778,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             else:
                 hook_duration = 3.0
         else:
-            self.log("  ⊘ Hook Maker voice skipped; using silent hook")
+            self.log("  ⊘ Hook voice skipped; using silent hook")
             hook_duration = 3.0
             tts_file = str(self.temp_dir / f"silent_hook_{int(time.time() * 1000)}.mp3")
             silent_cmd = [self.ffmpeg_path, "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", str(hook_duration), "-q:a", "9", "-acodec", "libmp3lame", tts_file]

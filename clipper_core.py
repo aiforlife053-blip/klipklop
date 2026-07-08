@@ -78,16 +78,12 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
                 timeout=600.0,
             ) if cm_config.get("api_key") else None
             self.whisper_model = cm_config.get("model", "whisper-1")
-            hm_config = self.ai_providers.get("hook_maker", {})
-            self.tts_client = OpenAI(
-                api_key=hm_config.get("api_key"),
-                base_url=hm_config.get("base_url", "https://api.openai.com/v1"),
-            ) if hm_config.get("api_key") else None
-            self.tts_model = hm_config.get("model", tts_model)
+            self.tts_client = None
+            self.tts_model = tts_model
         else:
             self.highlight_client = client
             self.caption_client = client
-            self.tts_client = client
+            self.tts_client = None
             self.model = model
             self.tts_model = tts_model
             self.whisper_model = "whisper-1"

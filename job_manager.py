@@ -142,7 +142,6 @@ class WebJobManager:
         provider = cfg.get("ai_providers", {}).get("highlight_finder", {})
         key_saved = bool(provider.get("api_key") or cfg.get("api_key"))
         caption_key_saved = bool(cfg.get("ai_providers", {}).get("caption_maker", {}).get("api_key"))
-        hook_key_saved = bool(cfg.get("ai_providers", {}).get("hook_maker", {}).get("api_key"))
         base_url = provider.get("base_url", cfg.get("base_url", GEMINI_BASE_URL))
         model = provider.get("model", cfg.get("model", GEMINI_MODEL))
         cookies = self.cookie_status()

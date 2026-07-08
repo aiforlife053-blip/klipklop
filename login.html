@@ -5,46 +5,75 @@
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <title>Masuk KlipKlop</title>
         <script src="https://cdn.tailwindcss.com"></script>
-        <link href="https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700;800;900&display=swap"
+            rel="stylesheet"
+        />
         <link rel="stylesheet" href="/static/styles.css?v=20260708-5" />
         <style>
-            .auth-tab-active { background:#f15a24 !important; color:#fff !important; }
-            .auth-tab-inactive { background:transparent !important; color:#aab3c2 !important; }
-            .auth-submit { background:#f15a24 !important; color:#fff !important; }
-            .auth-input { background:#222b3b !important; color:#fff !important; -webkit-text-fill-color:#fff !important; caret-color:#fff; }
-            .auth-input:focus { border-color:#f15a24 !important; box-shadow:none !important; --tw-ring-shadow:0 0 #0000 !important; }
+            .auth-tab-active {
+                background: #f15a24 !important;
+                color: #fff !important;
+            }
+            .auth-tab-inactive {
+                background: transparent !important;
+                color: #aab3c2 !important;
+            }
+            .auth-submit {
+                background: #f15a24 !important;
+                color: #fff !important;
+            }
+            .auth-input {
+                background: #222b3b !important;
+                color: #fff !important;
+                -webkit-text-fill-color: #fff !important;
+                caret-color: #fff;
+            }
+            .auth-input:focus {
+                border-color: #f15a24 !important;
+                box-shadow: none !important;
+                --tw-ring-shadow: 0 0 #0000 !important;
+            }
             input.auth-input:-webkit-autofill,
             input.auth-input:-webkit-autofill:hover,
-            input.auth-input:-webkit-autofill:focus { -webkit-box-shadow:0 0 0 1000px #222b3b inset !important; -webkit-text-fill-color:#fff !important; transition:background-color 9999s ease-in-out 0s; }
+            input.auth-input:-webkit-autofill:focus {
+                -webkit-box-shadow: 0 0 0 1000px #222b3b inset !important;
+                -webkit-text-fill-color: #fff !important;
+                transition: background-color 9999s ease-in-out 0s;
+            }
         </style>
     </head>
-    <body class="min-h-dvh bg-[#182231] text-white antialiased" style="font-family: Urbanist, sans-serif;">
+    <body
+        class="min-h-dvh bg-[#182231] text-white antialiased"
+        style="font-family: Urbanist, sans-serif"
+    >
         <main class="grid min-h-dvh lg:grid-cols-[1.05fr_.95fr]">
             <section
-                class="hidden lg:flex flex-col justify-between border-r border-white/10 bg-[#111827] p-10"
+                class="hidden lg:flex relative overflow-hidden flex-col justify-between border-r border-white/10 bg-[#111827] p-10 before:absolute before:-right-32 before:top-24 before:h-80 before:w-80 before:rounded-full before:bg-[#f15a24]/25 before:blur-3xl after:absolute after:left-10 after:bottom-20 after:h-40 after:w-40 after:rounded-full after:bg-[#f15a24]/15 after:blur-2xl"
             >
-                <div class="flex items-center gap-3 font-extrabold text-2xl">
+                <div
+                    class="relative z-10 flex items-center gap-3 font-extrabold text-2xl"
+                >
                     <img
                         src="/logo%20klipklop.png?v=3"
                         class="h-10 w-10 rounded-xl object-contain"
                         alt="KlipKlop"
                     /><span>KlipKlop</span>
                 </div>
-                <div class="max-w-xl space-y-5">
-                    <p class="text-sm font-semibold text-[#f15a24]">
-                        Creator clipping workspace
-                    </p>
+                <div class="relative z-10 max-w-xl space-y-5">
                     <h1
                         class="text-5xl font-extrabold tracking-tight leading-tight"
                     >
-                        Masuk, generate 1 klip terbaik, upload langsung.
+                        Upload videomu, biar Kliplop cari momen
+                        <span class="italic text-[#f15a24]">terbaiknya</span>.
                     </h1>
                     <p class="text-lg leading-8 text-slate-300">
-                        Akun dipakai untuk mengamankan dashboard, riwayat
-                        upload, dan koneksi sosial.
+                        Kliplop membantu mengubah video panjang menjadi klip
+                        pendek yang menarik, lengkap dengan caption, dan siap
+                        kamu upload ke YouTube.
                     </p>
                 </div>
-                <p class="text-sm text-slate-500">KlipKlop Web</p>
+                <p class="relative z-10 text-sm text-slate-500">KlipKlop Web</p>
             </section>
             <section class="flex items-center justify-center p-6">
                 <div
@@ -88,21 +117,21 @@
                         </button>
                     </div>
                     <form id="form" class="space-y-4">
-                        <label
-                            class="block text-sm font-semibold text-slate-200"
+                        <label class="block text-sm font-[14] text-slate-200"
                             >Email<input
                                 id="email"
-                                class="auth-input mt-1 w-full rounded-xl border border-white/10 px-4 py-3 outline-none"
+                                class="auth-input mt-1 w-full rounded-xl placeholder:text-white/60 border border-white/10 px-4 py-3 outline-none"
                                 type="email"
                                 autocomplete="email"
+                                placeholder="nama@email.com"
                                 required /></label
-                        ><label
-                            class="block text-sm font-semibold text-slate-200"
+                        ><label class="block text-sm font-[14] text-slate-200"
                             >Password<input
                                 id="password"
                                 class="auth-input mt-1 w-full rounded-xl border border-white/10 px-4 py-3 outline-none"
                                 type="password"
                                 autocomplete="current-password"
+                                placeholder="Minimal 6 karakter"
                                 required /></label
                         ><button
                             id="submit"

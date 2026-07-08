@@ -137,9 +137,12 @@ button[class*="bg-[#ea580c]"], a[class*="bg-[#ea580c]"], button[class*="bg-red-6
 [class*="hover:bg-orange-700"]:hover {
     background-color: var(--accent-hover) !important;
 }
-a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+a:focus-visible, button:focus-visible {
     outline: 2px solid #f59e0b !important;
     outline-offset: 2px;
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: none !important;
 }
 @media (max-width: 768px) {
     body {
