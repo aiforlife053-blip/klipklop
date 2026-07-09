@@ -4,7 +4,8 @@ export async function api(path: string, options: RequestInit = {}) {
     ...options
   });
   
-  const data = await res.json();
+  const text = await res.text();
+  const data = text ? (() => { try { return JSON.parse(text); } catch { return { message: text }; } })() : {};
   if (!res.ok) {
     if (res.status === 401 && window.location.pathname !== '/login') {
       window.location.href = '/login';

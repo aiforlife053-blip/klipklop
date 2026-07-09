@@ -49,7 +49,7 @@ export default function Settings() {
       });
       setSaveMessage('Konfigurasi berhasil disimpan! ✨');
       setTimeout(() => setSaveMessage(''), 3000);
-    } catch (err) {
+    } catch {
       setSaveMessage('Gagal menyimpan konfigurasi.');
       setTimeout(() => setSaveMessage(''), 3000);
     } finally {

@@ -83,7 +83,6 @@ export default function Dashboard() {
       try {
         const data = await api('/api/status');
         setJobStatus(data);
-        setJobStatus(data);
         if (data.status === 'complete') {
           stopPolling();
           setIsProcessing(false);
@@ -105,7 +104,6 @@ export default function Dashboard() {
       try {
         const data = await api('/api/status');
         setJobStatus(data);
-        setJobStatus(data);
         if (data.status === 'running' || data.status === 'stopping') {
           setIsProcessing(true);
           startPolling();
@@ -118,7 +116,7 @@ export default function Dashboard() {
     };
     init();
     return () => stopPolling();
-  }, []);
+  }, [fetchOutputs, startPolling, stopPolling]);
 
 
 
@@ -137,6 +135,7 @@ export default function Dashboard() {
         body: JSON.stringify({
           url: youtubeUrl.trim(),
           num_clips: numClips,
+          video_quality: videoQuality,
           add_captions: settings?.subtitle?.enabled ?? true,
           enable_captions: settings?.subtitle?.enabled ?? true,
           add_hook: settings?.hook_style?.enabled ?? false,

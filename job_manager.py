@@ -65,13 +65,15 @@ class WebJobManager:
             
         requested_clips = self._as_int(payload.get("num_clips"), 1)
         num_clips = requested_clips if requested_clips in {1, 3, 5} else 1
-        add_captions = self._as_bool(payload.get("add_captions", True), True)
+        add_captions = self._as_bool(payload.get("add_captions", payload.get("enable_captions", True)), True)
         add_hook = self._as_bool(payload.get("add_hook", True), True)
         subtitle_language = str(payload.get("subtitle_language", "id")).strip()[:10]
         instruction = str(payload.get("instruction", "")).strip()[:1000]
         landscape_blur = self._as_bool(payload.get("landscape_blur", self._config().config.get("landscape_blur", True)), True)
         source_credit = self._as_bool(payload.get("source_credit", True), True)
         screen_size = str(payload.get("screen_size", "9:16"))
+        if screen_size not in {"9:16", "16:9"}:
+            screen_size = "9:16"
         with self._lock:
             if self.thread and self.thread.is_alive():
                 return {"status": "busy", "message": "Processing is already running"}

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from 'react';
 import { useOutletContext, useBlocker } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { api } from '@/lib/api';
@@ -45,8 +45,9 @@ export default function Preview() {
     setDragging(element);
   };
 
-  const handleDragMove = (e: MouseEvent | TouchEvent) => {
+  const handleDragMove = useCallback((e: MouseEvent | TouchEvent) => {
     if (!draggingRef.current || !previewRef.current) return;
+    if ('touches' in e && e.touches.length === 0) return;
 
     const clientX = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
@@ -72,12 +73,12 @@ export default function Preview() {
       }
       return prev;
     });
-  };
+  }, [setSettings]);
 
-  const handleDragEnd = () => {
+  const handleDragEnd = useCallback(() => {
     draggingRef.current = null;
     setDragging(null);
-  };
+  }, []);
 
   useEffect(() => {
     const handleMove = (e: MouseEvent | TouchEvent) => handleDragMove(e);
@@ -94,7 +95,7 @@ export default function Preview() {
       window.removeEventListener('mouseup', handleEnd);
       window.removeEventListener('touchend', handleEnd);
     };
-  }, []);
+  }, [handleDragMove, handleDragEnd]);
 
   const handleSaveSettings = async () => {
     setSaveState('saving');
@@ -108,7 +109,7 @@ export default function Preview() {
       setIsDirty(false);
       lastSavedSettingsRef.current = JSON.stringify(settings);
       setTimeout(() => setSaveState('idle'), 2000);
-    } catch (e) {
+    } catch {
       setSaveState('error');
       setTimeout(() => setSaveState('idle'), 3000);
     }

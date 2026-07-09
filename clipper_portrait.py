@@ -492,9 +492,11 @@ class PortraitMixin(ClipperBase):
         strength = max(0, min(100, int(blur_settings.get("strength", 30) or 30)))
         scale = max(0.5, min(1.5, float(blur_settings.get("scale", 1.0) or 1.0)))
         foreground_width = int(width * scale)
+        bg_width = int(width * zoom)
+        bg_height = int(height * zoom)
         filter_complex = (
-            f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height},boxblur={strength}:3[bg];"
+            f"[0:v]scale={bg_width}:{bg_height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},boxblur={strength}:3,eq=brightness=-0.4[bg];"
             f"[0:v]scale={foreground_width}:-2[fg];"
             f"[bg][fg]overlay=(W-w)/2:(H-h)/2"
         )

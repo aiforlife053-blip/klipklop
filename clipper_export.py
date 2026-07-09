@@ -1338,11 +1338,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         """Add watermark overlay to video with progress tracking"""
         
         watermark_path = self.watermark_settings.get("image_path", "")
-        if not watermark_path or not Path(watermark_path).exists():
-            self.log("  Warning: Watermark image not found, skipping")
-            import shutil
-            shutil.copy(input_path, output_path)
-            return
+        placeholder = not watermark_path or not Path(watermark_path).exists()
+        if placeholder:
+            self.log("  Watermark image not found, using LOGO placeholder")
         
         progress_callback(0.1)
         
@@ -1372,16 +1370,21 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         x_pixels = int(pos_x * video_width)
         y_pixels = int(pos_y * video_height)
         
-        # Escape watermark path for FFmpeg (Windows paths)
-        watermark_escaped = watermark_path.replace('\\', '/').replace(':', '\\:')
-        
-        # Build FFmpeg overlay filter with proper opacity control
-        # Scale watermark, apply opacity via colorchannelmixer, then overlay at the exact center (pos_x, pos_y)
-        filter_complex = (
-            f"[1:v]scale={watermark_width}:-1,format=rgba,"
-            f"colorchannelmixer=aa={opacity}[wm];"
-            f"[0:v][wm]overlay=x='(main_w*{pos_x})-(overlay_w/2)':y='(main_h*{pos_y})-(overlay_h/2)'"
-        )
+        if placeholder:
+            box_size = watermark_width
+            font_size = max(8, int(box_size * 0.16))
+            filter_complex = (
+                f"drawbox=x='(w*{pos_x})-{box_size}/2':y='(h*{pos_y})-{box_size}/2':"
+                f"w={box_size}:h={box_size}:color=black@{opacity}:t=fill,"
+                f"drawtext=text='LOGO':fontcolor=white@{opacity}:fontsize={font_size}:"
+                f"x='(w*{pos_x})-(text_w/2)':y='(h*{pos_y})-(text_h/2)'"
+            )
+        else:
+            filter_complex = (
+                f"[1:v]scale={watermark_width}:-1,format=rgba,"
+                f"colorchannelmixer=aa={opacity}[wm];"
+                f"[0:v][wm]overlay=x='(main_w*{pos_x})-(overlay_w/2)':y='(main_h*{pos_y})-(overlay_h/2)'"
+            )
         
         progress_callback(0.3)
         
@@ -1394,18 +1397,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         
         # Apply watermark using GPU/CPU encoder
         encoder_args = self.get_video_encoder_args()
-        cmd = [
-            self.ffmpeg_path, "-y",
-            "-i", input_path,
-            "-i", watermark_path,
-            "-filter_complex", filter_complex,
+        cmd = [self.ffmpeg_path, "-y", "-i", input_path]
+        if not placeholder:
+            cmd.extend(["-i", watermark_path])
+        cmd.extend([
+            "-filter_complex" if not placeholder else "-vf", filter_complex,
             *encoder_args,
-            "-pix_fmt", "yuv420p",  # Ensure compatibility
+            "-pix_fmt", "yuv420p",
             "-c:a", "copy",
-            "-movflags", "+faststart",  # Enable streaming
+            "-movflags", "+faststart",
             "-progress", "pipe:1",
             output_path
-        ]
+        ])
         
         self.log_ffmpeg_command(cmd, "Apply Watermark")
         

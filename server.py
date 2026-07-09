@@ -381,9 +381,12 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         if size <= 0:
             return {}, None
         try:
-            return json.loads(self.rfile.read(size).decode("utf-8")), None
+            payload = json.loads(self.rfile.read(size).decode("utf-8"))
         except json.JSONDecodeError:
             return None, ({"status": "error", "message": "Invalid JSON"}, 400)
+        if not isinstance(payload, dict):
+            return None, ({"status": "error", "message": "JSON payload must be an object"}, 400)
+        return payload, None
 
     def _json(self, data, status=200):
         raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -509,10 +512,17 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         range_header = self.headers.get("Range", "")
 
         if range_header and range_header.startswith("bytes="):
-            byte_range = range_header[6:].split("-")
-            start = int(byte_range[0]) if byte_range[0] else 0
-            end = int(byte_range[1]) if len(byte_range) > 1 and byte_range[1] else file_size - 1
+            byte_range = range_header[6:].split("-", 1)
+            try:
+                start = int(byte_range[0]) if byte_range[0] else 0
+                end = int(byte_range[1]) if len(byte_range) > 1 and byte_range[1] else file_size - 1
+            except ValueError:
+                self._json({"status": "error", "message": "Invalid range"}, 416)
+                return
             end = min(end, file_size - 1)
+            if start < 0 or start > end:
+                self._json({"status": "error", "message": "Invalid range"}, 416)
+                return
             length = end - start + 1
             self.send_response(206)
             self._add_security_headers()

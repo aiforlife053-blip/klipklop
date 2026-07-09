@@ -203,14 +203,14 @@ class InstantJobManager(mod.WebJobManager):
         self.thread = None
 
 
-def test_enable_captions_alias_cannot_disable_captions(tmp_path):
+def test_enable_captions_alias_can_disable_captions(tmp_path):
     manager = InstantJobManager(app_dir=tmp_path)
     result = manager.start({"url": "https://www.youtube.com/watch?v=abc", "enable_captions": False})
     thread = manager.thread
     assert result == {"status": "started"}
     if thread:
         thread.join(1)
-    assert manager.captured["add_captions"] is True
+    assert manager.captured["add_captions"] is False
 
 
 def test_num_clips_accepts_allowed_values(tmp_path):
