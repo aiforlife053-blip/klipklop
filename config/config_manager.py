@@ -43,7 +43,7 @@ class ConfigManager:
                 "subtitle_engine": "local",
                 "local_whisper": {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"},
                 "subtitle_style": {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360},
-                "subtitle": {"enabled": False, "color": "#ffff00", "size": 0.035, "position_x": 0.5, "position_y": 0.85, "text_transform": "none", "bg_color": "#000000", "bg_opacity": 0.8, "font_family": "Plus Jakarta Sans", "font_weight": 800},
+                "subtitle": {"enabled": False, "color": "#00BFFF", "size": 0.04, "position_x": 0.5, "position_y": 0.85, "text_transform": "uppercase", "bg_color": "#000000", "bg_opacity": 0.0, "font_family": "Plus Jakarta Sans", "font_weight": 900},
                 "subtitle_position": "auto",
                 "mediapipe_settings": {
                     "lip_activity_threshold": 0.15,

@@ -369,6 +369,9 @@ class WebKlipHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         return
 
+    def log_error(self, fmt, *args):
+        return
+
     def _payload(self, max_size=65536):
         """Parse JSON payload with size limit. Default 64KB, can be overridden.
         Returns tuple: (payload_dict, error_response_tuple_or_None)
@@ -504,7 +507,10 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(raw)))
             self.send_header("Cache-Control", "public, max-age=3600")
             self.end_headers()
-            self.wfile.write(raw)
+            try:
+                self.wfile.write(raw)
+            except (ConnectionAbortedError, BrokenPipeError, ConnectionResetError, OSError):
+                pass
             return
 
         # Video streaming with Range support
@@ -533,16 +539,19 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(length))
             self.send_header("Accept-Ranges", "bytes")
             self.end_headers()
-            with open(target, "rb") as f:
-                f.seek(start)
-                remaining = length
-                chunk = 65536
-                while remaining > 0:
-                    data = f.read(min(chunk, remaining))
-                    if not data:
-                        break
-                    self.wfile.write(data)
-                    remaining -= len(data)
+            try:
+                with open(target, "rb") as f:
+                    f.seek(start)
+                    remaining = length
+                    chunk = 65536
+                    while remaining > 0:
+                        data = f.read(min(chunk, remaining))
+                        if not data:
+                            break
+                        self.wfile.write(data)
+                        remaining -= len(data)
+            except (ConnectionAbortedError, BrokenPipeError, ConnectionResetError, OSError):
+                pass
         else:
             self.send_response(200)
             self._add_security_headers()
@@ -550,13 +559,16 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(file_size))
             self.send_header("Accept-Ranges", "bytes")
             self.end_headers()
-            with open(target, "rb") as f:
-                chunk = 65536
-                while True:
-                    data = f.read(chunk)
-                    if not data:
-                        break
-                    self.wfile.write(data)
+            try:
+                with open(target, "rb") as f:
+                    chunk = 65536
+                    while True:
+                        data = f.read(chunk)
+                        if not data:
+                            break
+                        self.wfile.write(data)
+            except (ConnectionAbortedError, BrokenPipeError, ConnectionResetError, OSError):
+                pass
 
     def _download(self, query):
         path = parse_qs(query, keep_blank_values=True).get("path", [""])[0]

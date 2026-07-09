@@ -18,6 +18,7 @@ export default function Dashboard() {
   const [deleteConfirm, setDeleteConfirm] = useState<any>(null);
   const [stopConfirm, setStopConfirm] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
     if (settings?.video_quality) setVideoQuality(String(settings.video_quality));
@@ -50,8 +51,27 @@ export default function Dashboard() {
   };
   const [toastMessage, setToastMessage] = useState('');
 
+  // Kata gaul random
+  const loadingPhrases = [
+    "Sabar, biarkan AI memasak 🔥",
+    "Mencari momen paling FYP 🚀",
+    "Bikin klip yang bikin fyp meledak 💥",
+    "Meracik visual biar makin estetik 🎨",
+    "Tunggu bentar, lagi ngopi subtitle ☕",
+  ];
+  const [loadingPhraseIdx, setLoadingPhraseIdx] = useState(0);
+
+  useEffect(() => {
+    let interval: any;
+    if (isProcessing || globalStatus?.status === 'running') {
+      interval = setInterval(() => {
+        setLoadingPhraseIdx((prev) => (prev + 1) % loadingPhrases.length);
+      }, 8000);
+    }
+    return () => clearInterval(interval);
+  }, [isProcessing, globalStatus?.status]);
+
   // Real state
-  const [isProcessing, setIsProcessing] = useState(false);
   const [jobStatus, setJobStatus] = useState<any>(null);
   const [clips, setClips] = useState<any[]>([]);
   const [error, setError] = useState('');
@@ -201,13 +221,13 @@ export default function Dashboard() {
         body: JSON.stringify({ path: clip.groupPath, clips: [clip.path] }),
       });
       console.log('[Dashboard] Berhasil menyimpan klip:', clip.path);
-      
+
       // Delay sedikit agar user merasa ini berproses (tidak terlalu instan/patah)
-      await new Promise(r => setTimeout(r, 600)); 
-      
+      await new Promise(r => setTimeout(r, 600));
+
       setToastMessage('Klip berhasil disimpan ke Galeri! 🎉');
       setTimeout(() => setToastMessage(''), 3000);
-      
+
       setShowDetailModal(null);
       setClips(prev => prev.filter(c => c.path !== clip.path));
     } catch (e: any) {
@@ -284,7 +304,7 @@ export default function Dashboard() {
   return (
     <div className="flex flex-row flex-1 items-stretch h-[calc(100vh-53px)] overflow-hidden">
       <section className="relative order-2 w-[65%] flex-none bg-muted border-l border-border p-6 h-full overflow-y-auto" style={{ backgroundImage: 'radial-gradient(rgba(0, 0, 0, 0.05) 1.5px, transparent 1.5px)', backgroundSize: '20px 20px', backgroundPosition: '10px 10px' }}>
-        <button 
+        <button
           type="button"
           onClick={() => setShowJsonModal(true)}
           className="absolute top-4 right-4 border border-border px-3.5 py-2 rounded-xl text-[12px] font-semibold text-slate-700 hover:bg-white bg-white/50 backdrop-blur-sm transition shadow-sm z-10"
@@ -308,9 +328,9 @@ export default function Dashboard() {
             const displayProgress = isComplete ? 1 : currentProgress;
             return (
               <div className="w-full bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-4">
-                <div className="flex items-stretch gap-0">
+                <div className="flex items-stretch gap-0 min-h-[160px]">
                   {/* Thumbnail */}
-                  <div className="relative w-36 shrink-0 bg-slate-900">
+                  <div className="relative w-[200px] shrink-0 bg-slate-900">
                     {getYoutubeId(youtubeUrl) ? (
                       <img
                         src={videoMeta?.thumbnail_url || `https://i.ytimg.com/vi/${getYoutubeId(youtubeUrl)}/maxresdefault.jpg`}
@@ -330,45 +350,36 @@ export default function Dashboard() {
                   </div>
 
                   {/* Info + progress */}
-                  <div className="flex-1 p-3 flex flex-col justify-between min-w-0">
+                  <div className="flex-1 p-5 flex flex-col justify-between min-w-0">
                     <div className="min-w-0">
-                      <h4 className="font-bold text-[13px] leading-snug line-clamp-1 text-slate-900">{videoMeta?.title || 'YouTube Video'}</h4>
-                      <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">{videoMeta?.author_name || 'YouTube Channel'}</p>
+                      <h4 className="font-bold text-[15px] leading-snug line-clamp-2 text-slate-900">{videoMeta?.title || 'YouTube Video'}</h4>
+                      <p className="text-[12px] text-slate-500 mt-1 line-clamp-1">{videoMeta?.author_name || 'YouTube Channel'}</p>
                     </div>
 
                     {/* Progress bar */}
-                    <div className="mt-2">
-                      <div className="flex items-center justify-between mb-1">
-                        <p className={`text-[12px] font-semibold truncate mr-2 ${isComplete ? 'text-emerald-600' : 'text-slate-800'}`}>
-                          {isComplete ? `🎉 ${clips.length} klip berhasil dibuat!` : currentStatus === 'stopping' ? '⏹ Menghentikan...' : (jobStatus?.message || 'Memproses...')}
+                    <div className="mt-6 pt-2 border-t border-slate-100">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className={`text-[13px] font-bold truncate mr-2 ${
+                          isComplete
+                            ? 'text-emerald-600'
+                            : currentStatus === 'stopping'
+                            ? 'text-slate-800'
+                            : 'bg-gradient-to-r from-slate-800 via-orange-500 to-slate-800 bg-[length:200%_auto] animate-[shimmer_2s_linear_infinite] bg-clip-text text-transparent'
+                        }`}>
+                          {isComplete ? `🎉 ${clips.length} klip berhasil dibuat!` : currentStatus === 'stopping' ? '⏹ Menghentikan...' : loadingPhrases[loadingPhraseIdx]}
                         </p>
-                        <span className="text-[12px] font-black text-slate-700 tabular-nums shrink-0">
+                        <span className="text-[14px] font-black text-slate-700 tabular-nums shrink-0">
                           {Math.round(displayProgress * 100)}<span className="text-orange-500">%</span>
                         </span>
                       </div>
-                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
                         <div
                           className={`h-full rounded-full transition-all duration-500 ${isComplete ? 'bg-emerald-500' : 'bg-orange-500'}`}
                           style={{ width: `${Math.round(displayProgress * 100)}%` }}
                         />
                       </div>
-                      {/* Steps */}
-                      <div className="flex items-center gap-1 mt-2">
-                        {[
-                          { label: 'Download', pct: 0.2 },
-                          { label: 'AI', pct: 0.55 },
-                          { label: 'Render', pct: 0.85 },
-                          { label: 'Selesai', pct: 1 },
-                        ].map((step, i) => {
-                          const done = displayProgress >= step.pct;
-                          return (
-                            <div key={i} className="flex items-center gap-1">
-                              {i > 0 && <div className={`w-4 h-px ${done ? (isComplete ? 'bg-emerald-400' : 'bg-orange-400') : 'bg-slate-200'}`} />}
-                              <span className={`text-[10px] font-semibold ${done ? (isComplete ? 'text-emerald-500' : 'text-orange-500') : 'text-slate-400'}`}>{step.label}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
+
+
                     </div>
                   </div>
                 </div>
@@ -376,23 +387,28 @@ export default function Dashboard() {
             );
           })()}
 
-
           {/* Clips grid — muncul di bawah loading saat proses & setelah selesai */}
           {clips.length > 0 && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 mt-1">
+            <div className={`grid gap-4 mt-2 ${
+              clips.length === 1 ? 'grid-cols-1 max-w-[260px] mx-auto' :
+              clips.length === 2 ? 'grid-cols-2 max-w-[540px] mx-auto' :
+              clips.length === 3 ? 'grid-cols-3 max-w-[800px] mx-auto' :
+              clips.length === 4 ? 'grid-cols-2 md:grid-cols-4 max-w-[1060px] mx-auto' :
+              'grid-cols-2 md:grid-cols-3 lg:grid-cols-5'
+            }`}>
               {clips.map((clip, idx) => {
                 const clipId = clip.path;
                 const img = fmtImg(clip);
                 const duration = fmtDuration(clip);
                 const score = fmtScore(clip);
                 return (
-                  <div key={clipId || idx} className="relative bg-white rounded-xl p-2 shadow-sm border border-slate-100 flex flex-col group hover:shadow-md transition overflow-hidden">
-                    <div className="relative w-full aspect-[9/16] bg-slate-900 rounded-lg overflow-hidden shadow-inner group">
+                  <div key={clipId || idx} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-col group hover:shadow-md transition relative">
+                    <div className="relative w-full aspect-square bg-slate-900 rounded-xl overflow-hidden shadow-inner group">
                       {img ? (
                         <img src={img} alt="Thumbnail" className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition-transform duration-500" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-slate-600">
-                          <svg className="w-8 h-8 opacity-30" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                          <svg className="w-10 h-10 opacity-30" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                         </div>
                       )}
                       {duration && (
@@ -410,28 +426,28 @@ export default function Dashboard() {
                         </div>
                       )}
                     </div>
-                    <div className="mt-1.5 text-left flex-1 flex flex-col">
-                      <h4 className="font-bold text-[11px] leading-snug line-clamp-2 text-slate-900">{clip.title || clip.name}</h4>
+
+                    <div className="mt-3 text-left flex-1 flex flex-col">
+                      <h4 className="font-bold text-[13px] leading-snug line-clamp-2 text-slate-900">{clip.title || clip.name}</h4>
+                      {clip.description && (
+                        <p className="text-[11px] text-slate-500 line-clamp-2 mt-1.5">{clip.description}</p>
+                      )}
                     </div>
-                    <button 
+
+                    <button
                       onClick={() => setShowDetailModal(clip)}
-                      className="w-full mt-1.5 py-1 border border-slate-200 rounded-lg text-[10px] font-semibold text-slate-700 hover:bg-slate-50 transition"
+                      className="w-full mt-3 py-2 border border-slate-200 rounded-lg text-[12px] font-semibold text-slate-700 hover:bg-slate-50 transition"
                     >
                       Lihat detail
                     </button>
 
-                    {uploadProgress[clipId] !== undefined && (
-                      <>
-                        <div className="absolute bottom-0 left-0 w-full h-1.5 bg-slate-100">
-                          <div 
-                            className="h-full bg-blue-500 transition-all duration-200" 
-                            style={{ width: `${uploadProgress[clipId]}%` }}
-                          />
-                        </div>
-                        <div className="text-center text-[10px] font-bold text-blue-600 mt-2">
-                          {uploadProgress[clipId] === 100 ? 'Selesai (100%)' : `Uploading ${uploadProgress[clipId]}%`}
-                        </div>
-                      </>
+                    {uploadProgress[clipId] !== undefined && uploadProgress[clipId] < 100 && (
+                      <div className="absolute bottom-0 left-0 w-full h-1.5 bg-slate-100 rounded-b-2xl overflow-hidden">
+                        <div
+                          className="h-full bg-blue-500 transition-all duration-200"
+                          style={{ width: `${uploadProgress[clipId]}%` }}
+                        />
+                      </div>
                     )}
                   </div>
                 );
@@ -447,6 +463,11 @@ export default function Dashboard() {
               <p className="text-[13px] text-slate-400 text-center max-w-sm leading-relaxed">Masukkan URL YouTube di sebelah kiri lalu klik <strong className="font-bold">Proses Klip</strong> untuk mulai membuat video vertikal.</p>
             </div>
           )}
+
+          {/* Footer bantuan */}
+          <div className="mt-auto pt-8 pb-2 text-center text-[12px] font-medium text-slate-400">
+            Butuh bantuan? Silakan kirim ke <a href="mailto:bfrotok@klipklop.id" className="text-slate-500 font-semibold hover:underline">bfrotok@klipklop.id</a>
+          </div>
         </div>
       </section>
 
@@ -456,20 +477,20 @@ export default function Dashboard() {
           <div className="space-y-4">
             <div>
               <label className="block text-[12px] font-semibold text-black mb-1">Link YouTube</label>
-              <input 
-                type="text" 
-                placeholder="https://www.youtube.com/watch?v=..." 
+              <input
+                type="text"
+                placeholder="https://www.youtube.com/watch?v=..."
                 value={youtubeUrl}
                 onChange={(e) => setYoutubeUrl(e.target.value)}
                 disabled={isProcessing}
-                className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[13px] text-gray-700 bg-white disabled:opacity-50" 
+                className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[13px] text-gray-700 bg-white disabled:opacity-50"
               />
               <p className="text-[11px] text-gray-400 mt-1">Durasi optimal: 5 - 120 menit.</p>
             </div>
 
             <div>
               <label className="block text-[12px] font-semibold text-black mb-1.5">Kualitas Video</label>
-              <select 
+              <select
                 value={videoQuality}
                 onChange={(e) => setVideoQuality(e.target.value)}
                 disabled={isProcessing}
@@ -496,7 +517,7 @@ export default function Dashboard() {
               <p className="text-[11px] text-gray-400 mt-1">Berapa klip viral yang ingin dihasilkan dari video ini.</p>
             </div>
 
-            <div>
+            {/*<div>
               <label className="block text-[12px] font-semibold text-black mb-1.5">Background</label>
               <div className="border border-gray-200 rounded-xl p-2.5 flex items-center justify-between bg-white">
                 <div>
@@ -508,12 +529,12 @@ export default function Dashboard() {
                   <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
                 </label>
               </div>
-            </div>
+            </div>*/}
           </div>
 
           <div className="flex items-center">
-            <button 
-              type="button" 
+            <button
+              type="button"
               onClick={() => setShowInstructionModal(true)}
               className="text-[12px] text-primary font-semibold hover:text-orange-700 flex items-center space-x-1.5 transition"
             >
@@ -532,7 +553,7 @@ export default function Dashboard() {
             </div>
           )}
           <div className="flex gap-2 mb-3">
-            <button 
+            <button
               className="flex-1 bg-primary hover:bg-orange-700 text-white font-semibold py-2.5 rounded-xl text-[14px] transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={handleProcessClip}
               disabled={isProcessing}
@@ -545,8 +566,8 @@ export default function Dashboard() {
               ) : 'Proses Klip'}
             </button>
             {isProcessing && (
-              <button 
-                className="flex-none bg-red-500 hover:bg-red-600 text-white p-2.5 rounded-xl transition shadow-sm flex items-center justify-center group" 
+              <button
+                className="flex-none bg-red-500 hover:bg-red-600 text-white p-2.5 rounded-xl transition shadow-sm flex items-center justify-center group"
                 title="Berhenti"
                 onClick={handleStop}
               >
@@ -587,7 +608,7 @@ export default function Dashboard() {
             <button onClick={() => setShowDetailModal(null)} className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full border border-slate-200 text-slate-400 hover:text-slate-900 hover:bg-slate-50 transition-colors z-10">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
             </button>
-            
+
             {/* Left: Video */}
             <div className="w-[300px] shrink-0 bg-black rounded-xl overflow-hidden aspect-[9/16] relative shadow-inner">
               <video
@@ -599,7 +620,7 @@ export default function Dashboard() {
                 src={`/api/stream?path=${encodeURIComponent(showDetailModal.path)}`}
               />
             </div>
-            
+
             {/* Right: Details */}
             <div className="flex-1 flex flex-col py-2 pr-4">
               <p className="text-[12px] text-slate-500 mb-1 flex items-center gap-2">
@@ -614,16 +635,16 @@ export default function Dashboard() {
                   Tonton di YouTube
                 </a>
               )}
-              
+
               <p className="text-[12px] font-bold text-slate-700 mt-6 mb-2">Description</p>
               <div className="border border-slate-200 rounded-xl p-4 text-[13px] text-slate-600 bg-slate-50 min-h-[120px] leading-relaxed">
                 {showDetailModal.description}
                 <br/><br/>
                 sc: @klipklop
               </div>
-              
+
               <div className="mt-auto flex flex-wrap items-center gap-2 pt-6">
-                <button 
+                <button
                   onClick={() => handleSave(showDetailModal)}
                   disabled={isSaving}
                   className="bg-[#ea580c] hover:bg-[#c2410c] text-white font-semibold py-2.5 px-4 rounded-xl text-[13px] transition shadow-sm border border-[#ea580c] flex items-center gap-2 disabled:opacity-70 disabled:cursor-wait"
@@ -636,12 +657,12 @@ export default function Dashboard() {
                   )}
                   {isSaving ? 'Menyimpan...' : 'Simpan ke Gallery'}
                 </button>
-                <a 
+                <a
                   href={`/api/download?path=${encodeURIComponent(showDetailModal.path)}`}
                   download
                   className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold py-2.5 px-4 rounded-xl text-[13px] transition shadow-sm"
                 >Download</a>
-                <button 
+                <button
                   onClick={() => handleUpload(showDetailModal)}
                   disabled={uploadProgress[showDetailModal.path] !== undefined}
                   className={`font-semibold py-2.5 px-4 rounded-xl text-[13px] transition shadow-sm border ${
@@ -650,11 +671,11 @@ export default function Dashboard() {
                       : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
                   }`}
                 >
-                  {uploadProgress[showDetailModal.path] !== undefined 
-                    ? (uploadProgress[showDetailModal.path] === 100 ? 'Uploaded' : `Uploading...`) 
+                  {uploadProgress[showDetailModal.path] !== undefined
+                    ? (uploadProgress[showDetailModal.path] === 100 ? 'Uploaded' : `Uploading...`)
                     : 'Upload'}
                 </button>
-                <button 
+                <button
                   onClick={() => setDeleteConfirm(showDetailModal)}
                   className="bg-white border border-slate-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 text-slate-700 font-semibold py-2.5 px-4 rounded-xl text-[13px] transition shadow-sm"
                 >Hapus</button>
@@ -677,20 +698,20 @@ export default function Dashboard() {
             </div>
             <div className="p-5">
               <p className="text-[12px] text-slate-500 mb-3">Tambahkan arahan atau konteks spesifik untuk AI saat memotong video ini (opsional).</p>
-              <textarea 
+              <textarea
                 className="w-full h-32 px-3.5 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[13px] text-gray-700 bg-slate-50 resize-none"
                 placeholder="Misalnya: Fokus pada bagian saat host membahas tentang investasi saham..."
                 value={instruction}
                 onChange={(e) => setInstruction(e.target.value)}
               ></textarea>
               <div className="flex justify-end gap-2 mt-5">
-                <button 
+                <button
                   onClick={() => setShowInstructionModal(false)}
                   className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl text-[12px] transition shadow-sm"
                 >
                   Batal
                 </button>
-                <button 
+                <button
                   onClick={() => setShowInstructionModal(false)}
                   className="px-4 py-2 bg-primary hover:bg-orange-700 text-white font-semibold rounded-xl text-[12px] transition shadow-sm"
                 >

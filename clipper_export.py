@@ -480,8 +480,8 @@ class ExportMixin(ClipperBase):
             back_colour = "&H80000000"
 
         # BorderStyle: 1=Outline, 3=Opaque Box
-        border_style = 3 if bg_box else 1
-        outline = 8 if not bg_box else 0
+        border_style = 1 # Force outline, no box
+        outline = max(1, int(size * 0.05)) # Thin outline
         bold = -1 if font_weight >= 700 else 0
 
         ass_content = f"""[Script Info]
@@ -494,7 +494,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{size},{primary_colour},&H00FFFFFF,&H00000000,{back_colour},{bold},0,0,0,100,100,0,0,{border_style},{outline},0,{alignment},0,0,0,1
+Style: Default,{font},{size},&H00FFFFFF,&H00FFFFFF,&H00000000,{back_colour},{bold},0,0,0,100,100,0,0,{border_style},{outline},0,{alignment},0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -526,11 +526,37 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             if chunk:
                 chunks.append(chunk)
             for chunk in chunks:
-                events.append({
-                    'start': self.format_time(chunk[0]['start'] + time_offset),
-                    'end': self.format_time(chunk[-1]['end'] + time_offset),
-                    'text': ' '.join(item['text'] for item in chunk)
-                })
+                chunk_start = chunk[0]['start']
+                chunk_end = chunk[-1]['end']
+                
+                for i, word in enumerate(chunk):
+                    # Event start is either the start of the chunk (for first word) or the end of the previous word
+                    event_start = chunk_start if i == 0 else chunk[i-1]['end']
+                    # Event end is the end of the current word, or the end of the chunk (for last word)
+                    event_end = word['end'] if i < len(chunk) - 1 else chunk_end
+                    
+                    # Ensure event duration is at least 0.01s to avoid ASS errors
+                    if event_end - event_start < 0.01:
+                        event_end = event_start + 0.01
+                    
+                    # Format text: highlight the current word
+                    text_parts = []
+                    for j, w in enumerate(chunk):
+                        if i == j:
+                            # Active word: Blue/Custom color
+                            text_parts.append(f"{{\\c{primary_colour}}}{w['text']}{{\\c&HFFFFFF&}}")
+                        else:
+                            # Inactive word: White
+                            text_parts.append(f"{{\\c&HFFFFFF&}}{w['text']}")
+                    
+                    event_text = " ".join(text_parts)
+                    
+                    events.append({
+                        'start': self.format_time(event_start + time_offset),
+                        'end': self.format_time(event_end + time_offset),
+                        'text': event_text
+                    })
+
 
         
         # Fallback: use segment-level timestamps if no word timestamps
@@ -556,14 +582,24 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         # Write events to ASS file
         text_transform = str(style.get("text_transform", "none")).lower()
         for event in events:
-            text = str(event['text']).replace('{', '').replace('}', '').replace('\n', ' ')
-            if text_transform == "uppercase":
-                text = text.upper()
-            elif text_transform == "lowercase":
-                text = text.lower()
-            elif text_transform == "capitalize":
-                text = text.title()
-            ass_content += f"Dialogue: 0,{event['start']},{event['end']},Default,,0,0,0,,{{\\pos({pos_x},{pos_y})}}{text}\n"
+            raw_text = str(event['text']).replace('\n', ' ')
+            # Apply transform outside tags or just transform words
+            def _transform_word(match):
+                word = match.group(0)
+                if word.startswith("{\\c"):
+                    return word
+                if text_transform == "uppercase":
+                    return word.upper()
+                elif text_transform == "lowercase":
+                    return word.lower()
+                elif text_transform == "capitalize":
+                    return word.title()
+                return word
+            
+            # Split into tag / text tokens cleanly
+            tokens = re.split(r'(\{\\c[^}]+\})', raw_text)
+            transformed = "".join(_transform_word(re.match(r'.*', t)) for t in tokens)
+            ass_content += f"Dialogue: 0,{event['start']},{event['end']},Default,,0,0,0,,{{\\pos({pos_x},{pos_y})}}{transformed}\n"
         
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(ass_content)
@@ -588,23 +624,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         return str(cache_file)
 
     def add_hook_with_progress(self, input_path: str, hook_text: str, output_path: str, progress_callback) -> float:
-        """Add hook scene at the beginning with progress tracking"""
+        """Add hook scene as a title overlay for 4 seconds"""
         
         progress_callback(0.1)
-        try:
-            tts_file = self._generate_edge_tts(hook_text)
-        except Exception as e:
-            self.log(f"  ⊘ Hook skipped; edge-tts failed: {e}")
-            return 0
-        probe_cmd = [self.ffmpeg_path, "-i", tts_file, "-f", "null", "-"]
-        result = subprocess.run(probe_cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
-        duration_match = re.search(r"Duration: (\d+):(\d+):(\d+\.\d+)", result.stderr)
-        if duration_match:
-            h, m, s = duration_match.groups()
-            hook_duration = int(h) * 3600 + int(m) * 60 + float(s) + 0.5
-        else:
-            hook_duration = 3.0
-        progress_callback(0.2)
+        hook_duration = 4.0
         
         # Format hook text
         hook_upper = hook_text.upper()
@@ -635,48 +658,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         
         progress_callback(0.3)
         
-        # Create hook video in our temp directory
-        hook_video = str(self.temp_dir / f"hook_{int(time.time() * 1000)}.mp4")
-        
-        # Use a simpler approach: create static image with text, then combine with audio
-        # This avoids complex FFmpeg filter escaping issues
-        
-        # First, create a simple background video from first frame using GPU/CPU encoder
-        bg_video = str(self.temp_dir / f"hook_bg_{int(time.time() * 1000)}.mp4")
-        
-        encoder_args = self.get_video_encoder_args()
-        bg_cmd = [
-            self.ffmpeg_path, "-y",
-            "-i", input_path,
-            "-vf", f"trim=0:0.04,loop=loop=-1:size=1:start=0,setpts=N/{fps}/TB",
-            "-t", str(hook_duration),
-            *encoder_args,
-            "-r", str(fps),
-            "-s", f"{width}x{height}",
-            "-pix_fmt", "yuv420p",
-            "-an",
-            bg_video
-        ]
-        
-        self.log_ffmpeg_command(bg_cmd, "Create Hook Background")
-        result = self._run_ffmpeg_subprocess(bg_cmd)
-        if result.returncode != 0:
-            self.log(f"Failed to create background video: {result.stderr}")
-            raise Exception("Failed to create background video")
-        
-        # Verify background video was created successfully
-        if not os.path.exists(bg_video) or os.path.getsize(bg_video) < 1000:
-            raise Exception("Background video was not created properly")
-        
-        # === Render hook overlay using PIL (supports user-customized font, colors, corners) ===
+        # === Render hook overlay using PIL ===
         from PIL import Image, ImageDraw, ImageFont
 
         style = self.hook_style_settings or {}
         font_size_frac = float(style.get("font_size", 0.05))
-        font_color_hex = style.get("text_color") or style.get("font_color") or "#0033ff"
-        bg_color_hex = style.get("background_color") or style.get("bg_color") or "#ffffff"
-        shape = str(style.get("shape") or "rectangle")
-        corner_radius = 9999 if shape == "pill" else int(style.get("corner_radius", 0))
+        font_color_hex = style.get("text_color") or style.get("font_color") or "#FFD700"
         pos_x = float(style.get("position_x", 0.5))
         pos_y = float(style.get("position_y", 0.2))
         user_font_path = style.get("font_path") or ""
@@ -687,6 +674,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         family_fonts = {
             "Plus Jakarta Sans": root / "fonts" / "PlusJakartaSans.ttf",
             "Poppins": root / "fonts" / "Poppins-Bold.ttf",
+            "Super Kidpop": root / "fonts" / "SuperKidpop.ttf",
+            "Capo Sfogliato": root / "fonts" / "CapoSfogliato.ttf",
         }
         font_candidates = [user_font_path, str(family_fonts.get(font_family, "")), self._find_system_font_bold()]
         pil_font = None
@@ -705,7 +694,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             pil_font = ImageFont.load_default()
 
         font_color_rgb = _hex_to_rgb(font_color_hex)
-        bg_color_rgb = _hex_to_rgb(bg_color_hex)
 
         # Per-line geometry
         padding = max(10, int(font_px * 0.22))
@@ -735,182 +723,85 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         center_y = int(pos_y * height)
         block_top = center_y - total_h // 2
 
-        # Compose the static overlay (transparent everywhere except the hook boxes)
+        # Compose the static overlay
         overlay_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay_img)
 
         cur_y = block_top
+        stroke_width = max(1, int(font_px * 0.05))
+        shadow_offset = max(2, int(font_px * 0.08))
+
         for m in line_metrics:
             box_w = m["box_w"]
             box_h = m["box_h"]
             box_x1 = center_x - box_w // 2
             box_y1 = cur_y
-            box_x2 = box_x1 + box_w
-            box_y2 = box_y1 + box_h
-
-            if corner_radius > 0 and hasattr(draw, "rounded_rectangle"):
-                # Clamp radius so it never exceeds half the smaller dimension
-                r = min(corner_radius, box_w // 2, box_h // 2)
-                draw.rounded_rectangle(
-                    [box_x1, box_y1, box_x2, box_y2],
-                    radius=r,
-                    fill=(*bg_color_rgb, 255),
-                )
-            else:
-                draw.rectangle(
-                    [box_x1, box_y1, box_x2, box_y2],
-                    fill=(*bg_color_rgb, 255),
-                )
-
-            # PIL draws text at the top-left of the glyph bounding box;
-            # subtract bbox[0]/[1] so the glyphs sit cleanly inside the padding.
+            
             text_x = box_x1 + padding - m["bbox"][0]
             text_y = box_y1 + padding - m["bbox"][1]
+
+            # Draw Shadow
+            draw.text(
+                (text_x, text_y + shadow_offset),
+                m["text"],
+                font=pil_font,
+                fill=(0, 0, 0, 180),
+                stroke_width=stroke_width,
+                stroke_fill=(0, 0, 0, 180),
+            )
+
+            # Draw Main Text with Stroke
             draw.text(
                 (text_x, text_y),
                 m["text"],
                 font=pil_font,
                 fill=(*font_color_rgb, 255),
+                stroke_width=stroke_width,
+                stroke_fill=(0, 0, 0, 255),
             )
 
-            cur_y = box_y2 + line_spacing
+            cur_y = box_y1 + box_h + line_spacing
 
+        import time
         overlay_png = str(self.temp_dir / f"hook_overlay_{int(time.time() * 1000)}.png")
         overlay_img.save(overlay_png, "PNG")
         progress_callback(0.4)
 
-        # Composite overlay on the (frozen) background video in one FFmpeg pass
-        overlay_video = str(self.temp_dir / f"hook_overlay_video_{int(time.time() * 1000)}.mp4")
-        encoder_args = self.get_video_encoder_args()
-        overlay_cmd = [
-            self.ffmpeg_path, "-y",
-            "-i", bg_video,
-            "-i", overlay_png,
-            "-filter_complex", "[0:v][1:v]overlay=0:0[v]",
-            "-map", "[v]",
-            *encoder_args,
-            "-pix_fmt", "yuv420p",
-            "-an",
-            overlay_video,
-        ]
-        self.log_ffmpeg_command(overlay_cmd, "Composite Hook Overlay (PIL)")
-        result = self._run_ffmpeg_subprocess(overlay_cmd)
-        if result.returncode != 0:
-            self.log(f"Failed to composite hook overlay: {result.stderr}")
-            raise Exception("Failed to composite hook overlay video")
-
-        if not os.path.exists(overlay_video) or os.path.getsize(overlay_video) < 1000:
-            raise Exception("Hook overlay video was not created properly")
-
-        progress_callback(0.55)
-
-        # Both names point at the same file so the rest of the pipeline (audio mux,
-        # cleanup) keeps working without further changes.
-        current_video = overlay_video
-        reencoded_video = overlay_video
-
-        
-        # Finally, add audio to re-encoded video
-        cmd = [
-            self.ffmpeg_path, "-y",
-            "-i", reencoded_video,
-            "-i", tts_file,
-            "-c:v", "copy",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-ar", "44100",
-            "-ac", "2",
-            "-shortest",
-            hook_video
-        ]
-        
-        # Hook creation is 30-60%
-        self.run_ffmpeg_with_progress(cmd, hook_duration, 
-            lambda p: progress_callback(0.3 + p * 0.3))
-        
-        # Re-encode main video (60-80%) using GPU/CPU encoder
-        progress_callback(0.6)
-        main_reencoded = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
-        
-        # Get main video duration
-        probe_cmd = [self.ffmpeg_path, "-i", input_path, "-f", "null", "-"]
-        result = subprocess.run(probe_cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
-        duration_match = re.search(r"Duration: (\d+):(\d+):(\d+\.\d+)", result.stderr)
-        main_duration = 60
-        if duration_match:
-            h, m, s = duration_match.groups()
-            main_duration = int(h) * 3600 + int(m) * 60 + float(s)
-        
+        # Composite overlay on video
         encoder_args = self.get_video_encoder_args()
         cmd = [
             self.ffmpeg_path, "-y",
             "-i", input_path,
+            "-i", overlay_png,
+            "-filter_complex", f"[0:v][1:v]overlay=0:0:enable='between(t,0,{hook_duration})'[v]",
+            "-map", "[v]",
+            "-map", "0:a",
             *encoder_args,
-            "-r", str(fps),
-            "-s", f"{width}x{height}",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-ar", "44100",
-            "-ac", "2",
+            "-c:a", "copy",
             "-progress", "pipe:1",
-            main_reencoded
-        ]
-        
-        self.log_ffmpeg_command(cmd, "Re-encode Main Video for Hook Concat")
-        self.run_ffmpeg_with_progress(cmd, main_duration,
-            lambda p: progress_callback(0.6 + p * 0.2))
-        
-        # Concatenate (80-100%)
-        progress_callback(0.8)
-        concat_list = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False).name
-        with open(concat_list, 'w') as f:
-            f.write(f"file '{hook_video.replace(chr(92), '/')}'\n")
-            f.write(f"file '{main_reencoded.replace(chr(92), '/')}'\n")
-        
-        cmd = [
-            self.ffmpeg_path, "-y",
-            "-f", "concat",
-            "-safe", "0",
-            "-i", concat_list,
-            "-c", "copy",
             output_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
         
-        if result.returncode != 0:
-            # Fallback to filter_complex using GPU/CPU encoder
-            encoder_args = self.get_video_encoder_args()
-            cmd = [
-                self.ffmpeg_path, "-y",
-                "-i", hook_video,
-                "-i", main_reencoded,
-                "-filter_complex",
-                "[0:v:0][0:a:0][1:v:0][1:a:0]concat=n=2:v=1:a=1[outv][outa]",
-                "-map", "[outv]",
-                "-map", "[outa]",
-                *encoder_args,
-                "-c:a", "aac",
-                "-b:a", "192k",
-                "-progress", "pipe:1",
-                output_path
-            ]
-            self.log_ffmpeg_command(cmd, "Concat Hook (filter_complex fallback - old)")
-            total_duration = hook_duration + main_duration
-            self.run_ffmpeg_with_progress(cmd, total_duration,
-                lambda p: progress_callback(0.8 + p * 0.2))
-        else:
-            progress_callback(1.0)
+        self.log_ffmpeg_command(cmd, "Apply Hook Title")
         
-        # Cleanup
-        for path in (tts_file, hook_video, main_reencoded, concat_list,
-                     bg_video, overlay_video, overlay_png):
-            try:
-                if path and os.path.exists(path) and "cache\\tts" not in path and "cache/tts" not in path.replace("\\", "/"):
-                    os.unlink(path)
-            except Exception:
-                pass
+        # Get duration for progress
+        duration_match = re.search(r"Duration: (\d+):(\d+):(\d+\.\d+)", result.stderr)
+        video_duration = 60
+        if duration_match:
+            h, m, s = duration_match.groups()
+            video_duration = int(h) * 3600 + int(m) * 60 + float(s)
+            
+        self.run_ffmpeg_with_progress(cmd, video_duration, lambda p: progress_callback(0.4 + p * 0.6))
         
+        if not os.path.exists(output_path):
+            raise Exception("Failed to apply hook title video")
+            
+        try:
+            os.unlink(overlay_png)
+        except Exception:
+            pass
+            
+        progress_callback(1.0)
         return hook_duration
 
     def add_captions_api_with_progress(self, input_path: str, output_path: str, audio_source: str = None, time_offset: float = 0, progress_callback=None):

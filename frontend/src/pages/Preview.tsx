@@ -10,7 +10,6 @@ export default function Preview() {
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [showBlockerModal, setShowBlockerModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'watermark' | 'credit' | 'hook' | 'subtitle' | 'blur'>('hook');
   const lastSavedSettingsRef = useRef<string>('');
   const draggingRef = useRef<string | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -317,7 +316,7 @@ export default function Preview() {
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <h4 className="text-[13px] font-bold text-slate-900 flex items-center gap-2">
                 <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path></svg>
-                Hook Style
+                Hook Title
               </h4>
               <label className="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" className="sr-only peer" checked={settings.hook_style.enabled} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, enabled: e.target.checked}})} />
@@ -325,45 +324,8 @@ export default function Preview() {
               </label>
             </div>
             {settings.hook_style.enabled && (
-              <div className="space-y-3 pt-1">
-                <div className="grid grid-cols-2 gap-2">
-                  <select value={settings.hook_style.font_family || 'Capo Sfogliato'} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, font_family: e.target.value}})} className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-[11px] font-medium focus:outline-none focus:border-primary bg-slate-50">
-                    <option value="Capo Sfogliato">Capo Sfogliato</option>
-                    <option value="Super Hockey">Super Hockey</option>
-                    <option value="Super Kidpop">Super Kidpop</option>
-                    <option value="Inter">Inter</option>
-                  </select>
-                  <select value={settings.hook_style.shape || 'rectangle'} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, shape: e.target.value}})} className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-[11px] font-medium focus:outline-none focus:border-primary bg-slate-50">
-                    <option value="rectangle">Rectangle</option>
-                    <option value="pill">Pill</option>
-                  </select>
-                </div>
-                <div className="flex gap-2">
-                  <div className="flex-1 flex items-center gap-1.5 bg-slate-50 border border-slate-100 p-1.5 rounded-lg">
-                    <input type="color" value={settings.hook_style.text_color} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, text_color: e.target.value}})} className="w-5 h-5 rounded cursor-pointer border border-slate-200 p-0.5 bg-white shrink-0" />
-                    <label className="text-[10px] font-semibold text-slate-600">Text</label>
-                  </div>
-                  <div className="flex-1 flex items-center gap-1.5 bg-slate-50 border border-slate-100 p-1.5 rounded-lg">
-                    <input type="color" value={settings.hook_style.background_color || settings.hook_style.bg_color} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, background_color: e.target.value, bg_color: e.target.value}})} className="w-5 h-5 rounded cursor-pointer border border-slate-200 p-0.5 bg-white shrink-0" />
-                    <label className="text-[10px] font-semibold text-slate-600">Bg</label>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[10px] font-semibold text-slate-600">Size</label>
-                      <span className="text-[9px] font-medium text-slate-400">{Math.round((settings.hook_style.font_size || 0.05) * 1000)}%</span>
-                    </div>
-                    <input type="range" min="0.01" max="0.1" step="0.005" value={settings.hook_style.font_size} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, font_size: parseFloat(e.target.value)}})} className="w-full h-1 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[10px] font-semibold text-slate-600">Radius</label>
-                      <span className="text-[9px] font-medium text-slate-400">{settings.hook_style.corner_radius}px</span>
-                    </div>
-                    <input type="range" min="0" max="100" step="1" value={settings.hook_style.corner_radius} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, corner_radius: parseInt(e.target.value)}})} className={`w-full h-1 rounded-lg appearance-none cursor-pointer ${settings.hook_style.shape === 'pill' ? 'bg-slate-200 accent-slate-400 opacity-50' : 'bg-orange-100 accent-primary'}`} disabled={settings.hook_style.shape === 'pill'} />
-                  </div>
-                </div>
+              <div className="space-y-2 pt-1">
+                <p className="text-[10px] text-slate-500 leading-snug">Geser hook title di preview untuk mengubah posisi.</p>
               </div>
             )}
           </div>
@@ -373,7 +335,7 @@ export default function Preview() {
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <h4 className="text-[13px] font-bold text-slate-900 flex items-center gap-2">
                 <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
-                Subtitle Style
+                Subtitle
               </h4>
               <label className="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" className="sr-only peer" checked={settings.subtitle?.enabled} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, enabled: e.target.checked}})} />
@@ -381,47 +343,12 @@ export default function Preview() {
               </label>
             </div>
             {settings.subtitle?.enabled && (
-              <div className="space-y-3 pt-1">
-                <div className="flex gap-2">
-                  <div className="flex-1 flex items-center gap-1.5 bg-slate-50 border border-slate-100 p-1.5 rounded-lg">
-                    <input type="color" value={settings.subtitle?.color || '#ffff00'} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, color: e.target.value}})} className="w-5 h-5 rounded cursor-pointer border border-slate-200 p-0.5 bg-white shrink-0" />
-                    <label className="text-[10px] font-semibold text-slate-600">Text</label>
-                  </div>
-                  <div className="flex-1 flex items-center gap-1.5 bg-slate-50 border border-slate-100 p-1.5 rounded-lg">
-                    <input type="color" value={settings.subtitle?.bg_color || '#000000'} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, bg_color: e.target.value}})} className="w-5 h-5 rounded cursor-pointer border border-slate-200 p-0.5 bg-white shrink-0" />
-                    <label className="text-[10px] font-semibold text-slate-600">Bg</label>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <select value={settings.subtitle?.font_family || 'Plus Jakarta Sans'} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, font_family: e.target.value}})} className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-[11px] font-medium focus:outline-none focus:border-primary bg-slate-50">
-                    <option value="Plus Jakarta Sans">Plus Jakarta</option>
-                    <option value="Poppins">Poppins</option>
-                    <option value="Inter">Inter</option>
-                  </select>
-                  <select value={settings.subtitle?.text_transform || 'none'} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, text_transform: e.target.value}})} className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-[11px] font-medium focus:outline-none focus:border-primary bg-slate-50">
-                    <option value="none">Normal</option>
-                    <option value="uppercase">UPPERCASE</option>
-                  </select>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[10px] font-semibold text-slate-600">Size</label>
-                      <span className="text-[9px] font-medium text-slate-400">{Math.round((settings.subtitle?.size || 0.04) * 1000)}%</span>
-                    </div>
-                    <input type="range" min="0.01" max="0.1" step="0.005" value={settings.subtitle?.size || 0.04} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, size: parseFloat(e.target.value)}})} className="w-full h-1 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[10px] font-semibold text-slate-600">Weight</label>
-                      <span className="text-[9px] font-medium text-slate-400">{settings.subtitle?.font_weight || 800}</span>
-                    </div>
-                    <input type="range" min="100" max="900" step="100" value={settings.subtitle?.font_weight || 800} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, font_weight: parseInt(e.target.value)}})} className="w-full h-1 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
-                  </div>
-                </div>
+              <div className="space-y-2 pt-1">
+                <p className="text-[10px] text-slate-500 leading-snug">Geser subtitle di preview untuk mengubah posisi.</p>
               </div>
             )}
           </div>
+
 
           {/* Background Blur Section */}
           <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-col gap-2.5">
@@ -449,7 +376,7 @@ export default function Preview() {
                     <label className="text-[11px] font-semibold text-slate-600">Bg Zoom</label>
                     <span className="text-[10px] font-medium text-slate-400">{Math.round(settings.blur_background.zoom * 100)}%</span>
                   </div>
-                  <input type="range" min="1.0" max="2.0" step="0.01" value={settings.blur_background.zoom} onChange={(e) => setSettings({...settings, blur_background: {...settings.blur_background, zoom: parseFloat(e.target.value)}})} className="w-full h-1 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
+                  <input type="range" min="1.0" max="3.0" step="0.01" value={settings.blur_background.zoom} onChange={(e) => setSettings({...settings, blur_background: {...settings.blur_background, zoom: parseFloat(e.target.value)}})} className="w-full h-1 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
                 </div>
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
@@ -547,63 +474,60 @@ export default function Preview() {
           </div>
 
           {/* 5. Hook Layer (Draggable) */}
-          <div 
-            className={`absolute z-10 flex items-center justify-center hover:ring-2 ring-primary/50 transition-opacity ${settings.hook_style.enabled ? 'cursor-move' : 'opacity-0 pointer-events-none'}`}
-            style={{
-              left: `${settings.hook_style.position_x * 100}%`,
-              top: `${settings.hook_style.position_y * 100}%`,
-              transform: 'translate(-50%, -50%)',
-              color: settings.hook_style.text_color,
-              backgroundColor: settings.hook_style.background_color || settings.hook_style.bg_color,
-              fontSize: `${Math.max(12, (settings.hook_style.font_size || 0.05) * 500)}px`,
-              fontFamily: settings.hook_style.font_family || 'sans-serif',
-              fontWeight: '900',
-              padding: '12px 28px',
-              borderRadius: settings.hook_style.shape === 'pill' ? '999px' : `${settings.hook_style.corner_radius}px`,
-              boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
-              whiteSpace: 'nowrap',
-              textTransform: 'uppercase',
-              letterSpacing: '1px'
-            }}
-            onMouseDown={(e) => handleDragStart(e, 'hook')}
-            onTouchStart={(e) => handleDragStart(e, 'hook')}
-          >
-            WAIT FOR IT!
-          </div>
+          {settings.hook_style.enabled && (
+            <div
+              className={`absolute z-10 hover:ring-2 ring-primary/50 rounded transition-opacity cursor-move`}
+              style={{
+                left: `${settings.hook_style.position_x * 100}%`,
+                top: `${settings.hook_style.position_y * 100}%`,
+                transform: 'translate(-50%, -50%)',
+                color: '#FFD700',
+                fontSize: `${Math.max(16, (settings.hook_style.font_size || 0.05) * 500)}px`,
+                fontFamily: `'Super Kidpop', 'Capo Sfogliato', 'Plus Jakarta Sans', sans-serif`,
+                fontWeight: 900,
+                textAlign: 'center',
+                whiteSpace: 'pre-wrap',
+                lineHeight: '1.2',
+                WebkitTextStroke: '1.5px black',
+                textShadow: '0px 3px 0px black, 0px 4px 4px rgba(0,0,0,0.5)',
+                width: '90%',
+              }}
+              onMouseDown={(e) => handleDragStart(e, 'hook')}
+              onTouchStart={(e) => handleDragStart(e, 'hook')}
+            >
+              JUDUL VIDEO VIRAL BIKIN PENASARAN
+            </div>
+          )}
 
           {/* 6. Subtitle Layer (Draggable) */}
-          <div 
-            className={`absolute z-10 hover:ring-2 ring-primary/50 rounded transition-opacity ${settings.subtitle?.enabled ? 'cursor-move' : 'opacity-0 pointer-events-none'}`}
-            style={{
-              left: `${(settings.subtitle?.position_x ?? 0.5) * 100}%`,
-              top: `${(settings.subtitle?.position_y ?? 0.85) * 100}%`,
-              transform: 'translate(-50%, -50%)',
-              color: settings.subtitle?.color || '#ffff00',
-              fontSize: `${Math.max(12, (settings.subtitle?.size || 0.04) * 500)}px`,
-              fontWeight: settings.subtitle?.font_weight || 800,
-              textShadow: '0px 2px 4px rgba(0,0,0,0.8)',
-              whiteSpace: 'nowrap',
-              fontFamily: `'${settings.subtitle?.font_family || 'Plus Jakarta Sans'}', sans-serif`,
-              textAlign: 'center',
-              textTransform: (settings.subtitle?.text_transform as any) || 'none',
-              backgroundColor: `${settings.subtitle?.bg_color || '#000000'}${Math.round((settings.subtitle?.bg_opacity ?? 0.8) * 255).toString(16).padStart(2, '0')}`,
-              padding: '0.2em 0.5em',
-              borderRadius: '0.2em',
-              userSelect: 'none',
-              WebkitUserSelect: 'none'
-            }}
-            onMouseDown={(e) => handleDragStart(e, 'subtitle')}
-            onTouchStart={(e) => handleDragStart(e, 'subtitle')}
-          >
-            {(() => {
-              const t = 'Contoh subtitle klip video';
-              const transform = settings.subtitle?.text_transform || 'none';
-              if (transform === 'uppercase') return t.toUpperCase();
-              if (transform === 'lowercase') return t.toLowerCase();
-              if (transform === 'capitalize') return t.replace(/\b\w/g, c => c.toUpperCase());
-              return t;
-            })()}
-          </div>
+          {settings.subtitle?.enabled && (
+            <div
+              className={`absolute w-full z-10 hover:ring-2 ring-primary/50 transition-opacity cursor-move flex flex-col items-center justify-center`}
+              style={{
+                left: `50%`,
+                top: `${(settings.subtitle?.position_y ?? 0.85) * 100}%`,
+                transform: 'translate(-50%, -50%)',
+                textAlign: 'center',
+                whiteSpace: 'normal',
+                pointerEvents: 'auto',
+                lineHeight: '1.2',
+              }}
+              onMouseDown={(e) => handleDragStart(e, 'subtitle')}
+              onTouchStart={(e) => handleDragStart(e, 'subtitle')}
+            >
+              <div style={{
+                color: '#FFFFFF',
+                fontSize: `${Math.max(12, (settings.subtitle?.size || 0.04) * 500)}px`,
+                fontWeight: 900,
+                fontFamily: `'Plus Jakarta Sans', sans-serif`,
+                textTransform: 'uppercase',
+                WebkitTextStroke: '1px black',
+                textShadow: '0px 1px 2px rgba(0,0,0,0.5)',
+              }}>
+                CONTOH <span style={{ color: '#00BFFF' }}>SUBTITLE KLIP</span> VIDEO
+              </div>
+            </div>
+          )}
 
           {/* Overlay Helper text when dragging */}
           {dragging && (

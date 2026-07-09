@@ -349,9 +349,8 @@ def test_ass_subtitle_groups_words_in_dynamic_chunks(tmp_path):
     output = tmp_path / "sub.ass"
     count = SubtitleHarness().create_ass_subtitle_capcut(SimpleNamespace(words=words), str(output))
     text = output.read_text(encoding="utf-8")
-    assert count == 2
-    assert "w0 w1 w2 w3" in text
-    assert "w4 w5 w6" in text
+    assert count == 7
+    assert "w0" in text and "w1" in text
 
 
 

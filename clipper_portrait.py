@@ -11,6 +11,20 @@ from utils.logger import debug_log
 
 
 class PortraitMixin(ClipperBase):
+    def _get_target_portrait_dims(self, orig_w: int, orig_h: int) -> tuple[int, int]:
+        """Get target (out_w, out_h) dynamically from self.output_resolution or source video dimensions."""
+        res_str = getattr(self, "output_resolution", None)
+        if res_str and ":" in str(res_str):
+            try:
+                parts = [int(p) for p in str(res_str).split(":")]
+                if len(parts) == 2:
+                    w, h = (parts[0], parts[1]) if parts[0] < parts[1] else (parts[1], parts[0])
+                    return w, h
+            except Exception:
+                pass
+        crop_w = int(orig_h * (9 / 16))
+        return crop_w, orig_h
+
     def convert_to_portrait(self, input_path: str, output_path: str):
         """Convert landscape to 9:16 portrait with speaker tracking (router method)"""
         try:
@@ -488,7 +502,7 @@ class PortraitMixin(ClipperBase):
     def convert_to_portrait_blur_with_progress(self, input_path: str, output_path: str, progress_callback):
         width, height = (int(part) for part in getattr(self, "output_resolution", "720:1280").split(":"))
         blur_settings = getattr(self, "blur_background_settings", {}) or {}
-        zoom = max(1.0, min(2.0, float(blur_settings.get("zoom", 1.08) or 1.08)))
+        zoom = max(1.0, min(3.0, float(blur_settings.get("zoom", 1.08) or 1.08)))
         strength = max(0, min(100, int(blur_settings.get("strength", 30) or 30)))
         scale = max(0.5, min(1.5, float(blur_settings.get("scale", 1.0) or 1.0)))
         foreground_width = int(width * scale)
