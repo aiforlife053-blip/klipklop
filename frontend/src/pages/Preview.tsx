@@ -10,6 +10,7 @@ export default function Preview() {
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [showBlockerModal, setShowBlockerModal] = useState(false);
+  const [activeTab, setActiveTab] = useState<'watermark' | 'credit' | 'hook' | 'subtitle' | 'blur'>('hook');
   const lastSavedSettingsRef = useRef<string>('');
   const draggingRef = useRef<string | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);

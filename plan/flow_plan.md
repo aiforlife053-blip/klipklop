@@ -44,6 +44,17 @@ Recommended mode:
 - compute_type: `int8`
 - word timestamps: off for this stage
 
+Recommended audio format:
+- Use MP3 mono 16kHz at 32kbps for the audio-only fallback.
+- This is small, simple, and compatible with faster-whisper.
+- Approx size: 60 minutes ≈ 14 MB, 120 minutes ≈ 28 MB.
+- Avoid Opus unless needed; it is smaller but may require extra conversion before Whisper.
+
+Target FFmpeg profile:
+```bash
+ffmpeg -i input -vn -ac 1 -ar 16000 -b:a 32k audio.mp3
+```
+
 ### 3. AI highlight selection
 
 Input:

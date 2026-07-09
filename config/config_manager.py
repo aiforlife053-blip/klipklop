@@ -70,6 +70,16 @@ class ConfigManager:
                 if key not in config:
                     config[key] = value
                     dirty = True
+            hook_maker = config.setdefault("ai_providers", {}).setdefault("hook_maker", {})
+            if hook_maker.get("voice") in {None, "", "Fenrir"}:
+                hook_maker["voice"] = "id-ID-ArdiNeural"
+                dirty = True
+            if hook_maker.get("model") == "gemini-3.1-flash-tts-preview":
+                hook_maker["model"] = ""
+                dirty = True
+            if hook_maker.get("api_key"):
+                hook_maker["api_key"] = ""
+                dirty = True
             if not config.get("_blur_default_migrated"):
                 config["landscape_blur"] = True
                 config["_blur_default_migrated"] = True
@@ -146,8 +156,8 @@ class ConfigManager:
             },
             "hook_maker": {
                 "api_key": "",
-                "model": "gemini-3.1-flash-tts-preview",
-                "voice": "Fenrir"
+                "model": "",
+                "voice": "id-ID-ArdiNeural"
             }
         }
     
@@ -174,9 +184,9 @@ class ConfigManager:
                 "model": model
             },
             "hook_maker": {
-                "api_key": api_key,
-                "model": "gemini-3.1-flash-tts-preview",
-                "voice": "Fenrir"
+                "api_key": "",
+                "model": "",
+                "voice": "id-ID-ArdiNeural"
             }
         }
         

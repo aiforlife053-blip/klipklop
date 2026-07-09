@@ -11,6 +11,8 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from openai import OpenAI
+
 from clipper_core import AutoClipperCore
 from config.config_manager import ConfigManager
 from utils.helpers import get_app_dir, get_ffmpeg_path, get_ytdlp_path
@@ -59,9 +61,8 @@ class WebJobManager:
         if self._has_staged_outputs():
             return {"status": "busy", "message": "Simpan atau hapus klip di Beranda sebelum generate baru"}
             
-        # Dynamically save settings from payload to ensure 100% sync with UI
         if "settings" in payload and isinstance(payload["settings"], dict):
-            self.save_settings(payload["settings"])
+            self.save_settings(self._settings_from_start_payload(payload))
             
         requested_clips = self._as_int(payload.get("num_clips"), 1)
         num_clips = requested_clips if requested_clips in {1, 3, 5} else 1
@@ -106,6 +107,17 @@ class WebJobManager:
             self._job_start_time = datetime.now()
         return {"status": "started"}
 
+    def _settings_from_start_payload(self, payload):
+        start_settings = dict(payload["settings"])
+        if "video_quality" in payload:
+            start_settings["video_quality"] = payload["video_quality"]
+        if "landscape_blur" in payload:
+            start_settings["landscape_blur"] = payload["landscape_blur"]
+            blur_settings = dict(start_settings.get("blur_background") or {})
+            blur_settings["enabled"] = payload["landscape_blur"]
+            start_settings["blur_background"] = blur_settings
+        return start_settings
+
     def status(self):
         return {
             "status": self._status,
@@ -116,13 +128,14 @@ class WebJobManager:
         }
 
     def stop(self):
-        self._cancel_requested = True
-        self._status = "idle"
-        self._message = "Stopped"
-        self._progress = 0.0
-        self._error = ""
-        self._add_log("Stop requested")
-        self._add_log("Stopped", "Done")
+        with self._lock:
+            self._cancel_requested = True
+            self._status = "idle"
+            self._message = "Stopped"
+            self._progress = 0.0
+            self._error = ""
+            self._add_log("Stop requested")
+            self._add_log("Stopped", "Done")
         return {"status": "idle", "message": "Stopped"}
 
     def clear_logs(self):
@@ -179,7 +192,7 @@ class WebJobManager:
             "hook_key_saved": hook_key_saved,
             "model": model,
             "provider": {"base_url": base_url, "api_key": "", "model": model},
-            "subtitle_language": "id",
+            "subtitle_language": str(cfg.get("subtitle_language", "id")),
             "video_quality": str(cfg.get("video_quality", "720")),
             "landscape_blur": bool(cfg.get("landscape_blur", False)),
             "subtitle_engine": cfg.get("subtitle_engine", "local"),
@@ -192,12 +205,38 @@ class WebJobManager:
             "hook_style": cfg.get("hook_style", {"enabled": True, "font_size": 0.054, "text_color": "#0033ff", "background_color": "#ffffff", "corner_radius": 28, "duration": 5.0, "position_x": 0.5, "position_y": 0.2}),
             "blur_background": cfg.get("blur_background", {"enabled": True, "scale": 1.0, "zoom": 1.08, "strength": 30}),
             "output_dir": cfg.get("output_dir", str(self.output_dir)),
-            "parallel_workers": int(cfg.get("parallel_workers", 3)),
+            "parallel_workers": int(cfg.get("parallel_workers", 1)),
             "cookie_exists": cookies["exists"],
             "cookie_path": cookies["path"],
             "cookies_path": cookies["path"],
             "cookies": cookies,
         }
+
+    def check_ai_provider(self, payload):
+        if not isinstance(payload, dict):
+            return {"status": "error", "message": "Invalid payload"}
+        provider_payload = payload.get("provider", {}) if isinstance(payload.get("provider", {}), dict) else {}
+        base_url = str(payload.get("base_url", provider_payload.get("base_url", ""))).strip().rstrip("/")
+        api_key = str(payload.get("api_key", provider_payload.get("api_key", ""))).strip()
+        model = str(payload.get("model", provider_payload.get("model", ""))).strip()
+        if not base_url:
+            return {"status": "error", "message": "Base URL kosong"}
+        if not api_key:
+            return {"status": "error", "message": "API key kosong"}
+        if not model:
+            return {"status": "error", "message": "Model kosong"}
+        try:
+            client = OpenAI(api_key=api_key, base_url=base_url, timeout=20.0)
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": "Reply OK only."}],
+                max_tokens=4,
+                temperature=0,
+            )
+            content = (response.choices[0].message.content or "").strip() if response and response.choices else ""
+            return {"status": "ok", "message": "API key, base URL, dan model valid", "base_url": base_url, "model": model, "response": content[:80]}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "base_url": base_url, "model": model}
 
     def save_settings(self, payload):
         if not isinstance(payload, dict):
@@ -211,10 +250,10 @@ class WebJobManager:
         caption_base_url = str(payload.get("caption_base_url", cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("base_url", "https://api.openai.com/v1"))).strip() or "https://api.openai.com/v1"
         caption_api_key = str(payload.get("caption_api_key", "")).strip()
         caption_model = str(payload.get("caption_model", cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("model", "whisper-1"))).strip() or "whisper-1"
-        hook_model = str(payload.get("hook_model", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("model", "gemini-3.1-flash-tts-preview"))).strip() or "gemini-3.1-flash-tts-preview"
-        hook_voice = str(payload.get("hook_voice", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("voice", "Fenrir"))).strip() or "Fenrir"
+        hook_model = str(payload.get("hook_model", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("model", ""))).strip()
+        hook_voice = str(payload.get("hook_voice", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("voice", "id-ID-ArdiNeural"))).strip() or "id-ID-ArdiNeural"
         output_dir = str(payload.get("output_dir", cfg_mgr.config.get("output_dir", str(self.output_dir)))).strip() or str(self.output_dir)
-        subtitle_language = "id"
+        subtitle_language = str(payload.get("subtitle_language", cfg_mgr.config.get("subtitle_language", "id")) or "id")[:10]
         video_quality = str(payload.get("video_quality", cfg_mgr.config.get("video_quality", "720")) or "720")
         landscape_blur = self._as_bool(payload.get("landscape_blur", cfg_mgr.config.get("landscape_blur", True)), True)
         subtitle_engine = "local"
@@ -301,10 +340,7 @@ class WebJobManager:
         hook_current = providers.setdefault("hook_maker", {})
         hook_current["model"] = hook_model
         hook_current["voice"] = hook_voice
-        if clear_api_key:
-            hook_current["api_key"] = ""
-        elif api_key:
-            hook_current["api_key"] = api_key
+        hook_current["api_key"] = ""
         cfg_mgr.config["base_url"] = base_url
         cfg_mgr.config["model"] = model
         if clear_api_key:
@@ -324,7 +360,7 @@ class WebJobManager:
         cfg_mgr.config["subtitle"] = subtitle_cfg
         cfg_mgr.config["blur_background"] = blur_background
         cfg_mgr.config["output_dir"] = output_dir
-        parallel_workers = max(1, min(8, self._as_int(payload.get("parallel_workers", cfg_mgr.config.get("parallel_workers", 2)), 2)))
+        parallel_workers = max(1, min(8, self._as_int(payload.get("parallel_workers", cfg_mgr.config.get("parallel_workers", 1)), 1)))
         cfg_mgr.config["parallel_workers"] = parallel_workers
         cfg_mgr.save()
         settings = self.get_settings()
@@ -478,7 +514,7 @@ class WebJobManager:
                 "position": cfg.get("subtitle_position", "auto")
             }
             ai_providers = dict(cfg.get("ai_providers") or {})
-            ai_providers["parallel_workers"] = int(cfg.get("parallel_workers", 2))
+            ai_providers["parallel_workers"] = int(cfg.get("parallel_workers", 1))
             core = AutoClipperCore(
                 client=None,
                 ffmpeg_path=get_ffmpeg_path(),
@@ -547,8 +583,9 @@ class WebJobManager:
                 self._error = str(exc)
                 self._add_log(str(exc), "Error")
         finally:
-            self.thread = None
-            self._job_start_time = None
+            with self._lock:
+                self.thread = None
+                self._job_start_time = None
 
     def _config(self):
         return ConfigManager(self.config_file, self.output_dir)

@@ -6,7 +6,6 @@ import mimetypes
 import os
 import subprocess
 import sys
-import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -116,6 +115,9 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/settings":
             self._json(MANAGER.save_settings(payload))
+        elif parsed.path == "/api/check-api-key":
+            result = MANAGER.check_ai_provider(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/cookies":
             self._json(MANAGER.save_cookies(payload.get("content", payload.get("cookie_text", ""))))
         elif parsed.path == "/api/watermark/upload":

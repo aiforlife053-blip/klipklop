@@ -6,6 +6,7 @@ import sys
 import tempfile
 import threading
 import time
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 
@@ -58,6 +59,7 @@ class FfmpegMixin(ClipperBase):
                 return ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28']
             return ['-c:v', 'libx264', '-preset', 'fast', '-crf', '18']
 
+    @classmethod
     def _is_gpu_encoder_error(cls, stderr: str) -> bool:
         """Heuristically detect FFmpeg failures caused by GPU encoder options."""
         if not stderr:
@@ -81,6 +83,7 @@ class FfmpegMixin(ClipperBase):
         mentions_failure = any(p in text for p in failure_phrases)
         return mentions_hw and mentions_failure
 
+    @classmethod
     def _swap_cmd_to_cpu_encoder(cls, cmd: list) -> list:
         """Return a copy of cmd with any GPU encoder block replaced by CPU args.
 
@@ -248,18 +251,54 @@ class FfmpegMixin(ClipperBase):
         # Fallback: let FFmpeg use fontconfig default
         return "font='Arial':"
 
+    def _run_ffmpeg_progress_once(self, cmd: list, duration: float, progress_callback):
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, creationflags=SUBPROCESS_FLAGS)
+        output = deque(maxlen=200)
+        try:
+            for line in proc.stdout or []:
+                output.append(line)
+                if self.is_cancelled():
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                    raise InterruptedError("Stopped")
+                text = line.strip()
+                value = None
+                if text.startswith("out_time_ms="):
+                    try:
+                        value = float(text.split("=", 1)[1]) / 1_000_000
+                    except ValueError:
+                        value = None
+                elif text.startswith("out_time="):
+                    match = re.search(r"(\d+):(\d+):(\d+(?:\.\d+)?)", text)
+                    if match:
+                        h, m, s = match.groups()
+                        value = int(h) * 3600 + int(m) * 60 + float(s)
+                if value is not None and duration > 0:
+                    progress_callback(max(0.0, min(0.99, value / duration)))
+            return subprocess.CompletedProcess(cmd, proc.wait(), "".join(output), "".join(output))
+        except Exception:
+            if proc.poll() is None:
+                proc.kill()
+            raise
+
     def run_ffmpeg_with_progress(self, cmd: list, duration: float, progress_callback):
         """Run ffmpeg command and parse progress"""
         debug_log(f"Running ffmpeg command: {' '.join(cmd[:5])}...")
         debug_log(f"Expected duration: {duration}s")
         
-        # Just run ffmpeg normally without progress parsing for now
-        # Progress parsing from ffmpeg is complex due to carriage returns
-        # _run_ffmpeg_subprocess auto-falls-back to libx264 if a GPU encoder
-        # error is detected (e.g. invalid preset on h264_qsv).
-        result = self._run_ffmpeg_subprocess(cmd)
+        if "-progress" in cmd and "pipe:1" in cmd:
+            result = self._run_ffmpeg_progress_once(cmd, duration, progress_callback)
+            if result.returncode != 0 and self._is_gpu_encoder_error(result.stderr or result.stdout or ""):
+                fallback_cmd = self._swap_cmd_to_cpu_encoder(cmd)
+                if fallback_cmd != list(cmd):
+                    self._disable_gpu_acceleration_runtime("FFmpeg GPU progress command failed")
+                    result = self._run_ffmpeg_progress_once(fallback_cmd, duration, progress_callback)
+        else:
+            result = self._run_ffmpeg_subprocess(cmd)
         
-        # Set to 100% when done
         progress_callback(1.0)
         debug_log(f"FFmpeg completed with return code: {result.returncode}")
         

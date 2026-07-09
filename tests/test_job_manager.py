@@ -27,6 +27,13 @@ def test_rejects_non_dict_start_payload(tmp_path):
     assert result["status"] == "error"
 
 
+def test_check_ai_provider_requires_fields(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    result = manager.check_ai_provider({"base_url": "", "api_key": "", "model": ""})
+    assert result["status"] == "error"
+    assert "Base URL" in result["message"]
+
+
 def test_api_caption_setting_is_ignored_for_local_default(tmp_path):
     class Manager(mod.WebJobManager):
         def _run(self, url, num_clips, add_captions, add_hook, subtitle_language, instruction):
@@ -347,13 +354,53 @@ def test_ass_subtitle_groups_words_in_dynamic_chunks(tmp_path):
     assert "w4 w5 w6" in text
 
 
+
+def test_prefilter_transcript_keeps_viral_signals(tmp_path):
+    core = object.__new__(AutoClipperCore)
+    transcript = "\n".join(
+        [f"[00:00:{i % 60:02d},000 - 00:00:{i % 60:02d},500] oke nah filler biasa {i}" for i in range(500)]
+        + ["[00:10:00,000 - 00:10:10,000] gue hampir bangkrut karena masalah uang besar"]
+    )
+    filtered = core._prefilter_transcript_for_ai(transcript, max_chars=2000)
+    assert len(filtered) <= 2000
+    assert "bangkrut" in filtered
+
+
+def test_short_ai_highlight_is_expanded(tmp_path):
+    class Choice:
+        message = SimpleNamespace(content=json.dumps([{
+            "start_time": "00:01:00,000",
+            "end_time": "00:01:04,000",
+            "title": "Short",
+            "description": "Desc",
+            "virality_score": 8,
+        }]))
+
+    class Chat:
+        class completions:
+            @staticmethod
+            def create(**kwargs):
+                return SimpleNamespace(choices=[Choice()], usage=None)
+
+    core = object.__new__(AutoClipperCore)
+    core.model = "test-model"
+    core.temperature = 0
+    core.system_prompt = core.get_default_prompt()
+    core.highlight_client = SimpleNamespace(base_url="test", chat=Chat())
+    core.log = lambda *_args, **_kwargs: None
+    core.report_tokens = lambda *_args, **_kwargs: None
+    result = core._find_highlights_single("[00:01:00,000 - 00:01:04,000] halo", {"title": "video"}, 1, allow_chunking=False)
+    assert result[0]["duration_seconds"] >= 10
+    assert result[0]["hook_text"] == "Short"
+
+
 class NoSubtitleCore(AutoClipperCore):
     def __init__(self):
         self.output_dir = Path("out")
         self.temp_dir = self.output_dir / "_temp"
         self.cache_dir = self.output_dir / "cache"
         self.parallel_workers = 1
-        self.use_download_sections = False
+        self.use_download_sections = True
 
     def set_progress(self, stage, progress):
         pass
@@ -364,13 +411,17 @@ class NoSubtitleCore(AutoClipperCore):
     def download_subtitle_only(self, url):
         return None, {"title": "video"}
 
-    def download_video_only(self, url):
-        self.downloaded = getattr(self, "downloaded", 0) + 1
-        return "source.mp4"
+    def download_audio_only(self, url):
+        self.downloaded_audio = getattr(self, "downloaded_audio", 0) + 1
+        return "source_audio.mp3"
 
-    def transcribe_full_video_local(self, source_path):
-        self.transcribed = source_path
+    def transcribe_audio_local(self, audio_path):
+        self.transcribed = audio_path
         return "[00:00:00,000 - 00:00:03,000] halo indonesia"
+
+    def download_video_section(self, url, start_time, end_time, output_path):
+        self.downloaded_sections = getattr(self, "downloaded_sections", 0) + 1
+        return "section.mp4"
 
     def find_highlights(self, transcript, video_info, num_clips):
         self.highlight_transcript = transcript
@@ -386,13 +437,14 @@ class NoSubtitleCore(AutoClipperCore):
         pass
 
 
-def test_process_falls_back_to_local_whisper_when_indonesian_subtitle_missing(tmp_path):
+def test_process_falls_back_to_audio_only_whisper_then_section_download(tmp_path):
     core = NoSubtitleCore()
     core.process("https://www.youtube.com/watch?v=abc", num_clips=1)
-    assert core.transcribed == "source.mp4"
+    assert core.transcribed == "source_audio.mp3"
     assert core.highlight_transcript == "[00:00:00,000 - 00:00:03,000] halo indonesia"
-    assert core.downloaded == 1
-    assert core.processed == "source.mp4"
+    assert core.downloaded_audio == 1
+    assert core.downloaded_sections == 1
+    assert core.processed == "section.mp4"
 
 
 if __name__ == "__main__":

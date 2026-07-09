@@ -75,7 +75,7 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
             self.highlight_client = OpenAI(
                 api_key=hf_config.get("api_key", ""),
                 base_url=hf_config.get("base_url", "https://api.openai.com/v1"),
-                timeout=30.0,
+                timeout=float(hf_config.get("timeout", 180.0) or 180.0),
             )
             self.model = hf_config.get("model", model)
             cm_config = self.ai_providers.get("caption_maker", {})
@@ -87,17 +87,17 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
             self.whisper_model = cm_config.get("model", "whisper-1")
             tts_config = self.ai_providers.get("hook_maker", {})
             self.tts_client = None
-            self.tts_api_key = tts_config.get("api_key") or hf_config.get("api_key") or ""
-            self.tts_model = tts_config.get("model", "gemini-3.1-flash-tts-preview")
-            self.tts_voice = tts_config.get("voice", "Fenrir")
+            self.tts_api_key = ""
+            self.tts_model = ""
+            self.tts_voice = tts_config.get("voice", "id-ID-ArdiNeural")
         else:
             self.highlight_client = client
             self.caption_client = client
             self.tts_client = None
             self.tts_api_key = ""
             self.model = model
-            self.tts_model = "gemini-3.1-flash-tts-preview"
-            self.tts_voice = "Fenrir"
+            self.tts_model = ""
+            self.tts_voice = "id-ID-ArdiNeural"
             self.whisper_model = "whisper-1"
 
         self.client = client
@@ -155,16 +155,12 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         self.temp_dir = self.output_dir / "_temp"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.cache_dir = Path(os.environ.get("KLIPKLOP_CACHE_DIR") or self.output_dir.parent / "cache")
-        # Parallel clip processing: default 2 workers (safe for 2-CPU VPS).
-        # Override via config 'parallel_workers' or env KLIPKLOP_PARALLEL_WORKERS.
-        # Set to 1 to disable parallelism entirely.
         _env_workers = os.environ.get("KLIPKLOP_PARALLEL_WORKERS")
         _cfg_workers = (self.ai_providers or {}).get("parallel_workers")
         try:
-            self.parallel_workers = int(_cfg_workers or _env_workers or 3)
+            self.parallel_workers = int(_cfg_workers or _env_workers or 1)
         except (TypeError, ValueError):
-            self.parallel_workers = 3
-        self.parallel_workers = max(1, self.parallel_workers)
+            self.parallel_workers = 1
         self.parallel_workers = max(1, self.parallel_workers)
 
     def _video_cache_dir(self, url: str) -> Path:
@@ -226,11 +222,16 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
             self.channel_name = video_info.get("channel", "") if video_info else ""
             if self.is_cancelled():
                 return
-            source_path = ""
             if not srt_path:
-                self.set_progress("Subtitle tidak ditemukan, download video untuk transkripsi lokal...", 0.18)
-                source_path = self.download_video_only(url)
-                transcript = self.transcribe_full_video_local(source_path)
+                self.set_progress("Subtitle tidak ditemukan, download audio-only untuk transkripsi lokal...", 0.18)
+                audio_path = self.download_audio_only(url)
+                try:
+                    transcript = self.transcribe_audio_local(audio_path)
+                finally:
+                    try:
+                        Path(audio_path).unlink(missing_ok=True)
+                    except Exception:
+                        pass
             else:
                 transcript = self.parse_srt(srt_path)
             self.set_progress("Finding highlights...", 0.3)
@@ -247,51 +248,61 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
             if not highlights:
                 raise Exception("No valid highlights found!")
             total_clips = len(highlights)
-            if use_sections and srt_path:
+            if use_sections:
                 self._process_clips_with_sections(url, highlights, total_clips, add_captions, add_hook)
             else:
-                if not source_path:
-                    self.set_progress("Downloading source video/audio once...", 0.32)
-                    source_path = self.download_video_only(url)
-                self._process_clips_parallel(source_path, highlights, total_clips, add_captions, add_hook, pre_cut=False)
+                raise Exception("Section-only flow required: full video download is disabled.")
             self.set_progress("Complete!", 1.0)
             self.log(f"\n\u2705 Created {total_clips} clips in: {self.output_dir}")
         finally:
             self.cleanup()
 
     def _process_clips_with_sections(self, url, highlights, total_clips, add_captions, add_hook):
-        """Download each section sequentially (yt-dlp is single-threaded), then
-        process all clips in parallel using ThreadPoolExecutor.
+        workers = self.parallel_workers
+        self.log(f"  Processing {total_clips} clip(s) [pipeline, {workers} worker(s)]")
 
-        Strategy:
-          1. Download all sections sequentially (can't parallelise yt-dlp safely).
-          2. Kick off process_clip for all downloaded sections in parallel.
-        """
-        # Phase 1: download sections sequentially
-        sections = []  # list of (clip_source, highlight, index)
-        for i, highlight in enumerate(highlights, 1):
-            if self.is_cancelled():
-                return
-            self.set_progress(
-                f"Clip {i}/{total_clips}: Downloading section...",
-                0.32 + (0.08 * (i - 1) / total_clips),
-            )
-            section_path = str(self.temp_dir / f"section_{i:03d}.mp4")
-            clip_source = self.download_video_section(
-                url, highlight["start_time"], highlight["end_time"], section_path
-            )
-            sections.append((clip_source, highlight, i))
+        def _do_clip(clip_source, highlight, idx):
+            try:
+                if not self.is_cancelled():
+                    self.process_clip(
+                        clip_source, highlight, idx, total_clips,
+                        add_captions=add_captions, add_hook=add_hook, pre_cut=True,
+                    )
+            finally:
+                try:
+                    Path(clip_source).unlink(missing_ok=True)
+                except Exception:
+                    pass
 
-        # Phase 2: process (encode + caption burn) in parallel
-        self._process_clips_parallel(
-            source_path=None,
-            highlights=highlights,
-            total_clips=total_clips,
-            add_captions=add_captions,
-            add_hook=add_hook,
-            pre_cut=True,
-            sections=sections,
-        )
+        if workers == 1:
+            for i, highlight in enumerate(highlights, 1):
+                if self.is_cancelled():
+                    return
+                self.set_progress(f"Clip {i}/{total_clips}: Downloading section...", 0.32 + (0.08 * (i - 1) / total_clips))
+                section_path = str(self.temp_dir / f"section_{i:03d}.mp4")
+                clip_source = self.download_video_section(url, highlight["start_time"], highlight["end_time"], section_path)
+                _do_clip(clip_source, highlight, i)
+            return
+
+        futures = {}
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="clip-worker") as executor:
+            for i, highlight in enumerate(highlights, 1):
+                if self.is_cancelled():
+                    break
+                self.set_progress(f"Clip {i}/{total_clips}: Downloading section...", 0.32 + (0.08 * (i - 1) / total_clips))
+                section_path = str(self.temp_dir / f"section_{i:03d}.mp4")
+                clip_source = self.download_video_section(url, highlight["start_time"], highlight["end_time"], section_path)
+                futures[executor.submit(_do_clip, clip_source, highlight, i)] = i
+            for future in as_completed(futures):
+                clip_idx = futures[future]
+                try:
+                    future.result()
+                except Exception as exc:
+                    self.log(f"  Clip {clip_idx} failed: {exc}")
+                    raise
+                if self.is_cancelled():
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    break
 
     def _process_clips_parallel(
         self,

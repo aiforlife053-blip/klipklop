@@ -18,6 +18,36 @@ export default function Dashboard() {
   const [deleteConfirm, setDeleteConfirm] = useState<any>(null);
   const [stopConfirm, setStopConfirm] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (settings?.video_quality) setVideoQuality(String(settings.video_quality));
+    if (settings?.blur_background?.enabled !== undefined) setLandscapeBlur(Boolean(settings.blur_background.enabled));
+  }, [settings?.video_quality, settings?.blur_background?.enabled]);
+
+  const buildStartPayload = () => {
+    const syncedSettings = {
+      ...settings,
+      video_quality: videoQuality,
+      landscape_blur: landscapeBlur,
+      blur_background: {
+        ...(settings?.blur_background || {}),
+        enabled: landscapeBlur,
+      },
+    };
+    return {
+      url: youtubeUrl.trim(),
+      num_clips: numClips,
+      video_quality: videoQuality,
+      add_captions: syncedSettings?.subtitle?.enabled ?? true,
+      add_hook: syncedSettings?.hook_style?.enabled ?? false,
+      screen_size: '9:16',
+      subtitle_language: syncedSettings?.subtitle_language || 'id',
+      landscape_blur: landscapeBlur,
+      source_credit: syncedSettings?.credit_watermark?.enabled ?? true,
+      instruction: instruction,
+      settings: syncedSettings,
+    };
+  };
   const [toastMessage, setToastMessage] = useState('');
 
   // Real state
@@ -132,21 +162,7 @@ export default function Dashboard() {
     try {
       const result = await api('/api/start', {
         method: 'POST',
-        body: JSON.stringify({
-          url: youtubeUrl.trim(),
-          num_clips: numClips,
-          video_quality: videoQuality,
-          add_captions: settings?.subtitle?.enabled ?? true,
-          enable_captions: settings?.subtitle?.enabled ?? true,
-          add_hook: settings?.hook_style?.enabled ?? false,
-          hook_mode: settings?.hook_style?.enabled ?? false,
-          screen_size: '9:16',
-          subtitle_language: settings?.subtitle_language || 'id',
-          landscape_blur: landscapeBlur,
-          source_credit: settings?.credit_watermark?.enabled ?? true,
-          instruction: instruction,
-          settings: settings,
-        }),
+        body: JSON.stringify(buildStartPayload()),
       });
       if (result.status === 'error') {
         setError(result.message || 'Gagal memulai proses.');
@@ -286,134 +302,75 @@ export default function Dashboard() {
             </p>
           </div>
 
-          {/* Professional Loading Animation — tampil saat running, stopping, complete, DAN idle+ada klip */}
+          {/* Loading state — thumbnail kiri, progress kanan */}
           {(currentStatus === 'running' || currentStatus === 'stopping' || (currentStatus === 'complete' && clips.length > 0) || (currentStatus === 'idle' && clips.length > 0)) && (() => {
             const isComplete = currentStatus === 'complete' || (currentStatus === 'idle' && clips.length > 0);
             const displayProgress = isComplete ? 1 : currentProgress;
             return (
-              <div className="flex flex-col items-center justify-center py-2 gap-3">
-                {/* Circular progress */}
-                <div className="relative w-28 h-28">
-                  {/* Outer glow ring */}
-                  <div className={`absolute inset-0 rounded-full ${isComplete ? 'bg-gradient-to-tr from-emerald-400/20 to-emerald-600/10' : 'bg-gradient-to-tr from-orange-400/20 to-orange-600/10 animate-pulse'}`} />
-                  <svg className="w-full h-full -rotate-90" viewBox="0 0 144 144">
-                    {/* Track */}
-                    <circle cx="72" cy="72" r="60" fill="none" stroke="#f1f5f9" strokeWidth="10" />
-                    {/* Progress arc */}
-                    <circle
-                      cx="72" cy="72" r="60"
-                      fill="none"
-                      stroke={isComplete ? 'url(#completeGrad)' : 'url(#progressGrad)'}
-                      strokeWidth="10"
-                      strokeLinecap="round"
-                      strokeDasharray={`${2 * Math.PI * 60}`}
-                      strokeDashoffset={`${2 * Math.PI * 60 * (1 - displayProgress)}`}
-                      style={{ transition: 'stroke-dashoffset 0.6s cubic-bezier(0.4,0,0.2,1)' }}
-                    />
-                    <defs>
-                      <linearGradient id="progressGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                        <stop offset="0%" stopColor="#f97316" />
-                        <stop offset="100%" stopColor="#ea580c" />
-                      </linearGradient>
-                      <linearGradient id="completeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                        <stop offset="0%" stopColor="#10b981" />
-                        <stop offset="100%" stopColor="#059669" />
-                      </linearGradient>
-                    </defs>
-                  </svg>
-                  {/* Center text */}
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    {isComplete ? (
-                      <span className="text-[32px]">✅</span>
+              <div className="w-full bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-4">
+                <div className="flex items-stretch gap-0">
+                  {/* Thumbnail */}
+                  <div className="relative w-36 shrink-0 bg-slate-900">
+                    {getYoutubeId(youtubeUrl) ? (
+                      <img
+                        src={videoMeta?.thumbnail_url || `https://i.ytimg.com/vi/${getYoutubeId(youtubeUrl)}/maxresdefault.jpg`}
+                        alt="Thumbnail"
+                        className="w-full h-full object-cover opacity-90"
+                      />
                     ) : (
-                      <span className="text-[22px] font-black text-slate-900 leading-none tabular-nums">
-                        {Math.round(displayProgress * 100)}<span className="text-[14px] font-bold text-orange-500">%</span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Step label */}
-                <div className="text-center space-y-0.5">
-                  <p className={`text-[13px] font-semibold ${isComplete ? 'text-emerald-600' : 'text-slate-800'}`}>
-                    {isComplete
-                      ? `🎉 ${clips.length} klip berhasil dibuat!`
-                      : currentStatus === 'stopping'
-                      ? '⏹ Menghentikan proses...'
-                      : (jobStatus?.message || 'Memproses video...')}
-                  </p>
-                  <p className="text-[11px] text-slate-400">
-                    {isComplete ? 'Klip siap di bawah. Simpan atau download.' : 'Harap tunggu, jangan tutup halaman ini'}
-                  </p>
-                </div>
-
-                {/* Step indicators */}
-                <div className="flex items-center gap-2">
-                  {[
-                    { label: 'Download', pct: 0.2 },
-                    { label: 'Analisis AI', pct: 0.55 },
-                    { label: 'Render', pct: 0.85 },
-                    { label: 'Selesai', pct: 1 },
-                  ].map((step, i) => {
-                    const done = displayProgress >= step.pct;
-                    const active = !done && (i === 0 ? true : displayProgress >= [0, 0.2, 0.55, 0.85][i]);
-                    return (
-                      <div key={i} className="flex items-center gap-2">
-                        {i > 0 && <div className={`w-8 h-px transition-colors duration-500 ${displayProgress >= [0, 0.2, 0.55, 0.85][i] ? (isComplete ? 'bg-emerald-400' : 'bg-orange-400') : 'bg-slate-200'}`} />}
-                        <div className="flex flex-col items-center gap-1">
-                          <div className={`w-6 h-6 rounded-full flex items-center justify-center transition-all duration-500 ${
-                            done
-                              ? isComplete ? 'bg-emerald-500 shadow-md shadow-emerald-200' : 'bg-orange-500 shadow-md shadow-orange-200'
-                              : active ? 'bg-orange-100 border-2 border-orange-400 animate-pulse'
-                              : 'bg-slate-100 border border-slate-200'
-                          }`}>
-                            {done ? (
-                              <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"/></svg>
-                            ) : (
-                              <span className={`text-[9px] font-bold ${active ? 'text-orange-500' : 'text-slate-400'}`}>{i + 1}</span>
-                            )}
-                          </div>
-                          <span className={`text-[10px] font-semibold whitespace-nowrap ${
-                            done ? (isComplete ? 'text-emerald-500' : 'text-orange-500') : active ? 'text-slate-700' : 'text-slate-400'
-                          }`}>{step.label}</span>
-                        </div>
+                      <div className="w-full h-full min-h-[80px] flex items-center justify-center">
+                        <svg className="w-8 h-8 text-slate-600 opacity-30" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                       </div>
-                    );
-                  })}
-                </div>
+                    )}
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                      <div className="w-8 h-8 rounded-full bg-red-600/90 flex items-center justify-center shadow-lg">
+                        <svg className="w-3.5 h-3.5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                      </div>
+                    </div>
+                  </div>
 
-                {/* Skeleton saat masih loading / Klip asli saat complete */}
-                <div className="w-full grid gap-4 mt-1 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-                  {isComplete
-                    ? null  /* klip real ditampilkan di bawah blok ini */
-                    : videoMeta ? (
-                        <div className="rounded-xl overflow-hidden bg-white border border-slate-200 shadow-md w-full">
-                          <div className="relative w-full aspect-video bg-slate-900">
-                            <img src={videoMeta.thumbnail_url || `https://i.ytimg.com/vi/${getYoutubeId(youtubeUrl)}/maxresdefault.jpg`} alt="Thumbnail" className="w-full h-full object-cover opacity-90" />
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/10">
-                               <div className="w-10 h-10 rounded-full bg-red-600/90 flex items-center justify-center backdrop-blur-sm shadow-lg">
-                                 <svg className="w-4 h-4 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                               </div>
+                  {/* Info + progress */}
+                  <div className="flex-1 p-3 flex flex-col justify-between min-w-0">
+                    <div className="min-w-0">
+                      <h4 className="font-bold text-[13px] leading-snug line-clamp-1 text-slate-900">{videoMeta?.title || 'YouTube Video'}</h4>
+                      <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">{videoMeta?.author_name || 'YouTube Channel'}</p>
+                    </div>
+
+                    {/* Progress bar */}
+                    <div className="mt-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <p className={`text-[12px] font-semibold truncate mr-2 ${isComplete ? 'text-emerald-600' : 'text-slate-800'}`}>
+                          {isComplete ? `🎉 ${clips.length} klip berhasil dibuat!` : currentStatus === 'stopping' ? '⏹ Menghentikan...' : (jobStatus?.message || 'Memproses...')}
+                        </p>
+                        <span className="text-[12px] font-black text-slate-700 tabular-nums shrink-0">
+                          {Math.round(displayProgress * 100)}<span className="text-orange-500">%</span>
+                        </span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${isComplete ? 'bg-emerald-500' : 'bg-orange-500'}`}
+                          style={{ width: `${Math.round(displayProgress * 100)}%` }}
+                        />
+                      </div>
+                      {/* Steps */}
+                      <div className="flex items-center gap-1 mt-2">
+                        {[
+                          { label: 'Download', pct: 0.2 },
+                          { label: 'AI', pct: 0.55 },
+                          { label: 'Render', pct: 0.85 },
+                          { label: 'Selesai', pct: 1 },
+                        ].map((step, i) => {
+                          const done = displayProgress >= step.pct;
+                          return (
+                            <div key={i} className="flex items-center gap-1">
+                              {i > 0 && <div className={`w-4 h-px ${done ? (isComplete ? 'bg-emerald-400' : 'bg-orange-400') : 'bg-slate-200'}`} />}
+                              <span className={`text-[10px] font-semibold ${done ? (isComplete ? 'text-emerald-500' : 'text-orange-500') : 'text-slate-400'}`}>{step.label}</span>
                             </div>
-                          </div>
-                          <div className="p-3 text-left">
-                            <h4 className="font-bold text-[13px] leading-snug line-clamp-2 text-slate-900" title={videoMeta.title}>{videoMeta.title || 'YouTube Video'}</h4>
-                            <div className="flex items-center gap-1.5 mt-2 text-[11px] text-slate-500 font-medium">
-                              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-7.5c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
-                              {videoMeta.author_name || 'YouTube Channel'}
-                            </div>
-                          </div>
-                        </div>
-                      ) : Array.from({ length: numClips }).map((_, i) => (
-                        <div key={i} className="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
-                          <div className="w-full aspect-[4/3] bg-gradient-to-r from-slate-100 via-slate-50 to-slate-100 bg-[length:200%_100%] animate-[shimmer_1.5s_infinite]" />
-                          <div className="p-2.5 space-y-1.5">
-                            <div className="h-2.5 rounded-full bg-gradient-to-r from-slate-100 via-slate-50 to-slate-100 bg-[length:200%_100%] animate-[shimmer_1.5s_infinite]" />
-                            <div className="h-2 w-2/3 rounded-full bg-gradient-to-r from-slate-100 via-slate-50 to-slate-100 bg-[length:200%_100%] animate-[shimmer_1.5s_infinite]" />
-                          </div>
-                        </div>
-                      ))
-                  }
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             );
@@ -422,15 +379,15 @@ export default function Dashboard() {
 
           {/* Clips grid — muncul di bawah loading saat proses & setelah selesai */}
           {clips.length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 mt-1">
               {clips.map((clip, idx) => {
                 const clipId = clip.path;
                 const img = fmtImg(clip);
                 const duration = fmtDuration(clip);
                 const score = fmtScore(clip);
                 return (
-                  <div key={clipId || idx} className="relative bg-white rounded-xl p-3 shadow-sm border border-slate-100 flex flex-col group hover:shadow-md transition overflow-hidden pb-3.5">
-                    <div className="relative w-full aspect-[4/3] bg-slate-900 rounded-lg overflow-hidden shadow-inner group">
+                  <div key={clipId || idx} className="relative bg-white rounded-xl p-2 shadow-sm border border-slate-100 flex flex-col group hover:shadow-md transition overflow-hidden">
+                    <div className="relative w-full aspect-[9/16] bg-slate-900 rounded-lg overflow-hidden shadow-inner group">
                       {img ? (
                         <img src={img} alt="Thumbnail" className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition-transform duration-500" />
                       ) : (
@@ -453,13 +410,12 @@ export default function Dashboard() {
                         </div>
                       )}
                     </div>
-                    <div className="mt-2 text-left flex-1 flex flex-col">
-                      <h4 className="font-bold text-[12px] leading-snug line-clamp-1 text-slate-900">{clip.title || clip.name}</h4>
-                      <p className="text-[11px] text-slate-500 line-clamp-1 mt-1">{clip.description}</p>
+                    <div className="mt-1.5 text-left flex-1 flex flex-col">
+                      <h4 className="font-bold text-[11px] leading-snug line-clamp-2 text-slate-900">{clip.title || clip.name}</h4>
                     </div>
                     <button 
                       onClick={() => setShowDetailModal(clip)}
-                      className="w-full mt-2 py-1.5 border border-slate-200 rounded-lg text-[11px] font-semibold text-slate-700 hover:bg-slate-50 transition"
+                      className="w-full mt-1.5 py-1 border border-slate-200 rounded-lg text-[10px] font-semibold text-slate-700 hover:bg-slate-50 transition"
                     >
                       Lihat detail
                     </button>
@@ -616,22 +572,7 @@ export default function Dashboard() {
             </div>
             <div className="p-4 bg-slate-900 overflow-auto max-h-[60vh] text-left">
               <pre className="text-[12px] text-emerald-400 font-mono whitespace-pre-wrap">
-                {JSON.stringify({
-                  settings: settings,
-                  start: {
-                    url: youtubeUrl,
-                    num_clips: numClips,
-                    add_captions: settings.subtitle?.enabled ?? true,
-                    enable_captions: settings.subtitle?.enabled ?? true,
-                    add_hook: settings.hook_style?.enabled ?? false,
-                    hook_mode: settings.hook_style?.enabled ?? false,
-                    screen_size: "9:16",
-                    subtitle_language: settings.subtitle_language || "id",
-                    landscape_blur: landscapeBlur,
-                    source_credit: settings.credit_watermark?.enabled ?? true,
-                    instruction: instruction
-                  }
-                }, null, 2)}
+                {JSON.stringify(buildStartPayload(), null, 2)}
               </pre>
             </div>
           </div>

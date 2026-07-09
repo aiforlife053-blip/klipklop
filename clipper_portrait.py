@@ -1,21 +1,12 @@
-import json
 import os
-import re
-import subprocess
 import sys
 import tempfile
-import threading
 import time
-from datetime import datetime
-from pathlib import Path
 
 import cv2
 import numpy as np
-from openai import APIConnectionError, APIError, APIStatusError, RateLimitError
 
-from clipper_shared import SUBPROCESS_FLAGS, SubtitleNotFoundError, YTDLP_MODULE_AVAILABLE, _hex_to_rgb, yt_dlp
 from clipper_base import ClipperBase
-from utils.helpers import get_deno_path, get_ffmpeg_path, is_ytdlp_module_available
 from utils.logger import debug_log
 
 
@@ -485,6 +476,15 @@ class PortraitMixin(ClipperBase):
         finally:
             cap.release()
 
+    def _video_duration(self, input_path: str) -> float:
+        cap = cv2.VideoCapture(input_path)
+        try:
+            fps = cap.get(cv2.CAP_PROP_FPS) or 0
+            frames = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+            return max(1.0, frames / fps) if fps > 0 else 60.0
+        finally:
+            cap.release()
+
     def convert_to_portrait_blur_with_progress(self, input_path: str, output_path: str, progress_callback):
         width, height = (int(part) for part in getattr(self, "output_resolution", "720:1280").split(":"))
         blur_settings = getattr(self, "blur_background_settings", {}) or {}
@@ -505,33 +505,29 @@ class PortraitMixin(ClipperBase):
             "-y",
             "-i", input_path,
             "-filter_complex", filter_complex,
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "23",
+            *self.get_video_encoder_args(),
             "-c:a", "copy",
+            "-progress", "pipe:1",
             output_path,
         ]
-        result = self._run_ffmpeg_subprocess(cmd)
-        if result.returncode != 0:
-            raise Exception(f"Blur portrait failed: {result.stderr}")
-        progress_callback(1.0)
+        self.run_ffmpeg_with_progress(cmd, self._video_duration(input_path), progress_callback)
+        if not os.path.exists(output_path):
+            raise Exception("Blur portrait failed: output file not found")
 
     def convert_to_portrait_center(self, input_path: str, output_path: str, progress_callback):
         cmd = [
             self.ffmpeg_path,
             "-y",
             "-i", input_path,
-            "-vf", f"crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale={getattr(self, 'output_resolution', '720:1280')}",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "23",
+            "-vf", f"scale={getattr(self, 'output_resolution', '720:1280')}:force_original_aspect_ratio=increase,crop={getattr(self, 'output_resolution', '720:1280')}",
+            *self.get_video_encoder_args(),
             "-c:a", "copy",
+            "-progress", "pipe:1",
             output_path,
         ]
-        result = self._run_ffmpeg_subprocess(cmd)
-        if result.returncode != 0:
-            raise Exception(f"Center crop failed: {result.stderr}")
-        progress_callback(1.0)
+        self.run_ffmpeg_with_progress(cmd, self._video_duration(input_path), progress_callback)
+        if not os.path.exists(output_path):
+            raise Exception("Center crop failed: output file not found")
 
     def convert_to_portrait_opencv_with_progress(self, input_path: str, output_path: str, progress_callback):
         """Convert landscape to 9:16 portrait with speaker tracking and progress (OpenCV)"""

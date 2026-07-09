@@ -1,4 +1,3 @@
-import base64
 import hashlib
 import json
 import os
@@ -11,17 +10,22 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import cv2
-import numpy as np
-from openai import APIConnectionError, APIError, APIStatusError, RateLimitError
-
-from clipper_shared import SUBPROCESS_FLAGS, SubtitleNotFoundError, YTDLP_MODULE_AVAILABLE, _hex_to_rgb, yt_dlp
+from clipper_shared import SUBPROCESS_FLAGS, _hex_to_rgb
 from clipper_base import ClipperBase
-from utils.helpers import get_deno_path, get_ffmpeg_path, is_ytdlp_module_available
 from utils.logger import debug_log
 
 
 class ExportMixin(ClipperBase):
+    def _render_size(self):
+        try:
+            width, height = (int(part) for part in getattr(self, "output_resolution", "720:1280").split(":"))
+            return width, height
+        except Exception:
+            return (1280, 720) if getattr(self, "screen_size", "9:16") == "16:9" else (720, 1280)
+
+    def _scale_from_preview_width(self, value: float, preview_px: float, width: int, minimum: int = 1) -> int:
+        return max(minimum, int(float(value) * preview_px / 340 * width))
+
     def process_clip(self, video_path: str, highlight: dict, index: int, total_clips: int = 1, add_captions: bool = True, add_hook: bool = True, pre_cut: bool = False):
         """Process a single clip: cut, portrait, hook (optional), captions (optional)
         
@@ -174,9 +178,6 @@ class ExportMixin(ClipperBase):
         
         # Step 4: Add captions (optional)
         final_file = clip_dir / "master.mp4"
-        if add_captions and getattr(self, "screen_size", "9:16") == "16:9":
-            self.log("  ⊘ Skipped captions (landscape)")
-            add_captions = False
 
         if add_captions:
             if self.is_cancelled():
@@ -345,261 +346,7 @@ class ExportMixin(ClipperBase):
             self.log(f"  ⚠ Thumbnail extraction failed (non-fatal): {e}")
 
     def add_hook(self, input_path: str, hook_text: str, output_path: str) -> float:
-        """Add hook scene at the beginning with multi-line yellow text (Fajar Sadboy style)"""
-        
-        if not self.tts_client:
-            return self.add_hook_with_progress(input_path, hook_text, output_path, lambda _: None)
-        self.report_tokens(0, 0, 0, len(hook_text))
-        
-        try:
-            tts_response = self.tts_client.audio.speech.create(
-                model=self.tts_model,
-                voice="nova",
-                input=hook_text,
-                speed=1.0
-            )
-        except APIConnectionError as e:
-            self.log(f"  ❌ TTS API Connection Error: Could not connect to {self.tts_client.base_url}")
-            raise Exception(f"TTS API connection failed!\n\nCould not connect to: {self.tts_client.base_url}\nError: {e}")
-        except RateLimitError as e:
-            self.log(f"  ❌ TTS API Rate Limit: {e}")
-            raise Exception(f"TTS API rate limit exceeded!\n\nPlease wait a moment and try again.\nDetails: {e}")
-        except APIStatusError as e:
-            self.log(f"  ❌ TTS API Error (HTTP {e.status_code}): {e.message}")
-            self.log(f"     Model: {self.tts_model}, Base URL: {self.tts_client.base_url}")
-            raise Exception(
-                f"TTS (Hook) API Error!\n\n"
-                f"Status: {e.status_code}\n"
-                f"Message: {e.message}\n"
-                f"Model: {self.tts_model}\n"
-                f"Base URL: {self.tts_client.base_url}\n\n"
-                f"Check your Hook Maker API settings."
-            )
-        except Exception as e:
-            self.log(f"  ❌ TTS API Unexpected Error: {type(e).__name__}: {e}")
-            raise Exception(f"TTS (Hook) generation failed!\n\nError: {type(e).__name__}: {e}\nModel: {self.tts_model}")
-        
-        tts_file = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
-        with open(tts_file, 'wb') as f:
-            f.write(tts_response.content)
-        
-        # Get TTS duration using ffprobe
-        probe_cmd = [
-            self.ffmpeg_path, "-i", tts_file,
-            "-f", "null", "-"
-        ]
-        result = subprocess.run(probe_cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
-        duration_match = re.search(r"Duration: (\d+):(\d+):(\d+\.\d+)", result.stderr)
-        
-        if duration_match:
-            h, m, s = duration_match.groups()
-            hook_duration = int(h) * 3600 + int(m) * 60 + float(s) + 0.5
-        else:
-            hook_duration = 3.0
-        
-        # Format hook text: uppercase, split into lines (max 3 words per line for better visibility)
-        hook_upper = hook_text.upper()
-        words = hook_upper.split()
-        
-        # Split into lines (max 3 words per line - Fajar Sadboy style)
-        lines = []
-        current_line = []
-        for word in words:
-            current_line.append(word)
-            if len(current_line) >= 3:
-                lines.append(' '.join(current_line))
-                current_line = []
-        if current_line:
-            lines.append(' '.join(current_line))
-        
-        # Get input video info
-        probe_cmd = [self.ffmpeg_path, "-i", input_path]
-        result = subprocess.run(probe_cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
-        
-        # Extract fps
-        fps_match = re.search(r'(\d+(?:\.\d+)?)\s*fps', result.stderr)
-        fps = float(fps_match.group(1)) if fps_match else 30
-        
-        # Extract resolution
-        res_match = re.search(r'(\d{3,4})x(\d{3,4})', result.stderr)
-        if res_match:
-            width, height = int(res_match.group(1)), int(res_match.group(2))
-        else:
-            width, height = 1080, 1920
-        
-        # Create hook video: freeze first frame + TTS audio + text overlay
-        hook_video = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
-        
-        # Build drawtext filter for each line
-        # Style: Yellow/gold text on white background box
-        style = getattr(self, "hook_style_settings", {}) or {}
-        pos_x_ratio = float(style.get("position_x", 0.5))
-        pos_y_ratio = float(style.get("position_y", 0.333))
-        font_size_frac = float(style.get("font_size", 0.054))
-        font_color = str(style.get("text_color") or "#FFD700").lstrip("#")
-        bg_color = str(style.get("bg_color") or style.get("background_color") or "#FFFFFF").lstrip("#")
-        
-        # Matches Preview.tsx (size * 500 on 340px width -> size * 1588 on 1080px width)
-        font_size = max(20, int(font_size_frac * 1600))
-        line_height = int(font_size * 1.5)
-        
-        total_text_height = len(lines) * line_height
-        start_y = int(pos_y_ratio * height) - (total_text_height // 2)
-        
-        for i, line in enumerate(lines):
-            # Escape special characters for FFmpeg drawtext
-            escaped_line = line.replace("\\", "\\\\").replace("'", "'\\''").replace(":", "\\:")
-            y_pos = start_y + (i * line_height)
-            
-            # Text with background box
-            font_path = self._get_ffmpeg_font_path()
-            drawtext_filters.append(
-                f"drawtext=text='{escaped_line}':"
-                f"{font_path}"
-                f"fontsize={font_size}:"
-                f"fontcolor=0x{font_color}:"
-                f"box=1:"
-                f"boxcolor=0x{bg_color}@0.95:"
-                f"boxborderw={int(font_size * 0.2)}:"
-                f"x=(w*{pos_x_ratio})-(text_w/2):"
-                f"y={y_pos}"
-            )
-        
-        filter_chain = ",".join(drawtext_filters)
-        
-        # Get encoder args
-        encoder_args = self.get_video_encoder_args()
-        
-        # Step 1: Create hook video with frozen frame + text + TTS audio
-        # Use -t to set exact duration, freeze first frame
-        cmd = [
-            self.ffmpeg_path, "-y",
-            "-i", input_path,
-            "-i", tts_file,
-            "-filter_complex",
-            f"[0:v]trim=0:0.04,loop=loop=-1:size=1:start=0,setpts=N/{fps}/TB,{filter_chain},trim=0:{hook_duration},setpts=PTS-STARTPTS[v];"
-            f"[1:a]aresample=44100,apad=whole_dur={hook_duration}[a]",
-            "-map", "[v]",
-            "-map", "[a]",
-            *encoder_args,
-            "-r", str(fps),
-            "-s", f"{width}x{height}",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-ar", "44100",
-            "-ac", "2",
-            "-t", str(hook_duration),
-            hook_video
-        ]
-        self.log_ffmpeg_command(cmd, "Create Hook Video")
-        result = self._run_ffmpeg_subprocess(cmd)
-        
-        if result.returncode != 0:
-            error_lines = result.stderr.split('\n') if result.stderr else []
-            actual_errors = [line for line in error_lines if 'error' in line.lower()]
-            error_msg = '\n'.join(actual_errors[-3:]) if actual_errors else "Unknown error"
-            raise Exception(f"Failed to create hook video: {error_msg}")
-        
-        # Step 2: Re-encode main video to EXACT same format (critical for concat)
-        main_reencoded = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
-        cmd = [
-            self.ffmpeg_path, "-y",
-            "-i", input_path,
-            *encoder_args,
-            "-r", str(fps),
-            "-s", f"{width}x{height}",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-ar", "44100",
-            "-ac", "2",
-            main_reencoded
-        ]
-        self.log_ffmpeg_command(cmd, "Re-encode Main Video")
-        result = self._run_ffmpeg_subprocess(cmd)
-        
-        if result.returncode != 0:
-            error_lines = result.stderr.split('\n') if result.stderr else []
-            actual_errors = [line for line in error_lines if 'error' in line.lower()]
-            error_msg = '\n'.join(actual_errors[-3:]) if actual_errors else "Unknown error"
-            raise Exception(f"Failed to re-encode main video: {error_msg}")
-        
-        # Step 3: Concatenate using concat demuxer (more reliable than filter_complex)
-        concat_list = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False).name
-        with open(concat_list, 'w') as f:
-            f.write(f"file '{hook_video.replace(chr(92), '/')}'\n")
-            f.write(f"file '{main_reencoded.replace(chr(92), '/')}'\n")
-        
-        cmd = [
-            self.ffmpeg_path, "-y",
-            "-f", "concat",
-            "-safe", "0",
-            "-i", concat_list,
-            "-c", "copy",
-            output_path
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
-        
-        # If concat demuxer fails, try filter_complex as fallback
-        if result.returncode != 0:
-            # Extract actual error message (skip ffmpeg version info)
-            error_lines = result.stderr.split('\n') if result.stderr else []
-            actual_errors = [line for line in error_lines if 'error' in line.lower() or 'invalid' in line.lower() or 'failed' in line.lower()]
-            error_summary = '\n'.join(actual_errors[-3:]) if actual_errors else "Unknown concat error"
-            
-            self.log(f"  Concat demuxer failed: {error_summary[:100]}")
-            self.log(f"  Trying filter_complex fallback...")
-            
-            cmd = [
-                self.ffmpeg_path, "-y",
-                "-i", hook_video,
-                "-i", main_reencoded,
-                "-filter_complex",
-                "[0:v:0][0:a:0][1:v:0][1:a:0]concat=n=2:v=1:a=1[outv][outa]",
-                "-map", "[outv]",
-                "-map", "[outa]",
-                *encoder_args,
-                "-c:a", "aac",
-                "-b:a", "192k",
-                output_path
-            ]
-            self.log_ffmpeg_command(cmd, "Concat Hook (filter_complex fallback)")
-            result = self._run_ffmpeg_subprocess(cmd)
-            
-            if result.returncode != 0:
-                # Extract actual error, not version info
-                error_lines = result.stderr.split('\n') if result.stderr else []
-                actual_errors = [line for line in error_lines if 'error' in line.lower() or 'invalid' in line.lower() or 'failed' in line.lower()]
-                error_msg = '\n'.join(actual_errors[-3:]) if actual_errors else result.stderr[-200:] if result.stderr else "Unknown error"
-                raise Exception(f"Failed to concatenate hook video: {error_msg}")
-        
-        # Cleanup
-        try:
-            os.unlink(tts_file)
-        except Exception as e:
-            pass  # Ignore cleanup errors
-        
-        try:
-            os.unlink(hook_video)
-        except Exception as e:
-            pass
-        
-        try:
-            os.unlink(main_reencoded)
-        except Exception as e:
-            pass
-        
-        try:
-            os.unlink(concat_list)
-        except Exception as e:
-            pass
-        
-        # Verify output was created
-        if not os.path.exists(output_path):
-            raise Exception(f"Failed to create hook video at {output_path}")
-        
-        return hook_duration
+        return self.add_hook_with_progress(input_path, hook_text, output_path, lambda _: None)
 
     def add_captions_api(self, input_path: str, output_path: str, audio_source: str = None, time_offset: float = 0):
         """Add CapCut-style captions using OpenAI Whisper API
@@ -696,18 +443,18 @@ class ExportMixin(ClipperBase):
         
         style = getattr(self, "subtitle_style", {}) or {}
         font = str(style.get("font") or style.get("font_family") or "Plus Jakarta Sans").replace(",", " ")
+        width, height = self._render_size()
         
         size_val = float(style.get("size") or 0.04)
-        if size_val < 20: # If size is a ratio (like 0.03), map it to pixels
-            # Matches Preview.tsx (size * 500 on 340px width -> size * 1600)
-            size = int(size_val * 1600)
+        if size_val < 20:
+            size = self._scale_from_preview_width(size_val, 500, width, minimum=max(12, int(12 / 340 * width)))
         else:
-            size = int(size_val)
+            size = int(size_val / 1080 * width) if width != 1080 else int(size_val)
             
         pos_x_ratio = float(style.get("position_x", 0.5))
         pos_y_ratio = float(style.get("position_y", 0.85))
-        pos_x = int(pos_x_ratio * 1080)
-        pos_y = int(pos_y_ratio * 1920)
+        pos_x = int(pos_x_ratio * width)
+        pos_y = int(pos_y_ratio * height)
         
         alignment = 5 # Middle-center anchor for precise \pos placement
             
@@ -741,8 +488,8 @@ class ExportMixin(ClipperBase):
 Title: Auto-generated captions
 ScriptType: v4.00+
 WrapStyle: 0
-PlayResX: 1080
-PlayResY: 1920
+PlayResX: {width}
+PlayResY: {height}
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
@@ -822,100 +569,41 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             f.write(ass_content)
         return len(events)
 
-    def _generate_gemini_tts(self, hook_text: str) -> str:
-        api_key = getattr(self, "tts_api_key", "")
-        if not api_key:
-            raise RuntimeError("Gemini TTS API key kosong")
+    async def _generate_edge_tts_async(self, hook_text: str, output_path: str) -> None:
+        import edge_tts
+        voice = getattr(self, "tts_voice", "id-ID-ArdiNeural") or "id-ID-ArdiNeural"
+        communicate = edge_tts.Communicate(hook_text, voice)
+        await communicate.save(output_path)
+
+    def _generate_edge_tts(self, hook_text: str) -> str:
         cache_root = Path(os.environ.get("KLIPKLOP_CACHE_DIR") or self.output_dir.parent / "cache") / "tts"
         cache_root.mkdir(parents=True, exist_ok=True)
-        cache_file = cache_root / f"{hashlib.sha1((getattr(self, 'tts_voice', 'Fenrir') + hook_text).encode('utf-8')).hexdigest()}.wav"
+        voice = getattr(self, "tts_voice", "id-ID-ArdiNeural") or "id-ID-ArdiNeural"
+        cache_file = cache_root / f"{hashlib.sha1((voice + hook_text).encode('utf-8')).hexdigest()}.mp3"
         if cache_file.exists():
             self.log("  ✓ Using cached hook TTS")
             return str(cache_file)
-        import google.genai as genai
-        from google.genai import types
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model=getattr(self, "tts_model", "gemini-3.1-flash-tts-preview"),
-            contents=f"Say energetically in Indonesian: {hook_text}",
-            config=types.GenerateContentConfig(
-                response_modalities=["AUDIO"],
-                speech_config=types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                            voice_name=getattr(self, "tts_voice", "Fenrir")
-                        )
-                    )
-                )
-            )
-        )
-        data = response.candidates[0].content.parts[0].inline_data.data
-        audio = base64.b64decode(data) if isinstance(data, str) else data
-        with open(cache_file, 'wb') as f:
-            f.write(audio)
+        import asyncio
+        asyncio.run(self._generate_edge_tts_async(hook_text, str(cache_file)))
         return str(cache_file)
 
     def add_hook_with_progress(self, input_path: str, hook_text: str, output_path: str, progress_callback) -> float:
         """Add hook scene at the beginning with progress tracking"""
         
         progress_callback(0.1)
-        if getattr(self, "tts_api_key", ""):
-            try:
-                tts_file = self._generate_gemini_tts(hook_text)
-            except Exception as e:
-                self.log(f"  ⊘ Hook skipped; Gemini TTS failed: {e}")
-                return 0
-            probe_cmd = [self.ffmpeg_path, "-i", tts_file, "-f", "null", "-"]
-            result = subprocess.run(probe_cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
-            duration_match = re.search(r"Duration: (\d+):(\d+):(\d+\.\d+)", result.stderr)
-            if duration_match:
-                h, m, s = duration_match.groups()
-                hook_duration = int(h) * 3600 + int(m) * 60 + float(s) + 0.5
-            else:
-                hook_duration = 3.0
-        elif self.tts_client:
-            self.report_tokens(0, 0, 0, len(hook_text))
-            try:
-                tts_response = self.tts_client.audio.speech.create(
-                    model=self.tts_model,
-                    voice="nova",
-                    input=hook_text,
-                    speed=1.0
-                )
-            except APIConnectionError as e:
-                self.log(f"  ❌ TTS API Connection Error: Could not connect to {self.tts_client.base_url}")
-                raise Exception(f"TTS API connection failed!\n\nCould not connect to: {self.tts_client.base_url}\nError: {e}")
-            except RateLimitError as e:
-                self.log(f"  ❌ TTS API Rate Limit: {e}")
-                raise Exception(f"TTS API rate limit exceeded!\n\nPlease wait a moment and try again.\nDetails: {e}")
-            except APIStatusError as e:
-                self.log(f"  ❌ TTS API Error (HTTP {e.status_code}): {e.message}")
-                self.log(f"     Model: {self.tts_model}, Base URL: {self.tts_client.base_url}")
-                raise Exception(
-                    f"TTS (Hook) API Error!\n\n"
-                    f"Status: {e.status_code}\n"
-                    f"Message: {e.message}\n"
-                    f"Model: {self.tts_model}\n"
-                    f"Base URL: {self.tts_client.base_url}\n\n"
-                    f"Check your Hook Maker API settings."
-                )
-            except Exception as e:
-                self.log(f"  ❌ TTS API Unexpected Error: {type(e).__name__}: {e}")
-                raise Exception(f"TTS (Hook) generation failed!\n\nError: {type(e).__name__}: {e}\nModel: {self.tts_model}")
-            tts_file = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
-            with open(tts_file, 'wb') as f:
-                f.write(tts_response.content)
-            probe_cmd = [self.ffmpeg_path, "-i", tts_file, "-f", "null", "-"]
-            result = subprocess.run(probe_cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
-            duration_match = re.search(r"Duration: (\d+):(\d+):(\d+\.\d+)", result.stderr)
-            if duration_match:
-                h, m, s = duration_match.groups()
-                hook_duration = int(h) * 3600 + int(m) * 60 + float(s) + 0.5
-            else:
-                hook_duration = 3.0
-        else:
-            self.log("  ⊘ Hook skipped; Gemini TTS API key empty")
+        try:
+            tts_file = self._generate_edge_tts(hook_text)
+        except Exception as e:
+            self.log(f"  ⊘ Hook skipped; edge-tts failed: {e}")
             return 0
+        probe_cmd = [self.ffmpeg_path, "-i", tts_file, "-f", "null", "-"]
+        result = subprocess.run(probe_cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
+        duration_match = re.search(r"Duration: (\d+):(\d+):(\d+\.\d+)", result.stderr)
+        if duration_match:
+            h, m, s = duration_match.groups()
+            hook_duration = int(h) * 3600 + int(m) * 60 + float(s) + 0.5
+        else:
+            hook_duration = 3.0
         progress_callback(0.2)
         
         # Format hook text
@@ -1002,8 +690,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         }
         font_candidates = [user_font_path, str(family_fonts.get(font_family, "")), self._find_system_font_bold()]
         pil_font = None
-        # Matches Preview.tsx (size * 500 on 340px width -> size * 1600)
-        font_px = max(20, int(font_size_frac * 1600))
+        font_px = self._scale_from_preview_width(font_size_frac, 500, width, minimum=max(12, int(12 / 340 * width)))
         for candidate in font_candidates:
             if not candidate or not os.path.exists(candidate):
                 continue
@@ -1362,9 +1049,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         pos_y = self.watermark_settings.get("position_y", 0.05)
         opacity = self.watermark_settings.get("opacity", 0.8)
         
-        # Calculate watermark width in pixels
-        # Matches Preview.tsx (scale * 150 on 340px width -> scale * 476)
-        watermark_width = int(scale * 476)
+        watermark_width = self._scale_from_preview_width(scale, 150, video_width, minimum=8)
         
         # Calculate position in pixels
         x_pixels = int(pos_x * video_width)
@@ -1449,8 +1134,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         opacity = self.credit_watermark_settings.get("opacity", 0.7)
         color = str(self.credit_watermark_settings.get("color", "#FFFFFF")).lstrip("#") or "FFFFFF"
         
-        # Matches Preview.tsx (size * 320 on 340px width -> size * 1016)
-        font_size = max(22, int(size * 1016))
+        font_size = self._scale_from_preview_width(size, 320, video_width, minimum=max(10, int(10 / 340 * video_width)))
         
         # Calculate position in pixels
         x_pixels = int(pos_x * video_width)
@@ -1481,6 +1165,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     font_file = font.replace("\\", "/").replace(":", "\\:")
                     break
         
+        shadow_x = max(1, int(1 / 340 * video_width))
+        shadow_y = max(1, int(1 / 340 * video_width))
+
         # Build filter string
         if font_file:
             filter_str = (
@@ -1488,7 +1175,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f"text='{credit_text_escaped}':"
                 f"fontsize={font_size}:"
                 f"fontcolor=0x{color}@{opacity}:"
-                f"shadowcolor=0x000000@0.5:shadowx=3:shadowy=3:"
+                f"shadowcolor=0x000000@0.5:shadowx={shadow_x}:shadowy={shadow_y}:"
                 f"x=(w*{pos_x})-(text_w/2):"
                 f"y=(h*{pos_y})-(text_h/2)"
             )
@@ -1498,7 +1185,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f"drawtext=text='{credit_text_escaped}':"
                 f"fontsize={font_size}:"
                 f"fontcolor=0x{color}@{opacity}:"
-                f"shadowcolor=0x000000@0.5:shadowx=3:shadowy=3:"
+                f"shadowcolor=0x000000@0.5:shadowx={shadow_x}:shadowy={shadow_y}:"
                 f"x=(w*{pos_x})-(text_w/2):"
                 f"y=(h*{pos_y})-(text_h/2)"
             )

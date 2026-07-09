@@ -7,6 +7,8 @@ export default function Settings() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
   const [youtubeConnected, setYoutubeConnected] = useState(false);
+  const [apiCheckState, setApiCheckState] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle');
+  const [apiCheckMessage, setApiCheckMessage] = useState('');
 
   useEffect(() => {
     // Check YT connection status
@@ -57,6 +59,26 @@ export default function Settings() {
     }
   };
 
+  const handleCheckApiKey = async () => {
+    setApiCheckState('checking');
+    setApiCheckMessage('');
+    try {
+      const res = await api('/api/check-api-key', {
+        method: 'POST',
+        body: JSON.stringify({
+          base_url: settings.base_url,
+          api_key: settings.api_key,
+          model: settings.model,
+        }),
+      });
+      setApiCheckState('ok');
+      setApiCheckMessage(res.message || 'API valid');
+    } catch (e: any) {
+      setApiCheckState('error');
+      setApiCheckMessage(e.message || 'API tidak valid');
+    }
+  };
+
   const handleClearApiKey = () => {
     setSettings((prev: any) => ({ ...prev, api_key: '' }));
   };
@@ -91,13 +113,28 @@ export default function Settings() {
 
               <div>
                 <label className="block text-[13px] font-bold text-slate-700 mb-1.5">API Key</label>
-                <input 
-                  type="password" 
-                  placeholder="Gemini API key" 
-                  value={settings.api_key}
-                  onChange={(e) => setSettings({ ...settings, api_key: e.target.value })}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-[13px] text-slate-900 bg-slate-50/50 transition-all font-mono placeholder:text-slate-400" 
-                />
+                <div className="flex gap-2">
+                  <input 
+                    type="password" 
+                    placeholder="Gemini/Groq API key" 
+                    value={settings.api_key}
+                    onChange={(e) => setSettings({ ...settings, api_key: e.target.value })}
+                    className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-[13px] text-slate-900 bg-slate-50/50 transition-all font-mono placeholder:text-slate-400" 
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCheckApiKey}
+                    disabled={apiCheckState === 'checking'}
+                    className="px-4 py-2.5 rounded-xl border border-primary/30 bg-primary/10 text-primary text-[13px] font-bold hover:bg-primary/15 disabled:opacity-60 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                  >
+                    {apiCheckState === 'checking' ? 'Checking...' : 'Check API'}
+                  </button>
+                </div>
+                {apiCheckMessage && (
+                  <p className={`mt-2 text-[12px] font-medium ${apiCheckState === 'ok' ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {apiCheckMessage}
+                  </p>
+                )}
               </div>
 
               <div>

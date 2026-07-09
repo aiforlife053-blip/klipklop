@@ -2,20 +2,11 @@ import json
 import os
 import re
 import subprocess
-import sys
-import tempfile
-import threading
-import time
-from datetime import datetime
 from pathlib import Path
 
-import cv2
-import numpy as np
-from openai import APIConnectionError, APIError, APIStatusError, RateLimitError
-
-from clipper_shared import SUBPROCESS_FLAGS, SubtitleNotFoundError, YTDLP_MODULE_AVAILABLE, _hex_to_rgb, yt_dlp
+from clipper_shared import SUBPROCESS_FLAGS, YTDLP_MODULE_AVAILABLE, yt_dlp
 from clipper_base import ClipperBase
-from utils.helpers import get_deno_path, get_ffmpeg_path, is_ytdlp_module_available
+from utils.helpers import get_deno_path, get_ffmpeg_path
 from utils.logger import debug_log
 
 
@@ -24,6 +15,87 @@ class DownloadMixin(ClipperBase):
         quality = str(getattr(self, "video_quality", "720") or "720")
         max_height = {"480": 480, "720": 720, "1080": 1080}.get(quality, 720)
         return f"bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]/best"
+
+    def _cookies_path(self):
+        from utils.helpers import get_app_dir
+        return next((loc for loc in [Path("cookies.txt"), get_app_dir() / "cookies.txt"] if loc.exists()), None)
+
+    def _apply_common_ytdlp_options(self, ydl_opts: dict):
+        deno_path = get_deno_path()
+        ffmpeg_path = get_ffmpeg_path()
+        if deno_path and Path(deno_path).exists():
+            ydl_opts['js_runtimes'] = {'deno': {'path': deno_path}}
+            ydl_opts['remote_components'] = ['ejs:github']
+        if ffmpeg_path and Path(ffmpeg_path).exists():
+            ydl_opts['ffmpeg_location'] = str(Path(ffmpeg_path).parent)
+        cookies_path = self._cookies_path()
+        if cookies_path:
+            ydl_opts['cookiefile'] = str(cookies_path)
+        return ydl_opts
+
+    def download_audio_only(self, url: str) -> str:
+        self.log("  Downloading audio-only fallback (MP3 16kHz mono 32kbps)...")
+        if not (YTDLP_MODULE_AVAILABLE and self.ytdlp_path == "yt_dlp_module"):
+            return self._download_audio_only_subprocess(url)
+        return self._download_audio_only_module(url)
+
+    def _download_audio_only_module(self, url: str) -> str:
+        output_path = self.temp_dir / "source_audio.mp3"
+        last_percent = {"value": -1.0}
+        def progress_hook(d):
+            if self.is_cancelled():
+                raise Exception("Cancelled by user")
+            if d.get('status') == 'downloading':
+                match = re.search(r'(\d+\.?\d*)%', d.get('_percent_str', '0%').strip())
+                if match:
+                    percent = float(match.group(1))
+                    if percent + 0.05 < last_percent["value"]:
+                        return
+                    last_percent["value"] = percent
+                    self.set_progress(f"Downloading audio-only fallback... {percent:.1f}%", 0.18 + percent / 100 * 0.08)
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': str(self.temp_dir / 'source_audio.%(ext)s'),
+            'progress_hooks': [progress_hook],
+            'quiet': True,
+            'no_warnings': False,
+            'extract_flat': False,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '32',
+            }],
+            'postprocessor_args': ['-ac', '1', '-ar', '16000', '-b:a', '32k'],
+        }
+        self._apply_common_ytdlp_options(ydl_opts)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        if output_path.exists():
+            return str(output_path)
+        for candidate in self.temp_dir.glob("source_audio.*"):
+            if candidate.suffix.lower() == ".mp3":
+                return str(candidate)
+        raise Exception("Audio-only download failed: output file not found")
+
+    def _download_audio_only_subprocess(self, url: str) -> str:
+        output_path = self.temp_dir / "source_audio.mp3"
+        cmd = [
+            self.ytdlp_path,
+            "-f", "bestaudio/best",
+            "-x", "--audio-format", "mp3",
+            "--postprocessor-args", "ffmpeg:-ac 1 -ar 16000 -b:a 32k",
+            "-o", str(self.temp_dir / "source_audio.%(ext)s"),
+            url,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
+        if result.returncode != 0:
+            raise Exception(f"Audio-only download failed:\n{result.stderr}")
+        if output_path.exists():
+            return str(output_path)
+        for candidate in self.temp_dir.glob("source_audio.*"):
+            if candidate.suffix.lower() == ".mp3":
+                return str(candidate)
+        raise Exception("Audio-only download failed: output file not found")
 
     def download_video_only(self, url: str) -> str:
         self.log(f"  Downloading source video once ({getattr(self, 'video_quality', '720')}p max)...")

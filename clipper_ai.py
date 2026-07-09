@@ -2,21 +2,14 @@ import json
 import os
 import re
 import subprocess
-import sys
 import tempfile
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
 
-import cv2
-import numpy as np
-from openai import APIConnectionError, APIError, APIStatusError, RateLimitError
-
-from clipper_shared import SUBPROCESS_FLAGS, SubtitleNotFoundError, YTDLP_MODULE_AVAILABLE, _hex_to_rgb, yt_dlp
+from clipper_shared import SUBPROCESS_FLAGS, SubtitleNotFoundError
 from clipper_base import ClipperBase
-from utils.helpers import get_deno_path, get_ffmpeg_path, is_ytdlp_module_available
-from utils.logger import debug_log
 
 # Clip duration constraints (in seconds)
 MIN_CLIP_DURATION = 10
@@ -213,10 +206,54 @@ Transcript:
 {transcript}"""
 
     def find_highlights(self, transcript: str, video_info: dict, num_clips: int) -> list:
+        filtered = self._prefilter_transcript_for_ai(transcript)
+        if filtered != transcript:
+            self.log(f"  Fast AI mode: transcript dipangkas {len(transcript)} → {len(filtered)} chars")
+        return self._find_highlights_single(filtered, video_info, num_clips)
+
+    def _prefilter_transcript_for_ai(self, transcript: str, max_chars: int = 35000) -> str:
+        if len(transcript or "") <= max_chars:
+            return transcript
+        keywords = (
+            "bangkrut", "takut", "marah", "sedih", "stres", "stress", "trauma", "gagal", "salah", "masalah",
+            "konflik", "ribut", "berantem", "putus", "pacar", "cinta", "selingkuh", "uang", "bayaran", "mahal",
+            "murah", "viral", "kontroversi", "jujur", "pengakuan", "rahasia", "ternyata", "kenapa", "gimana",
+            "cerita", "pernah", "hampir", "akhirnya", "tapi", "karena", "gue", "aku", "saya", "dia",
+        )
+        lines = [line for line in (transcript or "").splitlines() if line.strip()]
+        scored = []
+        for idx, line in enumerate(lines):
+            text = line.lower()
+            words = re.findall(r"[\w']+", text)
+            if len(words) < 4:
+                continue
+            score = sum(3 for kw in keywords if kw in text)
+            score += 2 if "?" in line else 0
+            score += 1 if "!" in line else 0
+            score += min(3, len(words) // 12)
+            if score > 0:
+                scored.append((score, idx))
+        if not scored:
+            return "\n".join(lines[: max(1, max_chars // 120)])
+        keep = set()
+        size = 0
+        for _, idx in sorted(scored, reverse=True):
+            window = list(range(max(0, idx - 2), min(len(lines), idx + 3)))
+            window_size = sum(len(lines[i]) + 1 for i in window if i not in keep)
+            if keep and size + window_size > max_chars:
+                continue
+            keep.update(window)
+            size += window_size
+            if size >= max_chars:
+                break
+        selected = [lines[i] for i in sorted(keep)]
+        return "\n".join(selected) or transcript[:max_chars]
+
+    def _find_highlights_single(self, transcript: str, video_info: dict, num_clips: int, allow_chunking: bool = True) -> list:
         """Find highlights using AI (OpenAI-compatible API)"""
         self.log(f"[2/4] Finding highlights (using {self.model})...")
         
-        request_clips = num_clips + 5
+        request_clips = num_clips if not allow_chunking else num_clips + 5
         
         video_context = ""
         if video_info:
@@ -239,7 +276,8 @@ Transcript:
         import random
         seed = random.randint(1000, 9999)
         variety_hint = f"\n\n[SISTEM: Generate dengan variasi baru (Seed: {seed}). Prioritaskan segmen/timestamp yang BERBEDA dari yang biasanya paling jelas. Cari hidden gems atau momen unik yang sebelumnya mungkin terlewat.]"
-        prompt += variety_hint
+        duration_hint = "\n\n[SISTEM: Timestamp WAJIB berupa rentang cerita lengkap 45-90 detik. Jangan pilih satu kalimat pendek. Jika momen inti pendek, mulai 20-30 detik sebelum momen dan akhiri 30-60 detik setelahnya.]"
+        prompt += variety_hint + duration_hint
 
         # Use OpenAI-compatible API for all providers
         self.log(f"  Using API: {self.highlight_client.base_url}")
@@ -324,7 +362,16 @@ Transcript:
                 h["description"] = h.pop("reason")
                 self.log(f"  ⚠ Converted 'reason' to 'description' for '{h.get('title', 'Unknown')}'")
             
-            duration = self.parse_timestamp(h["end_time"]) - self.parse_timestamp(h["start_time"])
+            start_seconds = self.parse_timestamp(h["start_time"])
+            end_seconds = self.parse_timestamp(h["end_time"])
+            duration = end_seconds - start_seconds
+            if duration < MIN_CLIP_DURATION:
+                start_seconds = max(0, start_seconds - 25)
+                end_seconds = min(start_seconds + 75, end_seconds + 45)
+                h["start_time"] = self.format_timestamp(start_seconds)
+                h["end_time"] = self.format_timestamp(end_seconds)
+                duration = end_seconds - start_seconds
+                self.log(f"  ↻ Expanded short highlight '{h.get('title', 'Unknown')}' to {duration:.0f}s")
             h["duration_seconds"] = round(duration, 1)
             
             # Ensure virality_score exists (default to 5 if missing)
@@ -336,6 +383,8 @@ Transcript:
             if "description" not in h:
                 h["description"] = h.get("title", "No description")
                 self.log(f"  ⚠ Missing description for '{h.get('title', 'Unknown')}', using title")
+            if "hook_text" not in h:
+                h["hook_text"] = h.get("title", "Highlight")
             
             if duration > MAX_CLIP_DURATION:
                 h["end_time"] = self.format_timestamp(self.parse_timestamp(h["start_time"]) + MAX_CLIP_DURATION)
@@ -692,6 +741,18 @@ Transcript:
         
         return transcript
 
+    def transcribe_audio_local(self, audio_path: str) -> str:
+        self.log("[AI Transcription] Subtitle tidak ditemukan, transcribing audio-only lokal faster-whisper...")
+        transcript = self._whisper_transcribe_segments_local(audio_path)
+        lines = []
+        for segment in getattr(transcript, "segments", []) or []:
+            text = str(segment.get("text", "")).strip()
+            if text:
+                lines.append(f"[{self._seconds_to_srt_timestamp(segment.get('start', 0))} - {self._seconds_to_srt_timestamp(segment.get('end', 0))}] {text}")
+        if not lines:
+            raise Exception("Local faster-whisper returned empty transcription. Video may have no speech.")
+        return "\n".join(lines)
+
     def transcribe_full_video_local(self, video_path: str) -> str:
         self.log("[AI Transcription] Subtitle tidak ditemukan, transcribing lokal faster-whisper...")
         audio_file = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
@@ -702,7 +763,7 @@ Transcript:
             "-acodec", "libmp3lame",
             "-ar", "16000",
             "-ac", "1",
-            "-b:a", "64k",
+            "-b:a", "32k",
             audio_file
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
@@ -711,18 +772,10 @@ Transcript:
                 os.unlink(audio_file)
             raise Exception(f"Failed to extract audio for local transcription:\n{result.stderr[:200]}")
         try:
-            transcript = self._whisper_transcribe_words_local(audio_file)
+            return self.transcribe_audio_local(audio_file)
         finally:
             if os.path.exists(audio_file):
                 os.unlink(audio_file)
-        lines = []
-        for segment in getattr(transcript, "segments", []) or []:
-            text = str(segment.get("text", "")).strip()
-            if text:
-                lines.append(f"[{self._seconds_to_srt_timestamp(segment.get('start', 0))} - {self._seconds_to_srt_timestamp(segment.get('end', 0))}] {text}")
-        if not lines:
-            raise Exception("Local faster-whisper returned empty transcription. Video may have no speech.")
-        return "\n".join(lines)
 
     def _whisper_transcribe_file(self, audio_path: str, time_offset: float = 0) -> list:
         """Transcribe a single audio file with Whisper API.
@@ -947,8 +1000,7 @@ Transcript:
         return SimpleNamespace(words=words, segments=segments,
                                text=data.get("text", ""))
 
-    def _whisper_transcribe_words_local(self, audio_path: str):
-        from types import SimpleNamespace
+    def _get_local_whisper_model(self):
         try:
             from faster_whisper import WhisperModel
         except ImportError as exc:
@@ -961,8 +1013,21 @@ Transcript:
         if self._local_whisper_model is None:
             self.log(f"  Using local faster-whisper: {model_name}/{device}/{compute_type}")
             self._local_whisper_model = WhisperModel(model_name, device=device, compute_type=compute_type)
+        return self._local_whisper_model
+
+    def _whisper_transcribe_segments_local(self, audio_path: str):
+        from types import SimpleNamespace
         lang = "id"
-        segments_iter, info = self._local_whisper_model.transcribe(audio_path, language=lang, word_timestamps=True)
+        segments_iter, info = self._get_local_whisper_model().transcribe(audio_path, language=lang, word_timestamps=False)
+        segments = [{"start": segment.start, "end": segment.end, "text": segment.text} for segment in segments_iter]
+        text = " ".join(segment.get("text", "").strip() for segment in segments).strip()
+        self.log(f"  Local Whisper OK, language: {getattr(info, 'language', lang)}, segments: {len(segments)}")
+        return SimpleNamespace(words=[], segments=segments, text=text)
+
+    def _whisper_transcribe_words_local(self, audio_path: str):
+        from types import SimpleNamespace
+        lang = "id"
+        segments_iter, info = self._get_local_whisper_model().transcribe(audio_path, language=lang, word_timestamps=True)
         raw_segments = list(segments_iter)
         words = []
         segments = []
