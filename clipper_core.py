@@ -130,8 +130,21 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         self._local_whisper_model = None
         resolutions = {"16:9": {"480": "854:480", "720": "1280:720", "1080": "1920:1080"}, "9:16": {"480": "540:960", "720": "720:1280", "1080": "1080:1920"}}
         self.output_resolution = resolutions[self.screen_size].get(self.video_quality, resolutions[self.screen_size]["720"])
-        self.log = log_callback or print
-        self.set_progress = progress_callback or (lambda s, p: None)
+        self._progress_lock = threading.Lock()
+        
+        self._raw_log = log_callback or print
+        self._raw_set_progress = progress_callback or (lambda s, p: None)
+        
+        def _safe_log(*args, **kwargs):
+            with self._progress_lock:
+                self._raw_log(*args, **kwargs)
+                
+        def _safe_set_progress(*args, **kwargs):
+            with self._progress_lock:
+                self._raw_set_progress(*args, **kwargs)
+                
+        self.log = _safe_log
+        self.set_progress = _safe_set_progress
         self.report_tokens = token_callback or (lambda gi, go, w, t: None)
         self.is_cancelled = cancel_check or (lambda: False)
         self.gpu_enabled = False
@@ -151,14 +164,18 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         except (TypeError, ValueError):
             self.parallel_workers = 3
         self.parallel_workers = max(1, self.parallel_workers)
-        self._progress_lock = threading.Lock()
+        self.parallel_workers = max(1, self.parallel_workers)
 
     def _video_cache_dir(self, url: str) -> Path:
         parsed = urlparse(url)
         video_id = parse_qs(parsed.query).get("v", [""])[0] if parsed.query else ""
         key = video_id or hashlib.sha1(url.encode("utf-8")).hexdigest()[:16]
-        cache_root = getattr(self, "cache_dir", Path(os.environ.get("KLIPKLOP_CACHE_DIR") or Path(self.output_dir).parent / "cache"))
-        path = cache_root / key
+        
+        # User requested to disable caching. We now store "cached" files
+        # in the temp_dir so they are automatically wiped at the end of each run.
+        import uuid
+        unique_key = f"{key}_{uuid.uuid4().hex[:8]}"
+        path = self.temp_dir / unique_key
         path.mkdir(parents=True, exist_ok=True)
         return path
 

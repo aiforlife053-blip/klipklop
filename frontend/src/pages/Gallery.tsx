@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '@/lib/api';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
 
 export default function Gallery() {
   const [showDetailModal, setShowDetailModal] = useState<any>(null);
   const [clips, setClips] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<any>(null);
 
   const fetchSaved = useCallback(async () => {
     setIsLoading(true);
@@ -35,13 +37,21 @@ export default function Gallery() {
   }, [fetchSaved]);
 
   const handleDelete = async (clip: any) => {
-    if (!confirm('Hapus klip ini dari galeri?')) return;
+    setDeleteConfirm(clip);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
+    const clip = deleteConfirm;
+    setDeleteConfirm(null);
     try {
       await api('/api/delete', {
         method: 'POST',
         body: JSON.stringify({ path: clip.path }),
       });
-      setShowDetailModal(null);
+      if (showDetailModal?.path === clip.path) {
+        setShowDetailModal(null);
+      }
       setClips(prev => prev.filter(c => c.path !== clip.path));
     } catch (e: any) {
       alert('Gagal menghapus: ' + (e.message || ''));
@@ -154,7 +164,9 @@ export default function Gallery() {
                   <div className="mt-3 text-left flex-1 flex flex-col">
                     <h4 className="font-bold text-[13px] leading-snug line-clamp-2 text-slate-900">{clip.title || clip.name}</h4>
                     <p className="text-[11px] text-slate-500 line-clamp-2 mt-1.5">{clip.description}</p>
-                    <p className="text-[10px] text-slate-400 mt-2">Durasi: {duration}</p>
+                    <p className="text-[10px] text-slate-400 mt-2">
+                      Durasi: {duration} &bull; {clip.modified ? new Date(clip.modified).toLocaleString('id-ID', {day: 'numeric', month: 'short', year: '2-digit', hour: '2-digit', minute:'2-digit'}) : '-'}
+                    </p>
                   </div>
                   <button 
                     onClick={() => setShowDetailModal(clip)}
@@ -191,7 +203,11 @@ export default function Gallery() {
             
             {/* Right: Details */}
             <div className="flex-1 flex flex-col py-2 pr-4">
-              <p className="text-[12px] text-slate-500 mb-1">Durasi: {fmtDuration(showDetailModal)}</p>
+              <p className="text-[12px] text-slate-500 mb-1 flex items-center gap-2">
+                <span>Durasi: {fmtDuration(showDetailModal)}</span>
+                <span>&bull;</span>
+                <span>Diunduh: {showDetailModal.modified ? new Date(showDetailModal.modified).toLocaleString('id-ID', {day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute:'2-digit'}) : '-'}</span>
+              </p>
               <h2 className="text-[20px] font-bold text-slate-900 leading-tight">{showDetailModal.title || showDetailModal.name}</h2>
               {showDetailModal.isUploaded && (
                 <a href="#" className="inline-flex items-center gap-1.5 text-[13px] text-emerald-500 hover:text-emerald-600 font-bold mt-2 hover:underline">
@@ -234,6 +250,14 @@ export default function Gallery() {
         </div>,
         document.body
       )}
+
+      <ConfirmModal
+        isOpen={!!deleteConfirm}
+        title="Hapus klip ini dari galeri?"
+        message="Klip yang dihapus tidak dapat dikembalikan."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm(null)}
+      />
     </div>
   );
 }

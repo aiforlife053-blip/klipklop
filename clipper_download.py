@@ -1074,7 +1074,8 @@ class DownloadMixin(ClipperBase):
                 match = re.search(r'(\d+\.?\d*)%', percent_str)
                 if match:
                     percent = float(match.group(1))
-                    self.set_progress(f"Downloading video section... {percent:.1f}%", 0)
+                    self.log(f"  Downloading section... {percent:.1f}%")
+                    self.set_progress(f"Downloading video section... {percent:.1f}%", 0.32 + percent / 100 * 0.08)
             elif d['status'] == 'finished':
                 self.log("  Section download finished, processing...")
         
@@ -1209,7 +1210,8 @@ class DownloadMixin(ClipperBase):
                 match = re.search(r'(\d+\.?\d*)%', line)
                 if match:
                     percent = match.group(1)
-                    self.set_progress(f"Downloading video section... {percent}%", 0)
+                    self.log(f"  Downloading section... {percent}%")
+                    self.set_progress(f"Downloading video section... {percent}%", 0.32 + float(percent) / 100 * 0.08)
         
         if process.returncode != 0:
             stderr_output = process.stderr.read() if process.stderr else ""

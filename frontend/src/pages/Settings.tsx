@@ -7,7 +7,6 @@ export default function Settings() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
   const [youtubeConnected, setYoutubeConnected] = useState(false);
-  const navigate = useNavigate();
 
   useEffect(() => {
     // Check YT connection status

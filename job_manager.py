@@ -58,14 +58,19 @@ class WebJobManager:
                 return {"status": "busy", "message": "Processing is already running"}
         if self._has_staged_outputs():
             return {"status": "busy", "message": "Simpan atau hapus klip di Beranda sebelum generate baru"}
-        num_clips = 1
-        add_captions = True
-        add_hook = True
-        subtitle_language = "id"
+            
+        # Dynamically save settings from payload to ensure 100% sync with UI
+        if "settings" in payload and isinstance(payload["settings"], dict):
+            self.save_settings(payload["settings"])
+            
+        num_clips = min(10, max(1, self._as_int(payload.get("num_clips"), 1)))
+        add_captions = self._as_bool(payload.get("add_captions", True), True)
+        add_hook = self._as_bool(payload.get("add_hook", True), True)
+        subtitle_language = str(payload.get("subtitle_language", "id")).strip()[:10]
         instruction = str(payload.get("instruction", "")).strip()[:1000]
         landscape_blur = self._as_bool(payload.get("landscape_blur", self._config().config.get("landscape_blur", True)), True)
         source_credit = self._as_bool(payload.get("source_credit", True), True)
-        screen_size = "9:16"
+        screen_size = str(payload.get("screen_size", "9:16"))
         with self._lock:
             if self.thread and self.thread.is_alive():
                 return {"status": "busy", "message": "Processing is already running"}
@@ -230,44 +235,44 @@ class WebJobManager:
         watermark = {**cfg_mgr.config.get("watermark", {"enabled": False}), **(payload.get("watermark") if isinstance(payload.get("watermark"), dict) else {})}
         watermark["enabled"] = self._as_bool(watermark.get("enabled", False), False)
         watermark["image_path"] = str(watermark.get("image_path") or "")
-        watermark["opacity"] = max(0.0, min(1.0, float(watermark.get("opacity", 0.8) or 0.8)))
-        watermark["scale"] = max(0.02, min(0.6, float(watermark.get("scale", 0.15) or 0.15)))
-        watermark["position_x"] = max(0.0, min(1.0, float(watermark.get("position_x", 0.5) or 0.5)))
-        watermark["position_y"] = max(0.0, min(1.0, float(watermark.get("position_y", 0.1) or 0.1)))
-        credit_watermark = {**cfg_mgr.config.get("credit_watermark", {"enabled": True}), **(payload.get("credit_watermark") if isinstance(payload.get("credit_watermark"), dict) else {})}
-        credit_watermark["enabled"] = self._as_bool(credit_watermark.get("enabled", True), True)
+        watermark["opacity"] = max(0.0, min(1.0, float(self._as_float(watermark.get("opacity"), 0.8))))
+        watermark["scale"] = max(0.02, min(0.6, float(self._as_float(watermark.get("scale"), 0.15))))
+        watermark["position_x"] = max(0.0, min(1.0, float(self._as_float(watermark.get("position_x"), 0.5))))
+        watermark["position_y"] = max(0.0, min(1.0, float(self._as_float(watermark.get("position_y"), 0.1))))
+        credit_watermark = {**cfg_mgr.config.get("credit_watermark", {"enabled": False}), **(payload.get("credit_watermark") if isinstance(payload.get("credit_watermark"), dict) else {})}
+        credit_watermark["enabled"] = self._as_bool(credit_watermark.get("enabled", False), False)
         credit_watermark["text"] = str(credit_watermark.get("text") or "sc : {channel}")[:120]
         credit_watermark["color"] = str(credit_watermark.get("color") or "#FFFFFF")[:16]
-        credit_watermark["size"] = max(0.015, min(0.08, float(credit_watermark.get("size", 0.032) or 0.032)))
-        credit_watermark["opacity"] = max(0.0, min(1.0, float(credit_watermark.get("opacity", 0.55) or 0.55)))
-        credit_watermark["position_x"] = max(0.0, min(1.0, float(credit_watermark.get("position_x", 0.5) or 0.5)))
-        credit_watermark["position_y"] = max(0.0, min(1.0, float(credit_watermark.get("position_y", 0.1) or 0.1)))
+        credit_watermark["size"] = max(0.015, min(0.08, float(self._as_float(credit_watermark.get("size"), 0.032))))
+        credit_watermark["opacity"] = max(0.0, min(1.0, float(self._as_float(credit_watermark.get("opacity"), 0.55))))
+        credit_watermark["position_x"] = max(0.0, min(1.0, float(self._as_float(credit_watermark.get("position_x"), 0.5))))
+        credit_watermark["position_y"] = max(0.0, min(1.0, float(self._as_float(credit_watermark.get("position_y"), 0.1))))
         hook_style = {**cfg_mgr.config.get("hook_style", {}), **(payload.get("hook_style") if isinstance(payload.get("hook_style"), dict) else {})}
-        hook_style["enabled"] = self._as_bool(hook_style.get("enabled", True), True)
-        hook_style["font_size"] = max(0.025, min(0.12, float(hook_style.get("font_size", 0.054) or 0.054)))
+        hook_style["enabled"] = self._as_bool(hook_style.get("enabled", False), False)
+        hook_style["font_size"] = max(0.025, min(0.12, float(self._as_float(hook_style.get("font_size"), 0.054))))
         hook_style["text_color"] = str(hook_style.get("text_color") or "#0033ff")[:16]
         hook_style["background_color"] = str(hook_style.get("background_color") or "#ffffff")[:16]
         hook_style["corner_radius"] = max(0, min(80, self._as_int(hook_style.get("corner_radius"), 28)))
-        hook_style["duration"] = max(1.0, min(10.0, float(hook_style.get("duration", 5.0) or 5.0)))
-        hook_style["position_x"] = max(0.0, min(1.0, float(hook_style.get("position_x", 0.5) or 0.5)))
-        hook_style["position_y"] = max(0.0, min(1.0, float(hook_style.get("position_y", 0.2) or 0.2)))
+        hook_style["duration"] = max(1.0, min(10.0, float(self._as_float(hook_style.get("duration"), 5.0))))
+        hook_style["position_x"] = max(0.0, min(1.0, float(self._as_float(hook_style.get("position_x"), 0.5))))
+        hook_style["position_y"] = max(0.0, min(1.0, float(self._as_float(hook_style.get("position_y"), 0.2))))
         hook_style["shape"] = str(hook_style.get("shape") or "rectangle")
         hook_style["font_family"] = str(hook_style.get("font_family") or "Capo Sfogliato")[:80]
         # Subtitle settings
         _sub_payload = payload.get("subtitle") if isinstance(payload.get("subtitle"), dict) else {}
         subtitle_cfg = {**cfg_mgr.config.get("subtitle", {}), **_sub_payload}
-        subtitle_cfg["enabled"] = self._as_bool(subtitle_cfg.get("enabled", True), True)
+        subtitle_cfg["enabled"] = self._as_bool(subtitle_cfg.get("enabled", False), False)
         subtitle_cfg["color"] = str(subtitle_cfg.get("color") or "#ffff00")[:16]
         subtitle_cfg["bg_color"] = str(subtitle_cfg.get("bg_color") or "#000000")[:16]
-        subtitle_cfg["size"] = max(0.01, min(0.1, float(subtitle_cfg.get("size", 0.035) or 0.035)))
-        subtitle_cfg["position_x"] = max(0.0, min(1.0, float(subtitle_cfg.get("position_x", 0.5) or 0.5)))
-        subtitle_cfg["position_y"] = max(0.0, min(1.0, float(subtitle_cfg.get("position_y", 0.85) or 0.85)))
+        subtitle_cfg["size"] = max(0.01, min(0.1, float(self._as_float(subtitle_cfg.get("size"), 0.035))))
+        subtitle_cfg["position_x"] = max(0.0, min(1.0, float(self._as_float(subtitle_cfg.get("position_x"), 0.5))))
+        subtitle_cfg["position_y"] = max(0.0, min(1.0, float(self._as_float(subtitle_cfg.get("position_y"), 0.85))))
         subtitle_cfg["text_transform"] = str(subtitle_cfg.get("text_transform") or "none")
-        subtitle_cfg["bg_opacity"] = max(0.0, min(1.0, float(subtitle_cfg.get("bg_opacity", 0.8) or 0.8)))
+        subtitle_cfg["bg_opacity"] = max(0.0, min(1.0, float(self._as_float(subtitle_cfg.get("bg_opacity"), 0.8))))
         subtitle_cfg["font_family"] = str(subtitle_cfg.get("font_family") or "Plus Jakarta Sans")[:80]
         subtitle_cfg["font_weight"] = max(100, min(900, int(subtitle_cfg.get("font_weight") or 800)))
-        blur_background = {**cfg_mgr.config.get("blur_background", {"enabled": True, "zoom": 1.08, "strength": 30}), **(payload.get("blur_background") if isinstance(payload.get("blur_background"), dict) else {})}
-        blur_background["enabled"] = self._as_bool(blur_background.get("enabled", True), True)
+        blur_background = {**cfg_mgr.config.get("blur_background", {"enabled": False, "zoom": 1.08, "strength": 30}), **(payload.get("blur_background") if isinstance(payload.get("blur_background"), dict) else {})}
+        blur_background["enabled"] = self._as_bool(blur_background.get("enabled", False), False)
         blur_background["zoom"] = max(1.0, min(1.4, float(blur_background.get("zoom", 1.08) or 1.08)))
         blur_background["strength"] = max(10, min(60, self._as_int(blur_background.get("strength"), 30)))
         providers = cfg_mgr.config.setdefault("ai_providers", {})
@@ -459,7 +464,12 @@ class WebJobManager:
             self._write_run_meta(run_dir, url, {"video_quality": str(cfg.get("video_quality", "720")), "landscape_blur": landscape_blur, "screen_size": screen_size, "add_hook": add_hook, "add_captions": add_captions, "subtitle_language": subtitle_language, "status": "staged", "file_exists": True})
             self._add_log(f"Output folder: {run_dir}")
             self._add_log("Preparing AI/video processor")
-            subtitle_style = {**cfg.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360}), "position": cfg.get("subtitle_position", "auto")}
+            # Merge rich subtitle settings with legacy subtitle_style
+            subtitle_style = {
+                **cfg.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360}),
+                **cfg.get("subtitle", {}),
+                "position": cfg.get("subtitle_position", "auto")
+            }
             ai_providers = dict(cfg.get("ai_providers") or {})
             ai_providers["parallel_workers"] = int(cfg.get("parallel_workers", 2))
             core = AutoClipperCore(
@@ -606,6 +616,32 @@ class WebJobManager:
                 return True
         return False
 
+    def _is_url_in_gallery(self, url):
+        url = url.strip()
+        if not url: return False
+        
+        from utils.helpers import extract_video_id
+        vid = extract_video_id(url)
+        
+        output_dir = self._output_root()
+        if not output_dir.exists():
+            return False
+            
+        for folder in output_dir.iterdir():
+            if not folder.is_dir() or folder.name == "_temp":
+                continue
+            meta = self._read_json(folder / "run.json")
+            if not meta.get("saved_clips"):
+                continue
+            
+            saved_url = meta.get("url", "")
+            if vid and extract_video_id(saved_url) == vid:
+                return True
+            elif not vid and saved_url == url:
+                return True
+                
+        return False
+
     def _enforce_retention(self, max_active=10):
         output_dir = self._output_root()
         sessions = []
@@ -674,6 +710,14 @@ class WebJobManager:
         )
         user = f"\nArahan pengguna: {instruction}" if instruction else ""
         return f"{prompt or AutoClipperCore.get_default_prompt()}{viral}{user}"
+
+    def _as_float(self, value, default=0.0):
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return default
 
     def _as_int(self, value, default=0):
         try:

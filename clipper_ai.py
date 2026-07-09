@@ -216,7 +216,7 @@ Transcript:
         """Find highlights using AI (OpenAI-compatible API)"""
         self.log(f"[2/4] Finding highlights (using {self.model})...")
         
-        request_clips = num_clips + 3
+        request_clips = num_clips + 5
         
         video_context = ""
         if video_info:
@@ -235,6 +235,11 @@ Transcript:
             self.log("  ⚠ Warning: {transcript} placeholder not replaced - check your system prompt")
         if "{num_clips}" in self.system_prompt and "{num_clips}" in prompt:
             self.log("  ⚠ Warning: {num_clips} placeholder not replaced - check your system prompt")
+
+        import random
+        seed = random.randint(1000, 9999)
+        variety_hint = f"\n\n[SISTEM: Generate dengan variasi baru (Seed: {seed}). Prioritaskan segmen/timestamp yang BERBEDA dari yang biasanya paling jelas. Cari hidden gems atau momen unik yang sebelumnya mungkin terlewat.]"
+        prompt += variety_hint
 
         # Use OpenAI-compatible API for all providers
         self.log(f"  Using API: {self.highlight_client.base_url}")

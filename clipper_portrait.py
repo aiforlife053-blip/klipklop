@@ -59,52 +59,54 @@ class PortraitMixin(ClipperBase):
         )
         use_faces = not face_cascade.empty()
         
-        # First pass: analyze frames
-        crop_positions = []
-        current_target = orig_w / 2
-        
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+        try:
+            # First pass: analyze frames
+            crop_positions = []
+            current_target = orig_w / 2
             
-            if use_faces:
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(50, 50))
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
                 
-                if len(faces) > 0:
-                    # Find largest face
-                    largest = max(faces, key=lambda f: f[2] * f[3])
-                    current_target = largest[0] + largest[2] / 2
+                if use_faces:
+                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(50, 50))
+                    
+                    if len(faces) > 0:
+                        # Find largest face
+                        largest = max(faces, key=lambda f: f[2] * f[3])
+                        current_target = largest[0] + largest[2] / 2
+                
+                crop_x = int(current_target - crop_w / 2)
+                crop_x = max(0, min(crop_x, orig_w - crop_w))
+                crop_positions.append(crop_x)
             
-            crop_x = int(current_target - crop_w / 2)
-            crop_x = max(0, min(crop_x, orig_w - crop_w))
-            crop_positions.append(crop_x)
-        
-        # Stabilize positions
-        crop_positions = self.stabilize_positions(crop_positions)
-        
-        # Second pass: create video
-        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-        temp_video = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
-        
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(temp_video, fourcc, fps, (out_w, out_h))
-        
-        frame_idx = 0
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+            # Stabilize positions
+            crop_positions = self.stabilize_positions(crop_positions)
             
-            crop_x = crop_positions[frame_idx] if frame_idx < len(crop_positions) else crop_positions[-1]
-            cropped = frame[0:crop_h, crop_x:crop_x+crop_w]
-            resized = cv2.resize(cropped, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
-            out.write(resized)
-            frame_idx += 1
-        
-        cap.release()
-        out.release()
+            # Second pass: create video
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            temp_video = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
+            
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(temp_video, fourcc, fps, (out_w, out_h))
+            
+            frame_idx = 0
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                
+                crop_x = crop_positions[frame_idx] if frame_idx < len(crop_positions) else crop_positions[-1]
+                cropped = frame[0:crop_h, crop_x:crop_x+crop_w]
+                resized = cv2.resize(cropped, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
+                out.write(resized)
+                frame_idx += 1
+        finally:
+            cap.release()
+            if 'out' in locals():
+                out.release()
         
         # Merge with audio using GPU/CPU encoder
         encoder_args = self.get_video_encoder_args()

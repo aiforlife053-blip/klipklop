@@ -5,7 +5,6 @@ import { api } from '@/lib/api';
 
 export default function Preview() {
   const { settings, setSettings } = useOutletContext<any>();
-  const [activeAccordion, setActiveAccordion] = useState<string>('watermark');
   const [dragging, setDragging] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
@@ -126,20 +125,16 @@ export default function Preview() {
     setIsDirty(current !== lastSavedSettingsRef.current);
   }, [settings]);
 
-  const AccordionHeader = ({ id, title, icon, enabled, onToggle }: any) => (
-    <div 
-      className={`flex items-center justify-between p-4 cursor-pointer transition-all ${activeAccordion === id ? 'bg-orange-50/50' : 'hover:bg-slate-50'}`}
-      onClick={() => setActiveAccordion(id)}
-    >
+  const SectionHeader = ({ title, icon, enabled }: any) => (
+    <div className="flex items-center justify-between p-4 bg-orange-50/20 border-b border-slate-100">
       <div className="flex items-center gap-3">
-        <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${activeAccordion === id ? 'bg-orange-100 text-primary' : 'bg-slate-100 text-slate-500'}`}>
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-orange-100 text-primary">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={icon}></path></svg>
         </div>
-        <h4 className={`text-[14px] font-bold ${activeAccordion === id ? 'text-slate-900' : 'text-slate-700'}`}>{title}</h4>
+        <h4 className="text-[14px] font-bold text-slate-900">{title}</h4>
       </div>
       <div className="flex items-center gap-3">
         {enabled && <span className="w-2 h-2 rounded-full bg-emerald-500"></span>}
-        <svg className={`w-4 h-4 text-slate-400 transition-transform ${activeAccordion === id ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
       </div>
     </div>
   );
@@ -215,7 +210,7 @@ export default function Preview() {
 
       {/* Unsaved changes blocker modal */}
       {showBlockerModal && createPortal(
-        <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl border border-slate-100 overflow-hidden animate-in zoom-in-95 duration-150">
             <div className="p-6 space-y-3">
               <div className="w-11 h-11 bg-orange-100 rounded-xl flex items-center justify-center">
@@ -250,309 +245,230 @@ export default function Preview() {
         document.body
       )}
 
-        <div className="flex-1 divide-y divide-slate-100">
+        <div className="flex-1 p-3 grid grid-cols-2 gap-3 overflow-y-auto content-start bg-slate-50">
           
-          {/* Watermark Accordion */}
-          <div className="flex flex-col">
-            <AccordionHeader 
-              id="watermark" 
-              title="Watermark Logo" 
-              icon="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" 
-              enabled={settings.watermark.enabled} 
-            />
-            {activeAccordion === 'watermark' && (
-              <div className="p-5 pt-2 space-y-5 animate-in slide-in-from-top-2 duration-200">
-                <div className="flex items-center justify-between">
-                  <label className="text-[13px] font-bold text-slate-700">Aktifkan Watermark</label>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" checked={settings.watermark.enabled} onChange={(e) => setSettings({...settings, watermark: {...settings.watermark, enabled: e.target.checked}})} />
-                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
-                  </label>
+          {/* Watermark Section */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-col gap-2.5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h4 className="text-[13px] font-bold text-slate-900 flex items-center gap-2">
+                <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                Watermark Logo
+              </h4>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" className="sr-only peer" checked={settings.watermark.enabled} onChange={(e) => setSettings({...settings, watermark: {...settings.watermark, enabled: e.target.checked}})} />
+                <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
+              </label>
+            </div>
+            {settings.watermark.enabled && (
+              <div className="space-y-3 pt-1">
+                <div className="border border-slate-200 border-dashed rounded-lg p-2 flex items-center justify-center gap-2 hover:bg-slate-50 transition cursor-pointer">
+                  <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                  <span className="text-[11px] font-semibold text-slate-700">Upload Image</span>
                 </div>
-                {/* Upload Card Mock */}
-                <div className="border border-slate-200 border-dashed rounded-xl p-4 flex flex-col items-center justify-center text-center hover:bg-slate-50 transition cursor-pointer">
-                  <div className="w-10 h-10 rounded-full bg-orange-50 flex items-center justify-center text-primary mb-2">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-semibold text-slate-600">Opacity</label>
+                    <span className="text-[10px] font-medium text-slate-400">{Math.round(settings.watermark.opacity * 100)}%</span>
                   </div>
-                  <span className="text-[13px] font-semibold text-slate-700">Upload Image</span>
-                  <span className="text-[11px] text-slate-400 mt-0.5">PNG, JPG up to 5MB</span>
+                  <input type="range" min="0" max="1" step="0.01" value={settings.watermark.opacity} onChange={(e) => setSettings({...settings, watermark: {...settings.watermark, opacity: parseFloat(e.target.value)}})} className="w-full h-1 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
                 </div>
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[12px] font-semibold text-slate-600">Opacity</label>
-                      <span className="text-[12px] font-medium text-slate-400">{Math.round(settings.watermark.opacity * 100)}%</span>
-                    </div>
-                    <input type="range" min="0" max="1" step="0.01" value={settings.watermark.opacity} onChange={(e) => setSettings({...settings, watermark: {...settings.watermark, opacity: parseFloat(e.target.value)}})} className="w-full h-1.5 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-semibold text-slate-600">Scale</label>
+                    <span className="text-[10px] font-medium text-slate-400">{Math.round(settings.watermark.scale * 100)}%</span>
                   </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[12px] font-semibold text-slate-600">Scale / Ukuran</label>
-                      <span className="text-[12px] font-medium text-slate-400">{Math.round(settings.watermark.scale * 100)}%</span>
-                    </div>
-                    <input type="range" min="0.1" max="2" step="0.05" value={settings.watermark.scale} onChange={(e) => setSettings({...settings, watermark: {...settings.watermark, scale: parseFloat(e.target.value)}})} className="w-full h-1.5 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
-                  </div>
+                  <input type="range" min="0.1" max="2" step="0.05" value={settings.watermark.scale} onChange={(e) => setSettings({...settings, watermark: {...settings.watermark, scale: parseFloat(e.target.value)}})} className="w-full h-1 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
                 </div>
               </div>
             )}
           </div>
 
-          {/* Credit Accordion */}
-          <div className="flex flex-col">
-            <AccordionHeader 
-              id="credit" 
-              title="Credit Text" 
-              icon="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" 
-              enabled={settings.credit_watermark.enabled} 
-            />
-            {activeAccordion === 'credit' && (
-              <div className="p-5 pt-2 space-y-5 animate-in slide-in-from-top-2 duration-200">
-                <div className="flex items-center justify-between">
-                  <label className="text-[13px] font-bold text-slate-700">Aktifkan Credit Text</label>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" checked={settings.credit_watermark.enabled} onChange={(e) => setSettings({...settings, credit_watermark: {...settings.credit_watermark, enabled: e.target.checked}})} />
-                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
-                  </label>
-                </div>
+          {/* Credit Section */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-col gap-2.5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h4 className="text-[13px] font-bold text-slate-900 flex items-center gap-2">
+                <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                Credit Text
+              </h4>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" className="sr-only peer" checked={settings.credit_watermark.enabled} onChange={(e) => setSettings({...settings, credit_watermark: {...settings.credit_watermark, enabled: e.target.checked}})} />
+                <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
+              </label>
+            </div>
+            {settings.credit_watermark.enabled && (
+              <div className="space-y-3 pt-1">
                 <div>
-                  <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Format Teks</label>
-                  <input type="text" value={settings.credit_watermark.text} onChange={(e) => setSettings({...settings, credit_watermark: {...settings.credit_watermark, text: e.target.value}})} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-primary font-mono text-slate-700 bg-slate-50" placeholder="sc : {channel}" />
+                  <input type="text" value={settings.credit_watermark.text} onChange={(e) => setSettings({...settings, credit_watermark: {...settings.credit_watermark, text: e.target.value}})} className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-[11px] focus:outline-none focus:border-primary font-mono text-slate-700 bg-slate-50" placeholder="sc : {channel}" />
                 </div>
-                <div className="flex items-center gap-3">
-                  <label className="text-[12px] font-semibold text-slate-600 w-16">Warna</label>
-                  <input type="color" value={settings.credit_watermark.color} onChange={(e) => setSettings({...settings, credit_watermark: {...settings.credit_watermark, color: e.target.value}})} className="w-8 h-8 rounded cursor-pointer border border-slate-200 p-0.5 bg-white shrink-0" />
-                  <input type="text" value={settings.credit_watermark.color.toUpperCase()} readOnly className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-[12px] font-medium bg-slate-50 text-slate-600 focus:outline-none" />
+                <div className="flex items-center gap-2">
+                  <input type="color" value={settings.credit_watermark.color} onChange={(e) => setSettings({...settings, credit_watermark: {...settings.credit_watermark, color: e.target.value}})} className="w-6 h-6 rounded cursor-pointer border border-slate-200 p-0.5 bg-white shrink-0" />
+                  <input type="text" value={settings.credit_watermark.color.toUpperCase()} readOnly className="flex-1 px-2 py-1 border border-slate-200 rounded-lg text-[11px] font-medium bg-slate-50 text-slate-600 focus:outline-none" />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <label className="text-[12px] font-semibold text-slate-600">Font Size</label>
-                      <span className="text-[12px] font-medium text-slate-400">{Math.round(settings.credit_watermark.size * 1000)}%</span>
+                      <label className="text-[10px] font-semibold text-slate-600">Size</label>
+                      <span className="text-[9px] font-medium text-slate-400">{Math.round(settings.credit_watermark.size * 1000)}%</span>
                     </div>
-                    <input type="range" min="0.01" max="0.1" step="0.005" value={settings.credit_watermark.size} onChange={(e) => setSettings({...settings, credit_watermark: {...settings.credit_watermark, size: parseFloat(e.target.value)}})} className="w-full h-1.5 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
+                    <input type="range" min="0.01" max="0.1" step="0.005" value={settings.credit_watermark.size} onChange={(e) => setSettings({...settings, credit_watermark: {...settings.credit_watermark, size: parseFloat(e.target.value)}})} className="w-full h-1 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <label className="text-[12px] font-semibold text-slate-600">Opacity</label>
-                      <span className="text-[12px] font-medium text-slate-400">{Math.round(settings.credit_watermark.opacity * 100)}%</span>
+                      <label className="text-[10px] font-semibold text-slate-600">Opacity</label>
+                      <span className="text-[9px] font-medium text-slate-400">{Math.round(settings.credit_watermark.opacity * 100)}%</span>
                     </div>
-                    <input type="range" min="0" max="1" step="0.01" value={settings.credit_watermark.opacity} onChange={(e) => setSettings({...settings, credit_watermark: {...settings.credit_watermark, opacity: parseFloat(e.target.value)}})} className="w-full h-1.5 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
+                    <input type="range" min="0" max="1" step="0.01" value={settings.credit_watermark.opacity} onChange={(e) => setSettings({...settings, credit_watermark: {...settings.credit_watermark, opacity: parseFloat(e.target.value)}})} className="w-full h-1 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
                   </div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Hook Accordion */}
-          <div className="flex flex-col">
-            <AccordionHeader 
-              id="hook" 
-              title="Hook Style" 
-              icon="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" 
-              enabled={settings.hook_style.enabled} 
-            />
-            {activeAccordion === 'hook' && (
-              <div className="p-5 pt-2 space-y-5 animate-in slide-in-from-top-2 duration-200">
-                <div className="flex items-center justify-between">
-                  <label className="text-[13px] font-bold text-slate-700">Aktifkan Hook Opening</label>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" checked={settings.hook_style.enabled} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, enabled: e.target.checked}})} />
-                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
-                  </label>
-                </div>
-                
-                <div className="space-y-3 pt-2">
-                  <div className="space-y-2">
-                    <select value={settings.hook_style.font_family || 'Capo Sfogliato'} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, font_family: e.target.value}})} className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[13px] font-medium focus:outline-none focus:border-primary bg-slate-50 appearance-none cursor-pointer">
-                      <option value="Capo Sfogliato">Capo Sfogliato</option>
-                      <option value="Super Hockey">Super Hockey</option>
-                      <option value="Super Kidpop">Super Kidpop</option>
-                      <option value="Inter">Inter</option>
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <select value={settings.hook_style.shape || 'rectangle'} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, shape: e.target.value}})} className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[13px] font-medium focus:outline-none focus:border-primary bg-slate-50 appearance-none cursor-pointer">
-                      <option value="rectangle">Rectangle (Kotak)</option>
-                      <option value="pill">Pill (Kapsul Bulat)</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="flex items-center gap-3 bg-slate-50 border border-slate-100 p-2 rounded-xl">
-                    <input type="color" value={settings.hook_style.text_color} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, text_color: e.target.value}})} className="w-7 h-7 rounded cursor-pointer border border-slate-200 p-0.5 bg-white shrink-0" />
-                    <label className="text-[12px] font-semibold text-slate-600">Text Color</label>
-                  </div>
-                  <div className="flex items-center gap-3 bg-slate-50 border border-slate-100 p-2 rounded-xl">
-                    <input type="color" value={settings.hook_style.background_color || settings.hook_style.bg_color} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, background_color: e.target.value, bg_color: e.target.value}})} className="w-7 h-7 rounded cursor-pointer border border-slate-200 p-0.5 bg-white shrink-0" />
-                    <label className="text-[12px] font-semibold text-slate-600">Bg Color</label>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 pt-2">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[12px] font-semibold text-slate-600">Font Size</label>
-                      <span className="text-[12px] font-medium text-slate-400">{Math.round((settings.hook_style.font_size || 0.05) * 1000)}%</span>
-                    </div>
-                    <input type="range" min="0.01" max="0.1" step="0.005" value={settings.hook_style.font_size} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, font_size: parseFloat(e.target.value)}})} className="w-full h-1.5 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[12px] font-semibold text-slate-600">Corner Radius</label>
-                      <span className="text-[12px] font-medium text-slate-400">{settings.hook_style.corner_radius}px</span>
-                    </div>
-                    <input type="range" min="0" max="100" step="1" value={settings.hook_style.corner_radius} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, corner_radius: parseInt(e.target.value)}})} className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer ${settings.hook_style.shape === 'pill' ? 'bg-slate-200 accent-slate-400 opacity-50' : 'bg-orange-100 accent-primary'}`} disabled={settings.hook_style.shape === 'pill'} />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Subtitle Accordion */}
-          <div className="flex flex-col">
-            <AccordionHeader 
-              id="subtitle" 
-              title="Subtitle Style" 
-              icon="M4 6h16M4 12h16m-7 6h7" 
-              enabled={settings.subtitle?.enabled} 
-            />
-            {activeAccordion === 'subtitle' && (
-              <div className="p-5 pt-2 space-y-5 animate-in slide-in-from-top-2 duration-200">
-                <div className="flex items-center justify-between">
-                  <label className="text-[13px] font-bold text-slate-700">Aktifkan Subtitle</label>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" checked={settings.subtitle?.enabled} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, enabled: e.target.checked}})} />
-                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
-                  </label>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="flex items-center gap-3 bg-slate-50 border border-slate-100 p-2 rounded-xl">
-                    <input type="color" value={settings.subtitle?.color || '#ffff00'} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, color: e.target.value}})} className="w-7 h-7 rounded cursor-pointer border border-slate-200 p-0.5 bg-white shrink-0" />
-                    <label className="text-[12px] font-semibold text-slate-600">Text Color</label>
-                  </div>
-                  <div className="flex items-center gap-3 bg-slate-50 border border-slate-100 p-2 rounded-xl">
-                    <input type="color" value={settings.subtitle?.bg_color || '#000000'} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, bg_color: e.target.value}})} className="w-7 h-7 rounded cursor-pointer border border-slate-200 p-0.5 bg-white shrink-0" />
-                    <label className="text-[12px] font-semibold text-slate-600">Bg Color</label>
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4 pt-2">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[12px] font-semibold text-slate-600">Font Size</label>
-                      <span className="text-[12px] font-medium text-slate-400">{Math.round((settings.subtitle?.size || 0.04) * 1000)}%</span>
-                    </div>
-                    <input type="range" min="0.01" max="0.1" step="0.005" value={settings.subtitle?.size || 0.04} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, size: parseFloat(e.target.value)}})} className="w-full h-1.5 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[12px] font-semibold text-slate-600">Format Teks</label>
-                    </div>
-                    <select 
-                      value={settings.subtitle?.text_transform || 'none'} 
-                      onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, text_transform: e.target.value}})} 
-                      className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-[13px] font-medium focus:outline-none focus:border-primary bg-slate-50 appearance-none cursor-pointer"
-                    >
-                      <option value="none">Normal</option>
-                      <option value="uppercase">UPPERCASE</option>
-                      <option value="lowercase">lowercase</option>
-                      <option value="capitalize">Capitalize</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="space-y-2 pt-1">
-                  <label className="text-[12px] font-semibold text-slate-600">Font Family</label>
-                  <select
-                    value={settings.subtitle?.font_family || 'Plus Jakarta Sans'}
-                    onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, font_family: e.target.value}})}
-                    className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-[13px] font-medium focus:outline-none focus:border-primary bg-slate-50 appearance-none cursor-pointer"
-                  >
-                    <option value="Plus Jakarta Sans">Plus Jakarta Sans</option>
-                    <option value="Poppins">Poppins</option>
+          {/* Hook Section */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-col gap-2.5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h4 className="text-[13px] font-bold text-slate-900 flex items-center gap-2">
+                <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path></svg>
+                Hook Style
+              </h4>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" className="sr-only peer" checked={settings.hook_style.enabled} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, enabled: e.target.checked}})} />
+                <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
+              </label>
+            </div>
+            {settings.hook_style.enabled && (
+              <div className="space-y-3 pt-1">
+                <div className="grid grid-cols-2 gap-2">
+                  <select value={settings.hook_style.font_family || 'Capo Sfogliato'} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, font_family: e.target.value}})} className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-[11px] font-medium focus:outline-none focus:border-primary bg-slate-50">
+                    <option value="Capo Sfogliato">Capo Sfogliato</option>
+                    <option value="Super Hockey">Super Hockey</option>
+                    <option value="Super Kidpop">Super Kidpop</option>
                     <option value="Inter">Inter</option>
-                    <option value="Arial">Arial</option>
-                    <option value="sans-serif">Sans-serif</option>
+                  </select>
+                  <select value={settings.hook_style.shape || 'rectangle'} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, shape: e.target.value}})} className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-[11px] font-medium focus:outline-none focus:border-primary bg-slate-50">
+                    <option value="rectangle">Rectangle</option>
+                    <option value="pill">Pill</option>
                   </select>
                 </div>
-
-                <div className="space-y-2 pt-1">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[12px] font-semibold text-slate-600">Tebal / Tipis</label>
-                    <span className="text-[12px] font-medium text-slate-400">
-                      {(() => {
-                        const w = settings.subtitle?.font_weight || 800;
-                        if (w <= 100) return 'Tipis Sekali';
-                        if (w <= 200) return 'Tipis';
-                        if (w <= 300) return 'Light';
-                        if (w <= 400) return 'Normal';
-                        if (w <= 500) return 'Medium';
-                        if (w <= 600) return 'Semi Bold';
-                        if (w <= 700) return 'Bold';
-                        if (w <= 800) return 'Extra Bold';
-                        return 'Black';
-                      })()}
-                    </span>
+                <div className="flex gap-2">
+                  <div className="flex-1 flex items-center gap-1.5 bg-slate-50 border border-slate-100 p-1.5 rounded-lg">
+                    <input type="color" value={settings.hook_style.text_color} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, text_color: e.target.value}})} className="w-5 h-5 rounded cursor-pointer border border-slate-200 p-0.5 bg-white shrink-0" />
+                    <label className="text-[10px] font-semibold text-slate-600">Text</label>
                   </div>
-                  <div className="relative">
-                    <input
-                      type="range" min="100" max="900" step="100"
-                      value={settings.subtitle?.font_weight || 800}
-                      onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, font_weight: parseInt(e.target.value)}})}
-                      className="w-full h-1.5 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary"
-                    />
-                    <div className="flex justify-between mt-0.5">
-                      <span className="text-[9px] text-slate-300 font-medium">Tipis</span>
-                      <span className="text-[9px] text-slate-300 font-medium">Tebal</span>
+                  <div className="flex-1 flex items-center gap-1.5 bg-slate-50 border border-slate-100 p-1.5 rounded-lg">
+                    <input type="color" value={settings.hook_style.background_color || settings.hook_style.bg_color} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, background_color: e.target.value, bg_color: e.target.value}})} className="w-5 h-5 rounded cursor-pointer border border-slate-200 p-0.5 bg-white shrink-0" />
+                    <label className="text-[10px] font-semibold text-slate-600">Bg</label>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-semibold text-slate-600">Size</label>
+                      <span className="text-[9px] font-medium text-slate-400">{Math.round((settings.hook_style.font_size || 0.05) * 1000)}%</span>
                     </div>
+                    <input type="range" min="0.01" max="0.1" step="0.005" value={settings.hook_style.font_size} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, font_size: parseFloat(e.target.value)}})} className="w-full h-1 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-semibold text-slate-600">Radius</label>
+                      <span className="text-[9px] font-medium text-slate-400">{settings.hook_style.corner_radius}px</span>
+                    </div>
+                    <input type="range" min="0" max="100" step="1" value={settings.hook_style.corner_radius} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, corner_radius: parseInt(e.target.value)}})} className={`w-full h-1 rounded-lg appearance-none cursor-pointer ${settings.hook_style.shape === 'pill' ? 'bg-slate-200 accent-slate-400 opacity-50' : 'bg-orange-100 accent-primary'}`} disabled={settings.hook_style.shape === 'pill'} />
                   </div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Background Blur Accordion */}
-          <div className="flex flex-col">
-            <AccordionHeader 
-              id="blur" 
-              title="Background Blur" 
-              icon="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" 
-              enabled={settings.blur_background.enabled} 
-            />
-            {activeAccordion === 'blur' && (
-              <div className="p-5 pt-2 space-y-5 animate-in slide-in-from-top-2 duration-200">
-                <div className="flex items-center justify-between">
-                  <label className="text-[13px] font-bold text-slate-700">Aktifkan Effect Blur</label>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" checked={settings.blur_background.enabled} onChange={(e) => setSettings({...settings, blur_background: {...settings.blur_background, enabled: e.target.checked}})} />
-                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
-                  </label>
+          {/* Subtitle Section */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-col gap-2.5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h4 className="text-[13px] font-bold text-slate-900 flex items-center gap-2">
+                <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
+                Subtitle Style
+              </h4>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" className="sr-only peer" checked={settings.subtitle?.enabled} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, enabled: e.target.checked}})} />
+                <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
+              </label>
+            </div>
+            {settings.subtitle?.enabled && (
+              <div className="space-y-3 pt-1">
+                <div className="flex gap-2">
+                  <div className="flex-1 flex items-center gap-1.5 bg-slate-50 border border-slate-100 p-1.5 rounded-lg">
+                    <input type="color" value={settings.subtitle?.color || '#ffff00'} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, color: e.target.value}})} className="w-5 h-5 rounded cursor-pointer border border-slate-200 p-0.5 bg-white shrink-0" />
+                    <label className="text-[10px] font-semibold text-slate-600">Text</label>
+                  </div>
+                  <div className="flex-1 flex items-center gap-1.5 bg-slate-50 border border-slate-100 p-1.5 rounded-lg">
+                    <input type="color" value={settings.subtitle?.bg_color || '#000000'} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, bg_color: e.target.value}})} className="w-5 h-5 rounded cursor-pointer border border-slate-200 p-0.5 bg-white shrink-0" />
+                    <label className="text-[10px] font-semibold text-slate-600">Bg</label>
+                  </div>
                 </div>
-                
-                <div className="space-y-4 pt-2">
-                  <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <select value={settings.subtitle?.font_family || 'Plus Jakarta Sans'} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, font_family: e.target.value}})} className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-[11px] font-medium focus:outline-none focus:border-primary bg-slate-50">
+                    <option value="Plus Jakarta Sans">Plus Jakarta</option>
+                    <option value="Poppins">Poppins</option>
+                    <option value="Inter">Inter</option>
+                  </select>
+                  <select value={settings.subtitle?.text_transform || 'none'} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, text_transform: e.target.value}})} className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-[11px] font-medium focus:outline-none focus:border-primary bg-slate-50">
+                    <option value="none">Normal</option>
+                    <option value="uppercase">UPPERCASE</option>
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <label className="text-[12px] font-semibold text-slate-600">Video Center Scale</label>
-                      <span className="text-[12px] font-medium text-slate-400">{Math.round((settings.blur_background.scale || 1.0) * 100)}%</span>
+                      <label className="text-[10px] font-semibold text-slate-600">Size</label>
+                      <span className="text-[9px] font-medium text-slate-400">{Math.round((settings.subtitle?.size || 0.04) * 1000)}%</span>
                     </div>
-                    <input type="range" min="0.5" max="1.5" step="0.01" value={settings.blur_background.scale || 1.0} onChange={(e) => setSettings({...settings, blur_background: {...settings.blur_background, scale: parseFloat(e.target.value)}})} className="w-full h-1.5 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
+                    <input type="range" min="0.01" max="0.1" step="0.005" value={settings.subtitle?.size || 0.04} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, size: parseFloat(e.target.value)}})} className="w-full h-1 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <label className="text-[12px] font-semibold text-slate-600">Background Zoom</label>
-                      <span className="text-[12px] font-medium text-slate-400">{Math.round(settings.blur_background.zoom * 100)}%</span>
+                      <label className="text-[10px] font-semibold text-slate-600">Weight</label>
+                      <span className="text-[9px] font-medium text-slate-400">{settings.subtitle?.font_weight || 800}</span>
                     </div>
-                    <input type="range" min="1.0" max="2.0" step="0.01" value={settings.blur_background.zoom} onChange={(e) => setSettings({...settings, blur_background: {...settings.blur_background, zoom: parseFloat(e.target.value)}})} className="w-full h-1.5 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
+                    <input type="range" min="100" max="900" step="100" value={settings.subtitle?.font_weight || 800} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, font_weight: parseInt(e.target.value)}})} className="w-full h-1 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
                   </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[12px] font-semibold text-slate-600">Blur Strength</label>
-                      <span className="text-[12px] font-medium text-slate-400">{settings.blur_background.strength}</span>
-                    </div>
-                    <input type="range" min="0" max="100" step="1" value={settings.blur_background.strength} onChange={(e) => setSettings({...settings, blur_background: {...settings.blur_background, strength: parseInt(e.target.value)}})} className="w-full h-1.5 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Background Blur Section */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-col gap-2.5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h4 className="text-[13px] font-bold text-slate-900 flex items-center gap-2">
+                <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
+                Bg Blur
+              </h4>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" className="sr-only peer" checked={settings.blur_background.enabled} onChange={(e) => setSettings({...settings, blur_background: {...settings.blur_background, enabled: e.target.checked}})} />
+                <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
+              </label>
+            </div>
+            {settings.blur_background.enabled && (
+              <div className="space-y-3 pt-1">
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-semibold text-slate-600">Video Scale</label>
+                    <span className="text-[10px] font-medium text-slate-400">{Math.round((settings.blur_background.scale || 1.0) * 100)}%</span>
                   </div>
+                  <input type="range" min="0.5" max="1.5" step="0.01" value={settings.blur_background.scale || 1.0} onChange={(e) => setSettings({...settings, blur_background: {...settings.blur_background, scale: parseFloat(e.target.value)}})} className="w-full h-1 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
+                </div>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-semibold text-slate-600">Bg Zoom</label>
+                    <span className="text-[10px] font-medium text-slate-400">{Math.round(settings.blur_background.zoom * 100)}%</span>
+                  </div>
+                  <input type="range" min="1.0" max="2.0" step="0.01" value={settings.blur_background.zoom} onChange={(e) => setSettings({...settings, blur_background: {...settings.blur_background, zoom: parseFloat(e.target.value)}})} className="w-full h-1 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
+                </div>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-semibold text-slate-600">Blur Strength</label>
+                    <span className="text-[10px] font-medium text-slate-400">{settings.blur_background.strength}</span>
+                  </div>
+                  <input type="range" min="0" max="100" step="1" value={settings.blur_background.strength} onChange={(e) => setSettings({...settings, blur_background: {...settings.blur_background, strength: parseInt(e.target.value)}})} className="w-full h-1 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
                 </div>
               </div>
             )}

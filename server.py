@@ -75,6 +75,8 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._json(is_youtube_connected(self._current_user()))
         elif parsed.path == "/api/activity":
             self._json(MANAGER.list_activities())
+        elif parsed.path.startswith("/api/meta"):
+            self._handle_api_meta()
         elif parsed.path.startswith("/api/"):
             self._json({"status": "error", "message": "API endpoint not found"}, 404)
         else:
@@ -409,6 +411,25 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         self.send_header("X-Frame-Options", "DENY")
+
+    def _handle_api_meta(self):
+        query = parse_qs(urlparse(self.path).query)
+        url = query.get("url", [""])[0].strip()
+        if not url:
+            self._json({"status": "error", "message": "Missing URL"}, 400)
+            return
+        
+        req = Request(f"https://www.youtube.com/oembed?url={urllib.parse.quote(url)}&format=json")
+        try:
+            with urlopen(req, timeout=5) as res:
+                data = json.loads(res.read().decode())
+                self._json({
+                    "title": data.get("title", ""),
+                    "author": data.get("author_name", ""),
+                    "thumbnail": data.get("thumbnail_url", "")
+                })
+        except Exception as e:
+            self._json({"status": "error", "message": str(e)}, 500)
 
     def _static(self, path):
         """Serve static files with allowlist for security"""

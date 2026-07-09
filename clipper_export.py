@@ -202,6 +202,7 @@ class ExportMixin(ClipperBase):
                 
                 if not final_file.exists():
                     raise Exception(f"Failed to create final video: {final_file}")
+                current_output = final_file
             
             self.log("  ✓ Added captions")
             current_step += 1
@@ -431,28 +432,36 @@ class ExportMixin(ClipperBase):
         
         # Build drawtext filter for each line
         # Style: Yellow/gold text on white background box
-        drawtext_filters = []
-        line_height = 85  # pixels between lines
-        font_size = 58
+        style = getattr(self, "hook_style_settings", {}) or {}
+        pos_x_ratio = float(style.get("position_x", 0.5))
+        pos_y_ratio = float(style.get("position_y", 0.333))
+        font_size_frac = float(style.get("font_size", 0.054))
+        font_color = str(style.get("text_color") or "#FFD700").lstrip("#")
+        bg_color = str(style.get("bg_color") or style.get("background_color") or "#FFFFFF").lstrip("#")
+        
+        # Matches Preview.tsx (size * 500 on 340px width -> size * 1588 on 1080px width)
+        font_size = max(20, int(font_size_frac * 1600))
+        line_height = int(font_size * 1.5)
+        
         total_text_height = len(lines) * line_height
-        start_y = (height // 3) - (total_text_height // 2)  # Position at upper third
+        start_y = int(pos_y_ratio * height) - (total_text_height // 2)
         
         for i, line in enumerate(lines):
             # Escape special characters for FFmpeg drawtext
-            escaped_line = line.replace("'", "'\\''").replace(":", "\\:").replace("\\", "\\\\")
+            escaped_line = line.replace("\\", "\\\\").replace("'", "'\\''").replace(":", "\\:")
             y_pos = start_y + (i * line_height)
             
-            # Yellow/gold text with white box background
+            # Text with background box
             font_path = self._get_ffmpeg_font_path()
             drawtext_filters.append(
                 f"drawtext=text='{escaped_line}':"
                 f"{font_path}"
                 f"fontsize={font_size}:"
-                f"fontcolor=#FFD700:"  # Golden yellow
+                f"fontcolor=0x{font_color}:"
                 f"box=1:"
-                f"boxcolor=white@0.95:"  # White background
-                f"boxborderw=12:"  # Padding around text
-                f"x=(w-text_w)/2:"
+                f"boxcolor=0x{bg_color}@0.95:"
+                f"boxborderw={int(font_size * 0.2)}:"
+                f"x=(w*{pos_x_ratio})-(text_w/2):"
                 f"y={y_pos}"
             )
         
@@ -686,10 +695,48 @@ class ExportMixin(ClipperBase):
         """Create ASS subtitle file with CapCut-style word-by-word highlighting"""
         
         style = getattr(self, "subtitle_style", {}) or {}
-        font = str(style.get("font") or "Plus Jakarta Sans").replace(",", " ")
-        size = int(style.get("size") or 58)
-        alignment = 2
-        bottom_margin = int(style.get("bottom_margin") or 360)
+        font = str(style.get("font") or style.get("font_family") or "Plus Jakarta Sans").replace(",", " ")
+        
+        size_val = float(style.get("size") or 0.04)
+        if size_val < 20: # If size is a ratio (like 0.03), map it to pixels
+            # Matches Preview.tsx (size * 500 on 340px width -> size * 1600)
+            size = int(size_val * 1600)
+        else:
+            size = int(size_val)
+            
+        pos_x_ratio = float(style.get("position_x", 0.5))
+        pos_y_ratio = float(style.get("position_y", 0.85))
+        pos_x = int(pos_x_ratio * 1080)
+        pos_y = int(pos_y_ratio * 1920)
+        
+        alignment = 5 # Middle-center anchor for precise \pos placement
+            
+        # Colors (ASS is &HAABBGGRR)
+        color_hex = str(style.get("color") or "#ffffff").strip("#")
+        bg_color_hex = str(style.get("bg_color") or "#000000").strip("#")
+        bg_opacity = float(style.get("bg_opacity", 0.8))
+        # Always use box if opacity > 0, ignoring old bg_box false flag
+        bg_box = True if bg_opacity > 0 else False
+        font_weight = int(style.get("font_weight", 800))
+        
+        if len(color_hex) == 6:
+            r, g, b = color_hex[0:2], color_hex[2:4], color_hex[4:6]
+            primary_colour = f"&H00{b}{g}{r}"
+        else:
+            primary_colour = "&H00FFFFFF"
+
+        if len(bg_color_hex) == 6:
+            r, g, b = bg_color_hex[0:2], bg_color_hex[2:4], bg_color_hex[4:6]
+            alpha_hex = f"{int((1.0 - bg_opacity) * 255):02X}"
+            back_colour = f"&H{alpha_hex}{b}{g}{r}"
+        else:
+            back_colour = "&H80000000"
+
+        # BorderStyle: 1=Outline, 3=Opaque Box
+        border_style = 3 if bg_box else 1
+        outline = 8 if not bg_box else 0
+        bold = -1 if font_weight >= 700 else 0
+
         ass_content = f"""[Script Info]
 Title: Auto-generated captions
 ScriptType: v4.00+
@@ -700,7 +747,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{size},&H00FFFFFF,&H00FFFFFF,&H00A07B24,&H00A07B24,-1,0,0,0,100,100,0,0,3,8,0,{alignment},80,80,{bottom_margin},1
+Style: Default,{font},{size},{primary_colour},&H00FFFFFF,&H00000000,{back_colour},{bold},0,0,0,100,100,0,0,{border_style},{outline},0,{alignment},0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -760,9 +807,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         })
         
         # Write events to ASS file
+        text_transform = str(style.get("text_transform", "none")).lower()
         for event in events:
             text = str(event['text']).replace('{', '').replace('}', '').replace('\n', ' ')
-            ass_content += f"Dialogue: 0,{event['start']},{event['end']},Default,,0,0,0,,{text}\n"
+            if text_transform == "uppercase":
+                text = text.upper()
+            elif text_transform == "lowercase":
+                text = text.lower()
+            elif text_transform == "capitalize":
+                text = text.title()
+            ass_content += f"Dialogue: 0,{event['start']},{event['end']},Default,,0,0,0,,{{\\pos({pos_x},{pos_y})}}{text}\n"
         
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(ass_content)
@@ -941,7 +995,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         # Resolve font path with sensible fallbacks
         font_candidates = [user_font_path, self._find_system_font_bold()]
         pil_font = None
-        font_px = max(20, int(font_size_frac * width))
+        # Matches Preview.tsx (size * 500 on 340px width -> size * 1600)
+        font_px = max(20, int(font_size_frac * 1600))
         for candidate in font_candidates:
             if not candidate or not os.path.exists(candidate):
                 continue
@@ -1303,7 +1358,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         opacity = self.watermark_settings.get("opacity", 0.8)
         
         # Calculate watermark width in pixels
-        watermark_width = int(video_width * scale)
+        # Matches Preview.tsx (scale * 150 on 340px width -> scale * 476)
+        watermark_width = int(scale * 476)
         
         # Calculate position in pixels
         x_pixels = int(pos_x * video_width)
@@ -1313,11 +1369,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         watermark_escaped = watermark_path.replace('\\', '/').replace(':', '\\:')
         
         # Build FFmpeg overlay filter with proper opacity control
-        # Scale watermark, apply opacity via colorchannelmixer, then overlay
+        # Scale watermark, apply opacity via colorchannelmixer, then overlay at the exact center (pos_x, pos_y)
         filter_complex = (
             f"[1:v]scale={watermark_width}:-1,format=rgba,"
             f"colorchannelmixer=aa={opacity}[wm];"
-            f"[0:v][wm]overlay={x_pixels}:{y_pixels}"
+            f"[0:v][wm]overlay=x='(main_w*{pos_x})-(overlay_w/2)':y='(main_h*{pos_y})-(overlay_h/2)'"
         )
         
         progress_callback(0.3)
@@ -1383,16 +1439,21 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         opacity = self.credit_watermark_settings.get("opacity", 0.7)
         color = str(self.credit_watermark_settings.get("color", "#FFFFFF")).lstrip("#") or "FFFFFF"
         
-        font_size = max(22, int(video_height * size))
+        # Matches Preview.tsx (size * 320 on 340px width -> size * 1016)
+        font_size = max(22, int(size * 1016))
         
         # Calculate position in pixels
         x_pixels = int(pos_x * video_width)
         y_pixels = int(pos_y * video_height)
         
         # Prepare credit text
-        credit_text = str(self.credit_watermark_settings.get("text") or "sc : {channel}").replace("{channel}", self.channel_name)
+        channel_display = self.channel_name
+        if not channel_display or channel_display == "{channel}":
+            channel_display = "Local Video" # Fallback for local files without youtube channel
+            
+        credit_text = str(self.credit_watermark_settings.get("text") or "sc : {channel}").replace("{channel}", channel_display)
         # Escape special characters for FFmpeg drawtext
-        credit_text_escaped = credit_text.replace("'", "'\\''").replace(":", "\\:")
+        credit_text_escaped = credit_text.replace("\\", "\\\\").replace("'", "'\\''").replace(":", "\\:")
         
         # Build FFmpeg drawtext filter
         # Use fontfile for portable FFmpeg (avoids fontconfig dependency)
@@ -1417,10 +1478,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f"text='{credit_text_escaped}':"
                 f"fontsize={font_size}:"
                 f"fontcolor=0x{color}@{opacity}:"
-                f"borderw=3:"
-                f"bordercolor=black@0.75:"
-                f"x={x_pixels}:"
-                f"y={y_pixels}-(text_h/2)"
+                f"x=(w*{pos_x})-(text_w/2):"
+                f"y=(h*{pos_y})-(text_h/2)"
             )
         else:
             # Fallback without fontfile (may cause fontconfig warning but should still work)
@@ -1428,10 +1487,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f"drawtext=text='{credit_text_escaped}':"
                 f"fontsize={font_size}:"
                 f"fontcolor=0x{color}@{opacity}:"
-                f"borderw=3:"
-                f"bordercolor=black@0.75:"
-                f"x={x_pixels}:"
-                f"y={y_pixels}-(text_h/2)"
+                f"x=(w*{pos_x})-(text_w/2):"
+                f"y=(h*{pos_y})-(text_h/2)"
             )
         
         progress_callback(0.3)

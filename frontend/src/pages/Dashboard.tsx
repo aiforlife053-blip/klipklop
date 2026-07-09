@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { api } from '@/lib/api';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
 
 export default function Dashboard() {
   const { status: globalStatus, settings } = useOutletContext<any>();
@@ -14,6 +15,8 @@ export default function Dashboard() {
   const [showInstructionModal, setShowInstructionModal] = useState(false);
   const [instruction, setInstruction] = useState('');
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
+  const [deleteConfirm, setDeleteConfirm] = useState<any>(null);
+  const [stopConfirm, setStopConfirm] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
 
@@ -21,9 +24,30 @@ export default function Dashboard() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [jobStatus, setJobStatus] = useState<any>(null);
   const [clips, setClips] = useState<any[]>([]);
-  const [logs, setLogs] = useState<string[]>([]);
   const [error, setError] = useState('');
+  const [videoMeta, setVideoMeta] = useState<{title?: string, author_name?: string, thumbnail_url?: string} | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Helper: Extract YouTube ID
+  const getYoutubeId = (url: string) => {
+    const match = url.match(/^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/);
+    return (match && match[2].length === 11) ? match[2] : null;
+  };
+
+  useEffect(() => {
+    const vidId = getYoutubeId(youtubeUrl);
+    if (vidId) {
+      fetch(`/api/meta?url=${encodeURIComponent('https://www.youtube.com/watch?v=' + vidId)}`)
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data && data.title) setVideoMeta(data);
+          else setVideoMeta(null);
+        })
+        .catch(() => setVideoMeta(null));
+    } else {
+      setVideoMeta(null);
+    }
+  }, [youtubeUrl]);
 
 
   // Derive current status string
@@ -59,7 +83,7 @@ export default function Dashboard() {
       try {
         const data = await api('/api/status');
         setJobStatus(data);
-        if (data.logs) setLogs(data.logs.slice(-100));
+        setJobStatus(data);
         if (data.status === 'complete') {
           stopPolling();
           setIsProcessing(false);
@@ -81,7 +105,7 @@ export default function Dashboard() {
       try {
         const data = await api('/api/status');
         setJobStatus(data);
-        if (data.logs) setLogs(data.logs.slice(-100));
+        setJobStatus(data);
         if (data.status === 'running' || data.status === 'stopping') {
           setIsProcessing(true);
           startPolling();
@@ -104,8 +128,8 @@ export default function Dashboard() {
       return;
     }
     setError('');
+    setError('');
     setClips([]);
-    setLogs([]);
     setIsProcessing(true);
     try {
       const result = await api('/api/start', {
@@ -122,6 +146,7 @@ export default function Dashboard() {
           landscape_blur: landscapeBlur,
           source_credit: settings?.credit_watermark?.enabled ?? true,
           instruction: instruction,
+          settings: settings,
         }),
       });
       if (result.status === 'error') {
@@ -136,7 +161,12 @@ export default function Dashboard() {
     }
   };
 
-  const handleStop = async () => {
+  const handleStop = () => {
+    setStopConfirm(true);
+  };
+
+  const confirmStop = async () => {
+    setStopConfirm(false);
     try {
       await api('/api/stop', { method: 'POST', body: JSON.stringify({}) });
     } catch (e) {
@@ -170,17 +200,21 @@ export default function Dashboard() {
     }
   };
 
-  const handleDelete = async (clip: any) => {
-    if (!confirm('Hapus klip ini?')) return;
+  const confirmDeleteClip = async () => {
+    if (!deleteConfirm) return;
+    const clip = deleteConfirm;
+    setDeleteConfirm(null);
     try {
       await api('/api/delete', {
         method: 'POST',
-        body: JSON.stringify({ path: clip.path }),
+        body: JSON.stringify({ path: clip.path })
       });
-      setShowDetailModal(null);
-      setClips(prev => prev.filter(c => c.path !== clip.path));
+      if (showDetailModal?.path === clip.path) {
+        setShowDetailModal(null);
+      }
+      fetchOutputs();
     } catch (e: any) {
-      alert('Gagal menghapus: ' + (e.message || ''));
+      alert('Gagal menghapus klip: ' + (e.message || ''));
     }
   };
 
@@ -240,8 +274,8 @@ export default function Dashboard() {
           JSON Payload
         </button>
 
-        <div className="w-full max-w-5xl mx-auto space-y-3 mt-1 pb-4">
-          <div className="text-center mb-2">
+        <div className="w-full max-w-5xl mx-auto flex flex-col min-h-[calc(100vh-140px)] pb-4">
+          <div className="text-center mb-6">
             <h3 className="text-[18px] font-bold text-slate-900 tracking-tight">Hasil Generasi Klip</h3>
             <p className="text-[12px] text-slate-500 mt-0.5">
               {currentStatus === 'idle' && clips.length === 0 && 'Masukkan URL YouTube lalu klik Proses Klip.'}
@@ -347,14 +381,28 @@ export default function Dashboard() {
                 </div>
 
                 {/* Skeleton saat masih loading / Klip asli saat complete */}
-                <div className={`w-full grid gap-3 mt-1 ${
-                  numClips === 1 ? 'grid-cols-1 max-w-xs mx-auto' :
-                  numClips === 2 ? 'grid-cols-2' :
-                  'grid-cols-3'
-                }`}>
+                <div className="w-full grid gap-4 mt-1 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
                   {isComplete
                     ? null  /* klip real ditampilkan di bawah blok ini */
-                    : Array.from({ length: numClips }).map((_, i) => (
+                    : videoMeta ? (
+                        <div className="rounded-xl overflow-hidden bg-white border border-slate-200 shadow-md w-full">
+                          <div className="relative w-full aspect-video bg-slate-900">
+                            <img src={videoMeta.thumbnail_url || `https://i.ytimg.com/vi/${getYoutubeId(youtubeUrl)}/maxresdefault.jpg`} alt="Thumbnail" className="w-full h-full object-cover opacity-90" />
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/10">
+                               <div className="w-10 h-10 rounded-full bg-red-600/90 flex items-center justify-center backdrop-blur-sm shadow-lg">
+                                 <svg className="w-4 h-4 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                               </div>
+                            </div>
+                          </div>
+                          <div className="p-3 text-left">
+                            <h4 className="font-bold text-[13px] leading-snug line-clamp-2 text-slate-900" title={videoMeta.title}>{videoMeta.title || 'YouTube Video'}</h4>
+                            <div className="flex items-center gap-1.5 mt-2 text-[11px] text-slate-500 font-medium">
+                              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-7.5c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+                              {videoMeta.author_name || 'YouTube Channel'}
+                            </div>
+                          </div>
+                        </div>
+                      ) : Array.from({ length: numClips }).map((_, i) => (
                         <div key={i} className="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
                           <div className="w-full aspect-[4/3] bg-gradient-to-r from-slate-100 via-slate-50 to-slate-100 bg-[length:200%_100%] animate-[shimmer_1.5s_infinite]" />
                           <div className="p-2.5 space-y-1.5">
@@ -372,11 +420,7 @@ export default function Dashboard() {
 
           {/* Clips grid — muncul di bawah loading saat proses & setelah selesai */}
           {clips.length > 0 && (
-            <div className={`grid gap-4 mt-2 ${
-              clips.length === 1 ? 'grid-cols-1 max-w-xs mx-auto' :
-              clips.length === 2 ? 'grid-cols-2' :
-              'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
-            }`}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-2">
               {clips.map((clip, idx) => {
                 const clipId = clip.path;
                 const img = fmtImg(clip);
@@ -439,7 +483,7 @@ export default function Dashboard() {
 
           {/* Empty state */}
           {clips.length === 0 && (currentStatus === 'idle' || currentStatus === 'complete') && (
-            <div className="flex flex-col items-center justify-center mt-20 text-slate-400 gap-3">
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-3 -mt-10">
               <svg className="w-20 h-20 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/></svg>
               <p className="text-[16px] font-bold text-slate-500">Belum ada klip</p>
               <p className="text-[13px] text-slate-400 text-center max-w-sm leading-relaxed">Masukkan URL YouTube di sebelah kiri lalu klik <strong className="font-bold">Proses Klip</strong> untuk mulai membuat video vertikal.</p>
@@ -613,7 +657,11 @@ export default function Dashboard() {
             
             {/* Right: Details */}
             <div className="flex-1 flex flex-col py-2 pr-4">
-              <p className="text-[12px] text-slate-500 mb-1">Durasi: {fmtDuration(showDetailModal)}</p>
+              <p className="text-[12px] text-slate-500 mb-1 flex items-center gap-2">
+                <span>Durasi: {fmtDuration(showDetailModal)}</span>
+                <span>&bull;</span>
+                <span>Diunduh: {showDetailModal.modified ? new Date(showDetailModal.modified).toLocaleString('id-ID', {day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute:'2-digit'}) : '-'}</span>
+              </p>
               <h2 className="text-[20px] font-bold text-slate-900 leading-tight">{showDetailModal.title || showDetailModal.name}</h2>
               {uploadProgress[showDetailModal.path] === 100 && (
                 <a href="#" className="inline-flex items-center gap-1.5 text-[13px] text-emerald-500 hover:text-emerald-600 font-bold mt-2 hover:underline">
@@ -662,7 +710,7 @@ export default function Dashboard() {
                     : 'Upload'}
                 </button>
                 <button 
-                  onClick={() => handleDelete(showDetailModal)}
+                  onClick={() => setDeleteConfirm(showDetailModal)}
                   className="bg-white border border-slate-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 text-slate-700 font-semibold py-2.5 px-4 rounded-xl text-[13px] transition shadow-sm"
                 >Hapus</button>
               </div>
@@ -720,6 +768,26 @@ export default function Dashboard() {
         </div>,
         document.body
       )}
+
+      {/* Delete Group Modal */}
+      <ConfirmModal
+        isOpen={!!deleteConfirm}
+        title="Hapus Klip?"
+        message="Video klip ini akan dihapus secara permanen dari penyimpanan lokal."
+        onConfirm={confirmDeleteClip}
+        onCancel={() => setDeleteConfirm(null)}
+        confirmText="Ya, Hapus"
+      />
+
+      {/* Stop Process Modal */}
+      <ConfirmModal
+        isOpen={stopConfirm}
+        title="Batalkan Proses?"
+        message="Apakah kamu yakin ingin menghentikan proses pembuatan klip ini secara paksa?"
+        onConfirm={confirmStop}
+        onCancel={() => setStopConfirm(false)}
+        confirmText="Ya, Batalkan"
+      />
     </div>
   );
 }

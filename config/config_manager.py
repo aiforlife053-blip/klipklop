@@ -39,10 +39,11 @@ class ConfigManager:
                 "installation_id": str(uuid.uuid4()),
                 "face_tracking_mode": "center",
                 "video_quality": "720",
-                "landscape_blur": True,
+                "landscape_blur": False,
                 "subtitle_engine": "local",
                 "local_whisper": {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"},
                 "subtitle_style": {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360},
+                "subtitle": {"enabled": False, "color": "#ffff00", "size": 0.035, "position_x": 0.5, "position_y": 0.85, "text_transform": "none", "bg_color": "#000000", "bg_opacity": 0.8, "font_family": "Plus Jakarta Sans", "font_weight": 800},
                 "subtitle_position": "auto",
                 "mediapipe_settings": {
                     "lip_activity_threshold": 0.15,
@@ -60,9 +61,9 @@ class ConfigManager:
                     "opacity": 0.8,
                     "scale": 0.15
                 },
-                "credit_watermark": {"enabled": True, "text": "sc : {channel}", "color": "#FFFFFF", "size": 0.032, "opacity": 0.55, "position_x": 0.06, "position_y": 0.23},
-                "hook_style": {"enabled": True, "font_size": 0.054, "text_color": "#0033ff", "background_color": "#ffffff", "corner_radius": 28, "duration": 5.0, "position_x": 0.5, "position_y": 0.2},
-                "blur_background": {"enabled": True, "zoom": 1.08, "strength": 30},
+                "credit_watermark": {"enabled": False, "text": "sc : {channel}", "color": "#FFFFFF", "size": 0.032, "opacity": 0.55, "position_x": 0.06, "position_y": 0.23},
+                "hook_style": {"enabled": False, "font_size": 0.054, "text_color": "#0033ff", "background_color": "#ffffff", "corner_radius": 28, "duration": 5.0, "position_x": 0.5, "position_y": 0.2},
+                "blur_background": {"enabled": False, "zoom": 1.08, "strength": 30},
                 "ai_providers": self._get_default_ai_providers(),
             }
             for key, value in defaults.items():
@@ -97,15 +98,16 @@ class ConfigManager:
                 "opacity": 0.8,
                 "scale": 0.15
             },
-            "credit_watermark": {"enabled": True, "text": "sc : {channel}", "color": "#FFFFFF", "size": 0.032, "opacity": 0.55, "position_x": 0.06, "position_y": 0.23},
-            "hook_style": {"enabled": True, "font_size": 0.054, "text_color": "#0033ff", "background_color": "#ffffff", "corner_radius": 28, "duration": 5.0, "position_x": 0.5, "position_y": 0.2},
-                "blur_background": {"enabled": True, "zoom": 1.08, "strength": 30},
+            "credit_watermark": {"enabled": False, "text": "sc : {channel}", "color": "#FFFFFF", "size": 0.032, "opacity": 0.55, "position_x": 0.06, "position_y": 0.23},
+            "hook_style": {"enabled": False, "font_size": 0.054, "text_color": "#0033ff", "background_color": "#ffffff", "corner_radius": 28, "duration": 5.0, "position_x": 0.5, "position_y": 0.2},
+            "blur_background": {"enabled": False, "zoom": 1.08, "strength": 30},
             "face_tracking_mode": "center",
             "video_quality": "720",
-            "landscape_blur": True,
+            "landscape_blur": False,
             "subtitle_engine": "local",
             "local_whisper": {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"},
             "subtitle_style": {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360},
+            "subtitle": {"enabled": False, "color": "#ffff00", "size": 0.035, "position_x": 0.5, "position_y": 0.85, "text_transform": "none", "bg_color": "#000000", "bg_opacity": 0.8, "font_family": "Plus Jakarta Sans", "font_weight": 800},
             "subtitle_position": "auto",
             "mediapipe_settings": {
                 "lip_activity_threshold": 0.15,
