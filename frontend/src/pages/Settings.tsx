@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useOutletContext, useNavigate } from 'react-router-dom';
+import { useOutletContext } from 'react-router-dom';
 import { api } from '@/lib/api';
 
 export default function Settings() {

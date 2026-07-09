@@ -984,16 +984,23 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         from PIL import Image, ImageDraw, ImageFont
 
         style = self.hook_style_settings or {}
-        font_size_frac = float(style.get("font_size", 0.044))
-        font_color_hex = style.get("font_color", "#247BA0")
-        bg_color_hex = style.get("bg_color", "#FFFFFF")
-        corner_radius = int(style.get("corner_radius", 0))
+        font_size_frac = float(style.get("font_size", 0.05))
+        font_color_hex = style.get("text_color") or style.get("font_color") or "#0033ff"
+        bg_color_hex = style.get("background_color") or style.get("bg_color") or "#ffffff"
+        shape = str(style.get("shape") or "rectangle")
+        corner_radius = 9999 if shape == "pill" else int(style.get("corner_radius", 0))
         pos_x = float(style.get("position_x", 0.5))
-        pos_y = float(style.get("position_y", 0.333))
+        pos_y = float(style.get("position_y", 0.2))
         user_font_path = style.get("font_path") or ""
 
         # Resolve font path with sensible fallbacks
-        font_candidates = [user_font_path, self._find_system_font_bold()]
+        root = Path(__file__).resolve().parent
+        font_family = str(style.get("font_family") or "")
+        family_fonts = {
+            "Plus Jakarta Sans": root / "fonts" / "PlusJakartaSans.ttf",
+            "Poppins": root / "fonts" / "Poppins-Bold.ttf",
+        }
+        font_candidates = [user_font_path, str(family_fonts.get(font_family, "")), self._find_system_font_bold()]
         pil_font = None
         # Matches Preview.tsx (size * 500 on 340px width -> size * 1600)
         font_px = max(20, int(font_size_frac * 1600))
@@ -1478,6 +1485,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f"text='{credit_text_escaped}':"
                 f"fontsize={font_size}:"
                 f"fontcolor=0x{color}@{opacity}:"
+                f"shadowcolor=0x000000@0.5:shadowx=3:shadowy=3:"
                 f"x=(w*{pos_x})-(text_w/2):"
                 f"y=(h*{pos_y})-(text_h/2)"
             )
@@ -1487,6 +1495,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f"drawtext=text='{credit_text_escaped}':"
                 f"fontsize={font_size}:"
                 f"fontcolor=0x{color}@{opacity}:"
+                f"shadowcolor=0x000000@0.5:shadowx=3:shadowy=3:"
                 f"x=(w*{pos_x})-(text_w/2):"
                 f"y=(h*{pos_y})-(text_h/2)"
             )

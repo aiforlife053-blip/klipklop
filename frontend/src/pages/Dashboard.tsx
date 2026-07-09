@@ -167,6 +167,9 @@ export default function Dashboard() {
 
   const confirmStop = async () => {
     setStopConfirm(false);
+    stopPolling();
+    setIsProcessing(false);
+    setJobStatus({ status: 'idle', message: 'Stopped', progress: 0 });
     try {
       await api('/api/stop', { method: 'POST', body: JSON.stringify({}) });
     } catch (e) {
@@ -525,14 +528,16 @@ export default function Dashboard() {
 
             <div>
               <label className="block text-[12px] font-semibold text-black mb-1.5">Jumlah Klip</label>
-              <input 
-                type="number" 
-                min="1" max="10"
+              <select
                 value={numClips}
-                onChange={(e) => setNumClips(parseInt(e.target.value) || 1)}
+                onChange={(e) => setNumClips(Number(e.target.value))}
                 disabled={isProcessing}
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[13px] text-gray-700 bg-white disabled:opacity-50" 
-              />
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[13px] text-gray-700 bg-white disabled:opacity-50"
+              >
+                <option value={1}>1</option>
+                <option value={3}>3</option>
+                <option value={5}>5</option>
+              </select>
               <p className="text-[11px] text-gray-400 mt-1">Berapa klip viral yang ingin dihasilkan dari video ini.</p>
             </div>
 

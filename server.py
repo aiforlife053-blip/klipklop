@@ -70,7 +70,10 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/download":
             self._download(parsed.query)
         elif parsed.path == "/api/stream":
-            self._stream_video(parsed.query)
+            try:
+                self._stream_video(parsed.query)
+            except (ConnectionResetError, BrokenPipeError):
+                pass
         elif parsed.path == "/api/social/status":
             self._json(is_youtube_connected(self._current_user()))
         elif parsed.path == "/api/activity":
@@ -419,7 +422,7 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._json({"status": "error", "message": "Missing URL"}, 400)
             return
         
-        req = Request(f"https://www.youtube.com/oembed?url={urllib.parse.quote(url)}&format=json")
+        req = Request(f"https://www.youtube.com/oembed?url={quote(url)}&format=json")
         try:
             with urlopen(req, timeout=5) as res:
                 data = json.loads(res.read().decode())

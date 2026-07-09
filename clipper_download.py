@@ -34,6 +34,7 @@ class DownloadMixin(ClipperBase):
     def _download_video_only_module(self, url: str) -> str:
         ffmpeg_path = get_ffmpeg_path()
         deno_path = get_deno_path()
+        last_percent = {"value": -1.0}
         def progress_hook(d):
             if self.is_cancelled():
                 raise Exception("Cancelled by user")
@@ -41,6 +42,9 @@ class DownloadMixin(ClipperBase):
                 match = re.search(r'(\d+\.?\d*)%', d.get('_percent_str', '0%').strip())
                 if match:
                     percent = float(match.group(1))
+                    if percent + 0.05 < last_percent["value"]:
+                        return
+                    last_percent["value"] = percent
                     self.set_progress(f"Downloading source video/audio... {percent:.1f}%", 0.32 + percent / 100 * 0.08)
         ydl_opts = {
             'format': self._format_selector(),

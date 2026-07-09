@@ -137,6 +137,31 @@ class FfmpegMixin(ClipperBase):
         self.log(msg)
         self.log("  💻 Continuing with CPU encoding (libx264)")
 
+    def _run_cancelable_subprocess(self, cmd: list, **kwargs):
+        capture_output = kwargs.pop('capture_output', False)
+        text = kwargs.pop('text', False)
+        if capture_output:
+            kwargs.setdefault('stdout', subprocess.PIPE)
+            kwargs.setdefault('stderr', subprocess.PIPE)
+        proc = subprocess.Popen(cmd, **kwargs)
+        try:
+            while proc.poll() is None:
+                if self.is_cancelled():
+                    proc.terminate()
+                    try:
+                        stdout, stderr = proc.communicate(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        stdout, stderr = proc.communicate()
+                    raise InterruptedError("Stopped")
+                time.sleep(0.25)
+            stdout, stderr = proc.communicate()
+            return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+        except Exception:
+            if proc.poll() is None:
+                proc.kill()
+            raise
+
     def _run_ffmpeg_subprocess(self, cmd: list, **kwargs):
         """Run an FFmpeg command with automatic CPU fallback on GPU encoder errors.
 
@@ -148,7 +173,7 @@ class FfmpegMixin(ClipperBase):
         kwargs.setdefault('text', True)
         kwargs.setdefault('creationflags', SUBPROCESS_FLAGS)
 
-        result = subprocess.run(cmd, **kwargs)
+        result = self._run_cancelable_subprocess(cmd, **kwargs)
         if result.returncode == 0:
             return result
 
@@ -171,7 +196,7 @@ class FfmpegMixin(ClipperBase):
         )
         self._disable_gpu_acceleration_runtime(reason_line[:120])
 
-        retry = subprocess.run(fallback_cmd, **kwargs)
+        retry = self._run_cancelable_subprocess(fallback_cmd, **kwargs)
         return retry
 
     def log_ffmpeg_command(self, cmd: list, description: str = "FFmpeg"):

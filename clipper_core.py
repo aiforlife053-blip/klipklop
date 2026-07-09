@@ -75,6 +75,7 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
             self.highlight_client = OpenAI(
                 api_key=hf_config.get("api_key", ""),
                 base_url=hf_config.get("base_url", "https://api.openai.com/v1"),
+                timeout=30.0,
             )
             self.model = hf_config.get("model", model)
             cm_config = self.ai_providers.get("caption_maker", {})

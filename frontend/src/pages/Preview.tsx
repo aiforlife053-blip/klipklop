@@ -125,20 +125,6 @@ export default function Preview() {
     setIsDirty(current !== lastSavedSettingsRef.current);
   }, [settings]);
 
-  const SectionHeader = ({ title, icon, enabled }: any) => (
-    <div className="flex items-center justify-between p-4 bg-orange-50/20 border-b border-slate-100">
-      <div className="flex items-center gap-3">
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-orange-100 text-primary">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={icon}></path></svg>
-        </div>
-        <h4 className="text-[14px] font-bold text-slate-900">{title}</h4>
-      </div>
-      <div className="flex items-center gap-3">
-        {enabled && <span className="w-2 h-2 rounded-full bg-emerald-500"></span>}
-      </div>
-    </div>
-  );
-
   return (
     <div className="flex flex-row-reverse w-full h-[calc(100vh-53px)] overflow-hidden bg-slate-50/50">
       

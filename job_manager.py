@@ -63,7 +63,8 @@ class WebJobManager:
         if "settings" in payload and isinstance(payload["settings"], dict):
             self.save_settings(payload["settings"])
             
-        num_clips = min(10, max(1, self._as_int(payload.get("num_clips"), 1)))
+        requested_clips = self._as_int(payload.get("num_clips"), 1)
+        num_clips = requested_clips if requested_clips in {1, 3, 5} else 1
         add_captions = self._as_bool(payload.get("add_captions", True), True)
         add_hook = self._as_bool(payload.get("add_hook", True), True)
         subtitle_language = str(payload.get("subtitle_language", "id")).strip()[:10]
@@ -113,13 +114,14 @@ class WebJobManager:
         }
 
     def stop(self):
-        if not (self.thread and self.thread.is_alive()):
-            return {"status": "idle"}
         self._cancel_requested = True
-        self._status = "stopping"
-        self._message = "Stopping"
+        self._status = "idle"
+        self._message = "Stopped"
+        self._progress = 0.0
+        self._error = ""
         self._add_log("Stop requested")
-        return {"status": "stopping"}
+        self._add_log("Stopped", "Done")
+        return {"status": "idle", "message": "Stopped"}
 
     def clear_logs(self):
         self._logs = []
@@ -186,7 +188,7 @@ class WebJobManager:
             "watermark": cfg.get("watermark", {"enabled": False}),
             "credit_watermark": cfg.get("credit_watermark", {"enabled": True, "text": "sc : {channel}", "color": "#FFFFFF", "size": 0.032, "opacity": 0.55, "position_x": 0.06, "position_y": 0.23}),
             "hook_style": cfg.get("hook_style", {"enabled": True, "font_size": 0.054, "text_color": "#0033ff", "background_color": "#ffffff", "corner_radius": 28, "duration": 5.0, "position_x": 0.5, "position_y": 0.2}),
-            "blur_background": cfg.get("blur_background", {"enabled": True, "zoom": 1.08, "strength": 30}),
+            "blur_background": cfg.get("blur_background", {"enabled": True, "scale": 1.0, "zoom": 1.08, "strength": 30}),
             "output_dir": cfg.get("output_dir", str(self.output_dir)),
             "parallel_workers": int(cfg.get("parallel_workers", 3)),
             "cookie_exists": cookies["exists"],
@@ -236,23 +238,25 @@ class WebJobManager:
         watermark["enabled"] = self._as_bool(watermark.get("enabled", False), False)
         watermark["image_path"] = str(watermark.get("image_path") or "")
         watermark["opacity"] = max(0.0, min(1.0, float(self._as_float(watermark.get("opacity"), 0.8))))
-        watermark["scale"] = max(0.02, min(0.6, float(self._as_float(watermark.get("scale"), 0.15))))
+        watermark["scale"] = max(0.1, min(2.0, float(self._as_float(watermark.get("scale"), 0.15))))
         watermark["position_x"] = max(0.0, min(1.0, float(self._as_float(watermark.get("position_x"), 0.5))))
         watermark["position_y"] = max(0.0, min(1.0, float(self._as_float(watermark.get("position_y"), 0.1))))
         credit_watermark = {**cfg_mgr.config.get("credit_watermark", {"enabled": False}), **(payload.get("credit_watermark") if isinstance(payload.get("credit_watermark"), dict) else {})}
         credit_watermark["enabled"] = self._as_bool(credit_watermark.get("enabled", False), False)
         credit_watermark["text"] = str(credit_watermark.get("text") or "sc : {channel}")[:120]
         credit_watermark["color"] = str(credit_watermark.get("color") or "#FFFFFF")[:16]
-        credit_watermark["size"] = max(0.015, min(0.08, float(self._as_float(credit_watermark.get("size"), 0.032))))
+        credit_watermark["size"] = max(0.01, min(0.1, float(self._as_float(credit_watermark.get("size"), 0.032))))
         credit_watermark["opacity"] = max(0.0, min(1.0, float(self._as_float(credit_watermark.get("opacity"), 0.55))))
         credit_watermark["position_x"] = max(0.0, min(1.0, float(self._as_float(credit_watermark.get("position_x"), 0.5))))
         credit_watermark["position_y"] = max(0.0, min(1.0, float(self._as_float(credit_watermark.get("position_y"), 0.1))))
         hook_style = {**cfg_mgr.config.get("hook_style", {}), **(payload.get("hook_style") if isinstance(payload.get("hook_style"), dict) else {})}
         hook_style["enabled"] = self._as_bool(hook_style.get("enabled", False), False)
-        hook_style["font_size"] = max(0.025, min(0.12, float(self._as_float(hook_style.get("font_size"), 0.054))))
-        hook_style["text_color"] = str(hook_style.get("text_color") or "#0033ff")[:16]
-        hook_style["background_color"] = str(hook_style.get("background_color") or "#ffffff")[:16]
-        hook_style["corner_radius"] = max(0, min(80, self._as_int(hook_style.get("corner_radius"), 28)))
+        hook_style["font_size"] = max(0.01, min(0.1, float(self._as_float(hook_style.get("font_size"), 0.054))))
+        hook_style["text_color"] = str(hook_style.get("text_color") or hook_style.get("font_color") or "#0033ff")[:16]
+        hook_style["font_color"] = hook_style["text_color"]
+        hook_style["background_color"] = str(hook_style.get("background_color") or hook_style.get("bg_color") or "#ffffff")[:16]
+        hook_style["bg_color"] = hook_style["background_color"]
+        hook_style["corner_radius"] = max(0, min(100, self._as_int(hook_style.get("corner_radius"), 28)))
         hook_style["duration"] = max(1.0, min(10.0, float(self._as_float(hook_style.get("duration"), 5.0))))
         hook_style["position_x"] = max(0.0, min(1.0, float(self._as_float(hook_style.get("position_x"), 0.5))))
         hook_style["position_y"] = max(0.0, min(1.0, float(self._as_float(hook_style.get("position_y"), 0.2))))
@@ -273,8 +277,9 @@ class WebJobManager:
         subtitle_cfg["font_weight"] = max(100, min(900, int(subtitle_cfg.get("font_weight") or 800)))
         blur_background = {**cfg_mgr.config.get("blur_background", {"enabled": False, "zoom": 1.08, "strength": 30}), **(payload.get("blur_background") if isinstance(payload.get("blur_background"), dict) else {})}
         blur_background["enabled"] = self._as_bool(blur_background.get("enabled", False), False)
-        blur_background["zoom"] = max(1.0, min(1.4, float(blur_background.get("zoom", 1.08) or 1.08)))
-        blur_background["strength"] = max(10, min(60, self._as_int(blur_background.get("strength"), 30)))
+        blur_background["scale"] = max(0.5, min(1.5, float(self._as_float(blur_background.get("scale"), 1.0))))
+        blur_background["zoom"] = max(1.0, min(2.0, float(blur_background.get("zoom", 1.08) or 1.08)))
+        blur_background["strength"] = max(0, min(100, self._as_int(blur_background.get("strength"), 30)))
         providers = cfg_mgr.config.setdefault("ai_providers", {})
         for name in ("highlight_finder", "youtube_title_maker"):
             current = providers.setdefault(name, {})
@@ -529,10 +534,16 @@ class WebJobManager:
             self._error = "Job exceeded time limit"
             self._add_log(f"Timeout: {str(exc)}", "Error")
         except Exception as exc:
-            self._status = "error"
-            self._message = "Processing failed"
-            self._error = str(exc)
-            self._add_log(str(exc), "Error")
+            if self._cancel_requested:
+                self._status = "idle"
+                self._message = "Stopped"
+                self._error = ""
+                self._add_log("Stopped", "Done")
+            else:
+                self._status = "error"
+                self._message = "Processing failed"
+                self._error = str(exc)
+                self._add_log(str(exc), "Error")
         finally:
             self.thread = None
             self._job_start_time = None

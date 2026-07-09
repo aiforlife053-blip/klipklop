@@ -352,14 +352,44 @@ Transcript:
             if len(valid) >= num_clips:
                 break
         
-        # If we don't have enough valid clips, warn user
         if len(valid) < num_clips:
-            self.log(f"\n⚠️ WARNING: Only found {len(valid)} valid clips out of {num_clips} requested!")
-            self.log(f"   AI returned too few segments within {MIN_CLIP_DURATION}–{MAX_CLIP_DURATION}s.")
-            self.log(f"   Consider adding user instruction with the desired topic.")
+            self.log(f"\n⚠️ WARNING: Only found {len(valid)} valid clips out of {num_clips} requested; filling from transcript.")
+            used = [(self.parse_timestamp(h["start_time"]), self.parse_timestamp(h["end_time"])) for h in valid]
+            for fallback in self._fallback_highlights_from_transcript(transcript, num_clips - len(valid), used):
+                valid.append(fallback)
+                if len(valid) >= num_clips:
+                    break
         
         valid.sort(key=lambda h: float(h.get("virality_score", 0) or 0), reverse=True)
         return valid[:num_clips]
+
+    def _fallback_highlights_from_transcript(self, transcript: str, count: int, used: list) -> list:
+        matches = list(re.finditer(r"\[(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})\]", transcript or ""))
+        if not matches:
+            return []
+        spans = [(self.parse_timestamp(m.group(1)), self.parse_timestamp(m.group(2))) for m in matches]
+        total_end = max(end for _, end in spans)
+        out = []
+        cursor = 0.0
+        while len(out) < count and cursor < total_end:
+            start = cursor
+            end = min(start + 45, total_end)
+            cursor += 45
+            if end - start < MIN_CLIP_DURATION:
+                continue
+            if any(start < u_end and end > u_start for u_start, u_end in used):
+                continue
+            item = {
+                "title": f"Highlight tambahan {len(out) + 1}",
+                "description": "Segmen tambahan dari transcript karena AI mengembalikan terlalu sedikit klip.",
+                "start_time": self.format_timestamp(start),
+                "end_time": self.format_timestamp(end),
+                "duration_seconds": round(end - start, 1),
+                "virality_score": 4,
+            }
+            out.append(item)
+            used.append((start, end))
+        return out
 
     def format_timestamp(self, seconds: float) -> str:
         hours = int(seconds // 3600)

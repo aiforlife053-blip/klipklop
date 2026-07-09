@@ -213,7 +213,16 @@ def test_enable_captions_alias_cannot_disable_captions(tmp_path):
     assert manager.captured["add_captions"] is True
 
 
-def test_num_clips_is_forced_to_one(tmp_path):
+def test_num_clips_accepts_allowed_values(tmp_path):
+    manager = InstantJobManager(app_dir=tmp_path)
+    manager.start({"url": "https://www.youtube.com/watch?v=abc", "add_captions": False, "num_clips": 3})
+    thread = manager.thread
+    if thread:
+        thread.join(1)
+    assert manager.captured["num_clips"] == 3
+
+
+def test_num_clips_rejects_unsupported_values(tmp_path):
     manager = InstantJobManager(app_dir=tmp_path)
     manager.start({"url": "https://www.youtube.com/watch?v=abc", "add_captions": False, "num_clips": 999})
     thread = manager.thread
@@ -340,7 +349,10 @@ def test_ass_subtitle_groups_words_in_dynamic_chunks(tmp_path):
 
 class NoSubtitleCore(AutoClipperCore):
     def __init__(self):
-        self.output_dir = "out"
+        self.output_dir = Path("out")
+        self.temp_dir = self.output_dir / "_temp"
+        self.cache_dir = self.output_dir / "cache"
+        self.parallel_workers = 1
         self.use_download_sections = False
 
     def set_progress(self, stage, progress):
