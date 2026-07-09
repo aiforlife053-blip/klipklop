@@ -74,7 +74,7 @@ class ExportMixin(ClipperBase):
             else:
                 status = f"Clip {index}/{total_clips}: {step_name}"
             
-            print(f"[DEBUG] clip_progress: {status} (overall: {overall*100:.1f}%)")
+            debug_log(f"clip_progress: {status} (overall: {overall*100:.1f}%)")
             self.set_progress(status, overall)
         
         current_step = 0
@@ -1219,11 +1219,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         
         try:
             transcript = self._whisper_transcribe_words(audio_file)
-        except Exception:
-            os.unlink(audio_file)
-            raise
-        
-        os.unlink(audio_file)
+        finally:
+            try:
+                os.unlink(audio_file)
+            except OSError:
+                pass
         
         if progress_callback:
             progress_callback(0.5)

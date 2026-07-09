@@ -225,8 +225,8 @@ class FfmpegMixin(ClipperBase):
 
     def run_ffmpeg_with_progress(self, cmd: list, duration: float, progress_callback):
         """Run ffmpeg command and parse progress"""
-        print(f"[DEBUG] Running ffmpeg command: {' '.join(cmd[:5])}...")
-        print(f"[DEBUG] Expected duration: {duration}s")
+        debug_log(f"Running ffmpeg command: {' '.join(cmd[:5])}...")
+        debug_log(f"Expected duration: {duration}s")
         
         # Just run ffmpeg normally without progress parsing for now
         # Progress parsing from ffmpeg is complex due to carriage returns
@@ -236,7 +236,7 @@ class FfmpegMixin(ClipperBase):
         
         # Set to 100% when done
         progress_callback(1.0)
-        print(f"[DEBUG] FFmpeg completed with return code: {result.returncode}")
+        debug_log(f"FFmpeg completed with return code: {result.returncode}")
         
         if result.returncode != 0:
             error_msg = result.stderr if result.stderr else "Unknown FFmpeg error"
@@ -249,7 +249,7 @@ class FfmpegMixin(ClipperBase):
             # Get last 10 lines which usually contain the actual error
             last_lines = '\n'.join(error_lines[-10:])
             
-            print(f"[FFMPEG ERROR] Full stderr:\n{error_msg}")
+            debug_log(f"[FFMPEG ERROR] Full stderr:\n{error_msg}")
             self.log(f"FFmpeg command failed: {' '.join(cmd)}")
             self.log(f"FFmpeg full error output:\n{error_msg}")
             

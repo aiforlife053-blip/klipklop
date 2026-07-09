@@ -18,6 +18,10 @@ from clipper_base import ClipperBase
 from utils.helpers import get_deno_path, get_ffmpeg_path, is_ytdlp_module_available
 from utils.logger import debug_log
 
+# Clip duration constraints (in seconds)
+MIN_CLIP_DURATION = 10
+MAX_CLIP_DURATION = 120
+
 
 class AiMixin(ClipperBase):
     def get_default_prompt(self=None):
@@ -328,12 +332,12 @@ Transcript:
                 h["description"] = h.get("title", "No description")
                 self.log(f"  ⚠ Missing description for '{h.get('title', 'Unknown')}', using title")
             
-            if duration > 120:
-                h["end_time"] = self.format_timestamp(self.parse_timestamp(h["start_time"]) + 120)
-                h["duration_seconds"] = 120
+            if duration > MAX_CLIP_DURATION:
+                h["end_time"] = self.format_timestamp(self.parse_timestamp(h["start_time"]) + MAX_CLIP_DURATION)
+                h["duration_seconds"] = MAX_CLIP_DURATION
                 valid.append(h)
-                self.log(f"  ✓ {h['title']} ({duration:.0f}s → 120s) trimmed")
-            elif duration >= 10:
+                self.log(f"  ✓ {h['title']} ({duration:.0f}s → {MAX_CLIP_DURATION}s) trimmed")
+            elif duration >= MIN_CLIP_DURATION:
                 valid.append(h)
                 virality = h.get("virality_score", 5)
                 self.log(f"  ✓ {h['title']} ({duration:.0f}s) [{virality}/10]")
@@ -346,7 +350,7 @@ Transcript:
         # If we don't have enough valid clips, warn user
         if len(valid) < num_clips:
             self.log(f"\n⚠️ WARNING: Only found {len(valid)} valid clips out of {num_clips} requested!")
-            self.log(f"   AI returned too few segments within 10–120s.")
+            self.log(f"   AI returned too few segments within {MIN_CLIP_DURATION}–{MAX_CLIP_DURATION}s.")
             self.log(f"   Consider adding user instruction with the desired topic.")
         
         valid.sort(key=lambda h: float(h.get("virality_score", 0) or 0), reverse=True)

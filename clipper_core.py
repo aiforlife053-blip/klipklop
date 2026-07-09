@@ -2,6 +2,8 @@ import hashlib
 import json
 import os
 import shutil
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -139,6 +141,17 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         self.temp_dir = self.output_dir / "_temp"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.cache_dir = Path(os.environ.get("KLIPKLOP_CACHE_DIR") or self.output_dir.parent / "cache")
+        # Parallel clip processing: default 2 workers (safe for 2-CPU VPS).
+        # Override via config 'parallel_workers' or env KLIPKLOP_PARALLEL_WORKERS.
+        # Set to 1 to disable parallelism entirely.
+        _env_workers = os.environ.get("KLIPKLOP_PARALLEL_WORKERS")
+        _cfg_workers = (self.ai_providers or {}).get("parallel_workers")
+        try:
+            self.parallel_workers = int(_cfg_workers or _env_workers or 3)
+        except (TypeError, ValueError):
+            self.parallel_workers = 3
+        self.parallel_workers = max(1, self.parallel_workers)
+        self._progress_lock = threading.Lock()
 
     def _video_cache_dir(self, url: str) -> Path:
         parsed = urlparse(url)
@@ -152,8 +165,31 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
     def _cache_key(self, value: str) -> str:
         return hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
 
+    def _cleanup_stale_cache(self, ttl_days: int = 7):
+        """Delete cache entries older than ttl_days to prevent unbounded disk growth.
+        
+        Each video gets its own subdirectory under cache_dir (keyed by video ID).
+        Runs at the start of every process() call; best-effort, never raises.
+        """
+        import time
+        try:
+            if not self.cache_dir.exists():
+                return
+            cutoff = time.time() - ttl_days * 86400
+            removed = 0
+            for entry in self.cache_dir.iterdir():
+                if entry.is_dir() and entry.stat().st_mtime < cutoff:
+                    import shutil
+                    shutil.rmtree(entry, ignore_errors=True)
+                    removed += 1
+            if removed:
+                debug_log(f"Cache cleanup: removed {removed} stale cache folder(s) older than {ttl_days} days")
+        except Exception as exc:
+            debug_log(f"Cache cleanup error (ignored): {exc}")
+
     def process(self, url: str, num_clips: int = 5, add_captions: bool = True, add_hook: bool = True):
         try:
+            self._cleanup_stale_cache()
             cache_dir = self._video_cache_dir(url)
             cached_srt = cache_dir / "transcript.srt"
             cached_info = cache_dir / "video_info.json"
@@ -194,28 +230,107 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
                 raise Exception("No valid highlights found!")
             total_clips = len(highlights)
             if use_sections and srt_path:
-                for i, highlight in enumerate(highlights, 1):
-                    if self.is_cancelled():
-                        return
-                    self.set_progress(f"Clip {i}/{total_clips}: Downloading section...", 0.32 + (0.08 * (i - 1) / total_clips))
-                    section_path = str(self.temp_dir / f"section_{i:03d}.mp4")
-                    clip_source = self.download_video_section(url, highlight["start_time"], highlight["end_time"], section_path)
-                    try:
-                        self.process_clip(clip_source, highlight, i, total_clips, add_captions=add_captions, add_hook=add_hook, pre_cut=True)
-                    finally:
-                        try:
-                            Path(clip_source).unlink(missing_ok=True)
-                        except Exception:
-                            pass
+                self._process_clips_with_sections(url, highlights, total_clips, add_captions, add_hook)
             else:
                 if not source_path:
                     self.set_progress("Downloading source video/audio once...", 0.32)
                     source_path = self.download_video_only(url)
-                for i, highlight in enumerate(highlights, 1):
-                    if self.is_cancelled():
-                        return
-                    self.process_clip(source_path, highlight, i, total_clips, add_captions=add_captions, add_hook=add_hook, pre_cut=False)
+                self._process_clips_parallel(source_path, highlights, total_clips, add_captions, add_hook, pre_cut=False)
             self.set_progress("Complete!", 1.0)
-            self.log(f"\n✅ Created {total_clips} clips in: {self.output_dir}")
+            self.log(f"\n\u2705 Created {total_clips} clips in: {self.output_dir}")
         finally:
             self.cleanup()
+
+    def _process_clips_with_sections(self, url, highlights, total_clips, add_captions, add_hook):
+        """Download each section sequentially (yt-dlp is single-threaded), then
+        process all clips in parallel using ThreadPoolExecutor.
+
+        Strategy:
+          1. Download all sections sequentially (can't parallelise yt-dlp safely).
+          2. Kick off process_clip for all downloaded sections in parallel.
+        """
+        # Phase 1: download sections sequentially
+        sections = []  # list of (clip_source, highlight, index)
+        for i, highlight in enumerate(highlights, 1):
+            if self.is_cancelled():
+                return
+            self.set_progress(
+                f"Clip {i}/{total_clips}: Downloading section...",
+                0.32 + (0.08 * (i - 1) / total_clips),
+            )
+            section_path = str(self.temp_dir / f"section_{i:03d}.mp4")
+            clip_source = self.download_video_section(
+                url, highlight["start_time"], highlight["end_time"], section_path
+            )
+            sections.append((clip_source, highlight, i))
+
+        # Phase 2: process (encode + caption burn) in parallel
+        self._process_clips_parallel(
+            source_path=None,
+            highlights=highlights,
+            total_clips=total_clips,
+            add_captions=add_captions,
+            add_hook=add_hook,
+            pre_cut=True,
+            sections=sections,
+        )
+
+    def _process_clips_parallel(
+        self,
+        source_path,
+        highlights,
+        total_clips,
+        add_captions,
+        add_hook,
+        pre_cut=False,
+        sections=None,
+    ):
+        """Run process_clip in parallel using ThreadPoolExecutor.
+
+        Falls back to sequential (max_workers=1) if parallel_workers == 1.
+        Thread-safe: each clip writes to its own output subdirectory.
+        """
+        workers = self.parallel_workers
+        mode = f"parallel ({workers} workers)" if workers > 1 else "sequential"
+        self.log(f"  Processing {total_clips} clip(s) [{mode}]")
+
+        def _do_clip(args):
+            if self.is_cancelled():
+                return
+            clip_source, highlight, idx = args
+            try:
+                self.process_clip(
+                    clip_source, highlight, idx, total_clips,
+                    add_captions=add_captions, add_hook=add_hook, pre_cut=pre_cut,
+                )
+            finally:
+                if pre_cut:
+                    try:
+                        Path(clip_source).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+
+        if sections is not None:
+            tasks = sections
+        else:
+            tasks = [(source_path, h, i) for i, h in enumerate(highlights, 1)]
+
+        if workers == 1:
+            for task in tasks:
+                if self.is_cancelled():
+                    break
+                _do_clip(task)
+        else:
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="clip-worker") as executor:
+                futures = {executor.submit(_do_clip, task): task[2] for task in tasks}
+                for future in as_completed(futures):
+                    clip_idx = futures[future]
+                    try:
+                        future.result()
+                    except Exception as exc:
+                        self.log(f"  Clip {clip_idx} failed: {exc}")
+                        raise
+                    if self.is_cancelled():
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        break
+

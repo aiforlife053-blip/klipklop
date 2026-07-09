@@ -183,6 +183,7 @@ class WebJobManager:
             "hook_style": cfg.get("hook_style", {"enabled": True, "font_size": 0.054, "text_color": "#0033ff", "background_color": "#ffffff", "corner_radius": 28, "duration": 5.0, "position_x": 0.5, "position_y": 0.2}),
             "blur_background": cfg.get("blur_background", {"enabled": True, "zoom": 1.08, "strength": 30}),
             "output_dir": cfg.get("output_dir", str(self.output_dir)),
+            "parallel_workers": int(cfg.get("parallel_workers", 3)),
             "cookie_exists": cookies["exists"],
             "cookie_path": cookies["path"],
             "cookies_path": cookies["path"],
@@ -311,6 +312,8 @@ class WebJobManager:
         cfg_mgr.config["subtitle"] = subtitle_cfg
         cfg_mgr.config["blur_background"] = blur_background
         cfg_mgr.config["output_dir"] = output_dir
+        parallel_workers = max(1, min(8, self._as_int(payload.get("parallel_workers", cfg_mgr.config.get("parallel_workers", 2)), 2)))
+        cfg_mgr.config["parallel_workers"] = parallel_workers
         cfg_mgr.save()
         settings = self.get_settings()
         return {"status": "saved", "settings": settings, "local_ai_provider": settings["provider"], "provider": settings["provider"]}
@@ -457,6 +460,8 @@ class WebJobManager:
             self._add_log(f"Output folder: {run_dir}")
             self._add_log("Preparing AI/video processor")
             subtitle_style = {**cfg.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360}), "position": cfg.get("subtitle_position", "auto")}
+            ai_providers = dict(cfg.get("ai_providers") or {})
+            ai_providers["parallel_workers"] = int(cfg.get("parallel_workers", 2))
             core = AutoClipperCore(
                 client=None,
                 ffmpeg_path=get_ffmpeg_path(),
@@ -471,7 +476,7 @@ class WebJobManager:
                 hook_style_settings={**cfg.get("hook_style", {}), "blur_background": cfg.get("blur_background", {"enabled": True, "zoom": 1.08, "strength": 30})},
                 face_tracking_mode=cfg.get("face_tracking_mode", "center"),
                 mediapipe_settings=cfg.get("mediapipe_settings", {}),
-                ai_providers=cfg.get("ai_providers"),
+                ai_providers=ai_providers,
                 subtitle_language=subtitle_language,
                 video_quality=str(cfg.get("video_quality", "720")),
                 landscape_blur=landscape_blur,

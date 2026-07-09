@@ -32,7 +32,7 @@ class PortraitMixin(ClipperBase):
         except Exception as e:
             # Fallback to OpenCV if MediaPipe fails
             if self.face_tracking_mode == "mediapipe":
-                self.log(f"  ⚠ MediaPipe failed: {e}")
+                self.log(f"  âš  MediaPipe failed: {e}")
                 self.log("  Falling back to OpenCV mode...")
                 return self.convert_to_portrait_opencv(input_path, output_path)
             else:
@@ -470,7 +470,7 @@ class PortraitMixin(ClipperBase):
         except Exception as e:
             # Fallback to OpenCV if MediaPipe fails
             if self.face_tracking_mode == "mediapipe":
-                self.log(f"  ⚠ MediaPipe failed: {e}")
+                self.log(f"  âš  MediaPipe failed: {e}")
                 self.log("  Falling back to OpenCV mode...")
                 return self.convert_to_portrait_opencv_with_progress(input_path, output_path, progress_callback)
             else:
@@ -531,10 +531,10 @@ class PortraitMixin(ClipperBase):
     def convert_to_portrait_opencv_with_progress(self, input_path: str, output_path: str, progress_callback):
         """Convert landscape to 9:16 portrait with speaker tracking and progress (OpenCV)"""
         
-        self.log("[DEBUG] Starting portrait conversion...")
-        print("[DEBUG] Starting portrait conversion...")
-        print(f"[DEBUG] Input: {input_path}")
-        print(f"[DEBUG] Output: {output_path}")
+        debug_log("Starting portrait conversion...")
+        debug_log("Starting portrait conversion...")
+        debug_log(f"Input: {input_path}")
+        debug_log(f"Output: {output_path}")
         sys.stdout.flush()
         
         cap = cv2.VideoCapture(input_path)
@@ -546,8 +546,8 @@ class PortraitMixin(ClipperBase):
         fps = cap.get(cv2.CAP_PROP_FPS)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
-        self.log(f"[DEBUG] Video: {orig_w}x{orig_h}, {fps}fps, {total_frames} frames")
-        print(f"[DEBUG] Video: {orig_w}x{orig_h}, {fps}fps, {total_frames} frames")
+        debug_log(f"Video: {orig_w}x{orig_h}, {fps}fps, {total_frames} frames")
+        debug_log(f"Video: {orig_w}x{orig_h}, {fps}fps, {total_frames} frames")
         sys.stdout.flush()
         
         if total_frames == 0 or fps == 0:
@@ -567,7 +567,7 @@ class PortraitMixin(ClipperBase):
         use_faces = not face_cascade.empty()
         
         # First pass: analyze frames (0-40%)
-        print("[DEBUG] Pass 1: Analyzing frames...")
+        debug_log("Pass 1: Analyzing frames...")
         sys.stdout.flush()
         
         crop_positions = []
@@ -605,19 +605,19 @@ class PortraitMixin(ClipperBase):
             current_time = time.time()
             if frame_count % 30 == 0 or (current_time - last_log_time) > 2:  # Every 30 frames or 2 seconds
                 progress = (frame_count / total_frames) * 0.4  # 0-40%
-                print(f"[DEBUG] Pass 1 progress: {progress*100:.1f}% ({frame_count}/{total_frames} frames)")
+                debug_log(f"Pass 1 progress: {progress*100:.1f}% ({frame_count}/{total_frames} frames)")
                 sys.stdout.flush()
                 progress_callback(progress)
                 last_log_time = current_time
         
-        print(f"[DEBUG] Analyzed {frame_count} frames")
+        debug_log(f"Analyzed {frame_count} frames")
         
         # Stabilize positions
         crop_positions = self.stabilize_positions(crop_positions)
         progress_callback(0.45)
         
         # Second pass: create video (45-85%)
-        print("[DEBUG] Pass 2: Creating portrait video...")
+        debug_log("Pass 2: Creating portrait video...")
         sys.stdout.flush()  # Force output
         
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -674,33 +674,33 @@ class PortraitMixin(ClipperBase):
             # Update progress more frequently and with time-based logging
             if frame_idx % 30 == 0 or (current_time - last_log_time) > 2:  # Every 30 frames or 2 seconds
                 progress = 0.45 + (frame_idx / total_frames) * 0.4  # 45-85%
-                print(f"[DEBUG] Pass 2 progress: {progress*100:.1f}% ({frame_idx}/{total_frames} frames)")
+                debug_log(f"Pass 2 progress: {progress*100:.1f}% ({frame_idx}/{total_frames} frames)")
                 sys.stdout.flush()
                 progress_callback(progress)
                 last_log_time = current_time
         
-        print(f"[DEBUG] Created {frame_idx} frames")
+        debug_log(f"Created {frame_idx} frames")
         sys.stdout.flush()
         
         cap.release()
-        print("[DEBUG] Released VideoCapture")
+        debug_log("Released VideoCapture")
         sys.stdout.flush()
         
         out.release()
-        print("[DEBUG] Released VideoWriter")
+        debug_log("Released VideoWriter")
         sys.stdout.flush()
         
         # Verify temp video was created
         if not os.path.exists(temp_video) or os.path.getsize(temp_video) < 1000:
             raise Exception(f"Failed to create temp video: {temp_video}")
         
-        print(f"[DEBUG] Temp video size: {os.path.getsize(temp_video)} bytes")
+        debug_log(f"Temp video size: {os.path.getsize(temp_video)} bytes")
         sys.stdout.flush()
         
         progress_callback(0.85)
         
         # Merge with audio (85-100%) using GPU/CPU encoder
-        print("[DEBUG] Pass 3: Merging audio...")
+        debug_log("Pass 3: Merging audio...")
         sys.stdout.flush()
         
         duration = total_frames / fps if fps > 0 else 60
@@ -717,7 +717,7 @@ class PortraitMixin(ClipperBase):
         ]
         
         # Run without progress parsing for audio merge (quick operation)
-        print(f"[DEBUG] Running audio merge command...")
+        debug_log(f"Running audio merge command...")
         sys.stdout.flush()
         
         self.log_ffmpeg_command(cmd, "Portrait Merge Audio (with progress)")
@@ -728,17 +728,17 @@ class PortraitMixin(ClipperBase):
             sys.stdout.flush()
             raise Exception("Audio merge failed")
         
-        print("[DEBUG] Audio merge complete")
+        debug_log("Audio merge complete")
         sys.stdout.flush()
         
         progress_callback(1.0)
-        print("[DEBUG] Portrait conversion complete")
+        debug_log("Portrait conversion complete")
         sys.stdout.flush()
         
         # Cleanup temp video
         try:
             os.unlink(temp_video)
-            print("[DEBUG] Cleaned up temp video")
+            debug_log("Cleaned up temp video")
             sys.stdout.flush()
         except Exception as e:
             print(f"[WARNING] Failed to cleanup temp video: {e}")
@@ -750,8 +750,8 @@ class PortraitMixin(ClipperBase):
         # Initialize MediaPipe
         self._init_mediapipe()
         
-        self.log("[DEBUG] Starting MediaPipe portrait conversion...")
-        print("[DEBUG] Starting MediaPipe portrait conversion...")
+        debug_log("Starting MediaPipe portrait conversion...")
+        debug_log("Starting MediaPipe portrait conversion...")
         sys.stdout.flush()
         
         cap = cv2.VideoCapture(input_path)
@@ -763,8 +763,8 @@ class PortraitMixin(ClipperBase):
         fps = cap.get(cv2.CAP_PROP_FPS)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
-        self.log(f"[DEBUG] Video: {orig_w}x{orig_h}, {fps}fps, {total_frames} frames")
-        print(f"[DEBUG] Video: {orig_w}x{orig_h}, {fps}fps, {total_frames} frames")
+        debug_log(f"Video: {orig_w}x{orig_h}, {fps}fps, {total_frames} frames")
+        debug_log(f"Video: {orig_w}x{orig_h}, {fps}fps, {total_frames} frames")
         sys.stdout.flush()
         
         if total_frames == 0 or fps == 0:
@@ -784,7 +784,7 @@ class PortraitMixin(ClipperBase):
         center_weight = self.mediapipe_settings.get("center_weight", 0.3)
         
         # First pass: analyze frames with MediaPipe (0-40%)
-        print("[DEBUG] Pass 1: Analyzing lip movements with MediaPipe...")
+        debug_log("Pass 1: Analyzing lip movements with MediaPipe...")
         sys.stdout.flush()
         
         crop_positions = []
@@ -865,12 +865,12 @@ class PortraitMixin(ClipperBase):
                 current_time = time.time()
                 if frame_count % 30 == 0 or (current_time - last_log_time) > 2:
                     progress = (frame_count / total_frames) * 0.4
-                    print(f"[DEBUG] Pass 1 progress: {progress*100:.1f}% ({frame_count}/{total_frames} frames)")
+                    debug_log(f"Pass 1 progress: {progress*100:.1f}% ({frame_count}/{total_frames} frames)")
                     sys.stdout.flush()
                     progress_callback(progress)
                     last_log_time = current_time
         
-        print(f"[DEBUG] Analyzed {frame_count} frames with MediaPipe")
+        debug_log(f"Analyzed {frame_count} frames with MediaPipe")
         sys.stdout.flush()
         
         # Stabilize positions (40-45%)
@@ -884,7 +884,7 @@ class PortraitMixin(ClipperBase):
         progress_callback(0.45)
         
         # Second pass: create video (45-85%)
-        print("[DEBUG] Pass 2: Creating portrait video...")
+        debug_log("Pass 2: Creating portrait video...")
         sys.stdout.flush()
         
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -936,12 +936,12 @@ class PortraitMixin(ClipperBase):
             
             if frame_idx % 30 == 0 or (current_time - last_log_time) > 2:
                 progress = 0.45 + (frame_idx / total_frames) * 0.4
-                print(f"[DEBUG] Pass 2 progress: {progress*100:.1f}% ({frame_idx}/{total_frames} frames)")
+                debug_log(f"Pass 2 progress: {progress*100:.1f}% ({frame_idx}/{total_frames} frames)")
                 sys.stdout.flush()
                 progress_callback(progress)
                 last_log_time = current_time
         
-        print(f"[DEBUG] Created {frame_idx} frames")
+        debug_log(f"Created {frame_idx} frames")
         sys.stdout.flush()
         
         cap.release()
@@ -950,13 +950,13 @@ class PortraitMixin(ClipperBase):
         if not os.path.exists(temp_video) or os.path.getsize(temp_video) < 1000:
             raise Exception(f"Failed to create temp video: {temp_video}")
         
-        print(f"[DEBUG] Temp video size: {os.path.getsize(temp_video)} bytes")
+        debug_log(f"Temp video size: {os.path.getsize(temp_video)} bytes")
         sys.stdout.flush()
         
         progress_callback(0.85)
         
         # Merge with audio (85-100%) using GPU/CPU encoder
-        print("[DEBUG] Pass 3: Merging audio...")
+        debug_log("Pass 3: Merging audio...")
         sys.stdout.flush()
         
         encoder_args = self.get_video_encoder_args()
@@ -979,18 +979,19 @@ class PortraitMixin(ClipperBase):
             sys.stdout.flush()
             raise Exception("Audio merge failed")
         
-        print("[DEBUG] Audio merge complete")
+        debug_log("Audio merge complete")
         sys.stdout.flush()
         
         progress_callback(1.0)
-        print("[DEBUG] MediaPipe portrait conversion complete")
+        debug_log("MediaPipe portrait conversion complete")
         sys.stdout.flush()
         
         # Cleanup
         try:
             os.unlink(temp_video)
-            print("[DEBUG] Cleaned up temp video")
+            debug_log("Cleaned up temp video")
             sys.stdout.flush()
         except Exception as e:
             print(f"[WARNING] Failed to cleanup temp video: {e}")
             sys.stdout.flush()
+
