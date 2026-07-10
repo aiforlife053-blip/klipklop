@@ -6,7 +6,7 @@ import { ConfirmModal } from '@/components/ui/ConfirmModal';
 
 export default function Dashboard() {
   const { status: globalStatus, settings } = useOutletContext<any>();
-  const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [youtubeUrl, setYoutubeUrl] = useState(() => sessionStorage.getItem('klipklop.youtubeUrl') || '');
   const [videoQuality, setVideoQuality] = useState('720');
   const [numClips, setNumClips] = useState(1);
   const [landscapeBlur, setLandscapeBlur] = useState(true);
@@ -75,7 +75,13 @@ export default function Dashboard() {
   const [jobStatus, setJobStatus] = useState<any>(null);
   const [clips, setClips] = useState<any[]>([]);
   const [error, setError] = useState('');
-  const [videoMeta, setVideoMeta] = useState<{title?: string, author_name?: string, thumbnail_url?: string} | null>(null);
+  const [videoMeta, setVideoMeta] = useState<{title?: string, author_name?: string, thumbnail_url?: string} | null>(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem('klipklop.videoMeta') || 'null');
+    } catch {
+      return null;
+    }
+  });
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Helper: Extract YouTube ID
@@ -85,17 +91,26 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
+    if (youtubeUrl) sessionStorage.setItem('klipklop.youtubeUrl', youtubeUrl);
+    else sessionStorage.removeItem('klipklop.youtubeUrl');
     const vidId = getYoutubeId(youtubeUrl);
     if (vidId) {
+      const cachedVideoId = sessionStorage.getItem('klipklop.videoId');
+      if (cachedVideoId && cachedVideoId !== vidId) setVideoMeta(null);
       fetch(`/api/meta?url=${encodeURIComponent('https://www.youtube.com/watch?v=' + vidId)}`)
         .then(res => res.ok ? res.json() : null)
         .then(data => {
-          if (data && data.title) setVideoMeta(data);
-          else setVideoMeta(null);
+          if (data && data.title) {
+            setVideoMeta(data);
+            sessionStorage.setItem('klipklop.videoMeta', JSON.stringify(data));
+            sessionStorage.setItem('klipklop.videoId', vidId);
+          }
         })
-        .catch(() => setVideoMeta(null));
+        .catch(() => {});
     } else {
       setVideoMeta(null);
+      sessionStorage.removeItem('klipklop.videoMeta');
+      sessionStorage.removeItem('klipklop.videoId');
     }
   }, [youtubeUrl]);
 
@@ -154,6 +169,7 @@ export default function Dashboard() {
       try {
         const data = await api('/api/status');
         setJobStatus(data);
+        if (data.url) setYoutubeUrl((current) => current || data.url);
         if (data.status === 'running' || data.status === 'stopping') {
           setIsProcessing(true);
           startPolling();
@@ -498,7 +514,9 @@ export default function Dashboard() {
               >
                 <option value="480">480p</option>
                 <option value="720">720p</option>
-                <option value="1080">1080p</option>
+                <option value="1080">1080p (FHD)</option>
+                <option value="1440">1440p (2K)</option>
+                <option value="2160">2160p (4K)</option>
               </select>
             </div>
 

@@ -56,7 +56,7 @@ class PortraitMixin(ClipperBase):
         target_ratio = 9 / 16
         crop_w = int(orig_h * target_ratio)
         crop_h = orig_h
-        out_w, out_h = 1080, 1920
+        out_w, out_h = self._get_target_portrait_dims(orig_w, orig_h)
         
         # Face detector
         face_cascade = cv2.CascadeClassifier(
@@ -211,7 +211,7 @@ class PortraitMixin(ClipperBase):
         target_ratio = 9 / 16
         crop_w = int(orig_h * target_ratio)
         crop_h = orig_h
-        out_w, out_h = 1080, 1920
+        out_w, out_h = self._get_target_portrait_dims(orig_w, orig_h)
         
         # MediaPipe Face Mesh settings
         lip_threshold = self.mediapipe_settings.get("lip_activity_threshold", 0.15)
@@ -499,28 +499,36 @@ class PortraitMixin(ClipperBase):
         finally:
             cap.release()
 
-    def convert_to_portrait_blur_with_progress(self, input_path: str, output_path: str, progress_callback):
-        width, height = (int(part) for part in getattr(self, "output_resolution", "720:1280").split(":"))
+    def _preview_blur_filter(self, width: int, height: int) -> str:
         blur_settings = getattr(self, "blur_background_settings", {}) or {}
         zoom = max(1.0, min(3.0, float(blur_settings.get("zoom", 1.08) or 1.08)))
-        strength = max(0, min(100, int(blur_settings.get("strength", 30) or 30)))
+        strength = max(0, min(100, int(blur_settings.get("strength", 30))))
         scale = max(0.5, min(1.5, float(blur_settings.get("scale", 1.0) or 1.0)))
-        foreground_width = int(width * scale)
-        bg_width = int(width * zoom)
-        bg_height = int(height * zoom)
-        filter_complex = (
+        foreground_width = int(round(width * scale))
+        foreground_height = int(round(width * 9 / 16 * scale))
+        bg_width = int(round(width * zoom))
+        bg_height = int(round(height * zoom))
+        blur_sigma = strength / 340 * width
+        blur_filter = f"gblur=sigma={blur_sigma:.3f}:steps=2," if blur_sigma else ""
+        return (
             f"[0:v]scale={bg_width}:{bg_height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height},boxblur={strength}:3,eq=brightness=-0.4[bg];"
-            f"[0:v]scale={foreground_width}:-2[fg];"
+            f"{blur_filter}colorchannelmixer=rr=0.6:gg=0.6:bb=0.6,"
+            f"crop={width}:{height}[bg];"
+            f"[0:v]scale={foreground_width}:{foreground_height}:force_original_aspect_ratio=increase,"
+            f"crop={foreground_width}:{foreground_height}[fg];"
             f"[bg][fg]overlay=(W-w)/2:(H-h)/2"
         )
+
+    def convert_to_portrait_blur_with_progress(self, input_path: str, output_path: str, progress_callback):
+        width, height = (int(part) for part in getattr(self, "output_resolution", "720:1280").split(":"))
+        filter_complex = self._preview_blur_filter(width, height)
         cmd = [
             self.ffmpeg_path,
             "-y",
             "-i", input_path,
             "-filter_complex", filter_complex,
             *self.get_video_encoder_args(),
-            "-c:a", "copy",
+            "-an",
             "-progress", "pipe:1",
             output_path,
         ]
@@ -535,7 +543,7 @@ class PortraitMixin(ClipperBase):
             "-i", input_path,
             "-vf", f"scale={getattr(self, 'output_resolution', '720:1280')}:force_original_aspect_ratio=increase,crop={getattr(self, 'output_resolution', '720:1280')}",
             *self.get_video_encoder_args(),
-            "-c:a", "copy",
+            "-an",
             "-progress", "pipe:1",
             output_path,
         ]
@@ -573,7 +581,7 @@ class PortraitMixin(ClipperBase):
         target_ratio = 9 / 16
         crop_w = int(orig_h * target_ratio)
         crop_h = orig_h
-        out_w, out_h = 1080, 1920
+        out_w, out_h = self._get_target_portrait_dims(orig_w, orig_h)
         
         # Face detector
         face_cascade = cv2.CascadeClassifier(
@@ -790,7 +798,7 @@ class PortraitMixin(ClipperBase):
         target_ratio = 9 / 16
         crop_w = int(orig_h * target_ratio)
         crop_h = orig_h
-        out_w, out_h = 1080, 1920
+        out_w, out_h = self._get_target_portrait_dims(orig_w, orig_h)
         
         # MediaPipe settings
         lip_threshold = self.mediapipe_settings.get("lip_activity_threshold", 0.15)

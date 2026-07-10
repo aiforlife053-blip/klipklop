@@ -11,7 +11,22 @@ mod = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = mod
 spec.loader.exec_module(mod)
 from clipper_core import AutoClipperCore
+from clipper_download import DownloadMixin
 from clipper_export import ExportMixin
+from clipper_portrait import PortraitMixin
+
+
+def test_status_keeps_active_job_url(tmp_path):
+    class Manager(mod.WebJobManager):
+        def _run(self, url, num_clips, add_captions, add_hook, subtitle_language, instruction):
+            self.thread = None
+
+    manager = Manager(app_dir=tmp_path)
+    manager.start({"url": "https://www.youtube.com/watch?v=abc"})
+    thread = manager.thread
+    if thread:
+        thread.join(1)
+    assert manager.status()["url"] == "https://www.youtube.com/watch?v=abc"
 
 
 def test_rejects_empty_url(tmp_path):
@@ -350,11 +365,84 @@ def test_ass_subtitle_groups_words_in_dynamic_chunks(tmp_path):
     count = SubtitleHarness().create_ass_subtitle_capcut(SimpleNamespace(words=words), str(output))
     text = output.read_text(encoding="utf-8")
     assert count == 7
+    assert "PlayResX: 720" in text
+    assert "Fontname, Fontsize" in text
+    assert "Style: Default,Plus Jakarta Sans,40" in text
+    assert "{\\pos(360,1088)}" in text
+    assert "{\\c&H00FFBF00}" in text
     assert "w0" in text and "w1" in text
 
 
+def test_hook_wrap_uses_preview_width():
+    from PIL import ImageFont
+
+    font = ImageFont.truetype(str(ROOT / "fonts" / "PlusJakartaSans.ttf"), 33)
+    font.set_variation_by_axes([800])
+    lines = SubtitleHarness()._wrap_preview_text("JUDUL VIDEO VIRAL BIKIN PENASARAN", font, 648)
+    assert lines == ["JUDUL VIDEO VIRAL BIKIN PENASARAN"]
+
+
+def test_blur_filter_matches_preview_geometry():
+    harness = object.__new__(PortraitMixin)
+    harness.blur_background_settings = {"zoom": 1.08, "strength": 3, "scale": 1.5}
+    filter_graph = harness._preview_blur_filter(720, 1280)
+    assert "scale=1080:608:force_original_aspect_ratio=increase,crop=1080:608[fg]" in filter_graph
+    assert "gblur=sigma=6.353:steps=2" in filter_graph
+    assert "colorchannelmixer=rr=0.6:gg=0.6:bb=0.6" in filter_graph
+    assert "overlay=(W-w)/2:(H-h)/2" in filter_graph
+    harness.blur_background_settings["strength"] = 0
+    assert "gblur=" not in harness._preview_blur_filter(720, 1280)
+
+
+def test_high_resolution_caps_parallel_cpu_workers():
+    assert mod.WebJobManager._parallel_workers_for_quality(3, "720") == 3
+    assert mod.WebJobManager._parallel_workers_for_quality(3, "1080") == 2
+    assert mod.WebJobManager._parallel_workers_for_quality(3, "1440") == 1
+    assert mod.WebJobManager._parallel_workers_for_quality(3, "2160") == 1
+
+
+def test_section_format_has_hard_cap_and_fast_codec_sort():
+    harness = object.__new__(DownloadMixin)
+    harness.video_quality = "1080"
+    selector = harness._format_selector()
+    assert selector.count("height<=1080") == 4
+    assert selector.endswith("best[height<=1080]")
+    assert all("height<=1080" in fallback for fallback in selector.split("/"))
+    assert harness._format_sort() == ["res", "vcodec:h264", "fps:30", "br"]
+
+
+def test_section_download_does_not_force_reencode():
+    source = (ROOT / "clipper_download.py").read_text(encoding="utf-8")
+    assert "force_keyframes_at_cuts" not in source
+    assert "--force-keyframes-at-cuts" not in source
+    assert "concurrent_fragment_downloads': 4" in source
+
+
+def test_final_composite_uses_one_encode_and_separate_audio_source(tmp_path):
+    harness = object.__new__(SubtitleHarness)
+    harness.ffmpeg_path = "ffmpeg"
+    harness.output_resolution = "720:1280"
+    harness.hook_style_settings = {"duration": 5.0}
+    harness.watermark_settings = {"enabled": False}
+    harness.get_video_encoder_args = lambda: ["-c:v", "libx264", "-preset", "veryfast"]
+    command = harness._build_composite_command(
+        "portrait.mp4",
+        "master.mp4",
+        10.0,
+        audio_source="section.mp4",
+        hook_overlay=tmp_path / "hook.png",
+        ass_file=tmp_path / "captions.ass",
+        credit_overlay=tmp_path / "credit.png",
+    )
+    filter_graph = command[command.index("-filter_complex") + 1]
+    assert command.count("-c:v") == 1
+    assert command[command.index("-map", command.index("-map") + 1) + 1] == "[aout]"
+    assert "[1:a]asetpts=PTS-STARTPTS[aout]" in filter_graph
+    assert filter_graph.index("overlay=0:0:enable") < filter_graph.index("ass=") < filter_graph.rindex("overlay=0:0")
+
 
 def test_prefilter_transcript_keeps_viral_signals(tmp_path):
+
     core = object.__new__(AutoClipperCore)
     transcript = "\n".join(
         [f"[00:00:{i % 60:02d},000 - 00:00:{i % 60:02d},500] oke nah filler biasa {i}" for i in range(500)]

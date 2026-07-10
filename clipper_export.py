@@ -3,7 +3,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -24,9 +23,325 @@ class ExportMixin(ClipperBase):
             return (1280, 720) if getattr(self, "screen_size", "9:16") == "16:9" else (720, 1280)
 
     def _scale_from_preview_width(self, value: float, preview_px: float, width: int, minimum: int = 1) -> int:
-        return max(minimum, int(float(value) * preview_px / 340 * width))
+        return max(minimum, int(round(float(value) * preview_px / 340 * width)))
+
+    def _wrap_preview_text(self, text: str, font, max_width: int) -> list[str]:
+        words = str(text).split()
+        if not words:
+            return [""]
+        lines = []
+        current = words[0]
+        for word in words[1:]:
+            candidate = f"{current} {word}"
+            try:
+                candidate_width = font.getlength(candidate)
+            except AttributeError:
+                candidate_width = font.getbbox(candidate)[2]
+            if candidate_width <= max_width:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+        return lines
+
+    def _probe_render_input(self, input_path: str):
+        result = subprocess.run(
+            [self.ffmpeg_path, "-i", input_path],
+            capture_output=True,
+            text=True,
+            creationflags=SUBPROCESS_FLAGS,
+        )
+        dimensions = re.search(r'(\d{3,4})x(\d{3,4})', result.stderr)
+        duration_match = re.search(r"Duration: (\d+):(\d+):(\d+\.\d+)", result.stderr)
+        width, height = (int(dimensions.group(1)), int(dimensions.group(2))) if dimensions else self._render_size()
+        duration = 60.0
+        if duration_match:
+            hours, minutes, seconds = duration_match.groups()
+            duration = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+        return width, height, duration
+
+    def _has_audio_stream(self, input_path: str):
+        result = subprocess.run(
+            [self.ffmpeg_path, "-i", input_path],
+            capture_output=True,
+            text=True,
+            creationflags=SUBPROCESS_FLAGS,
+        )
+        return "Audio:" in result.stderr
+
+    def _create_hook_overlay(self, hook_text: str, width: int, height: int, output_path: Path):
+        from PIL import Image, ImageDraw, ImageFont
+
+        style = self.hook_style_settings or {}
+        font_size_frac = float(style.get("font_size", 0.05))
+        root = Path(__file__).resolve().parent
+        family_fonts = {
+            "Plus Jakarta Sans": root / "fonts" / "PlusJakartaSans.ttf",
+            "Poppins": root / "fonts" / "Poppins-Bold.ttf",
+            "Super Kidpop": root / "fonts" / "SuperKidpop.ttf",
+            "Capo Sfogliato": root / "fonts" / "CapoSfogliato.ttf",
+        }
+        font_candidates = [
+            style.get("font_path") or "",
+            str(family_fonts.get(str(style.get("font_family") or ""), "")),
+            str(family_fonts["Plus Jakarta Sans"]),
+            self._find_system_font_bold(),
+        ]
+        font_px = max(1, int(max(16, font_size_frac * 500) / 340 * width))
+        font = None
+        for candidate in font_candidates:
+            if not candidate or not os.path.exists(candidate):
+                continue
+            try:
+                font = ImageFont.truetype(candidate, font_px)
+                if hasattr(font, "set_variation_by_axes") and "PlusJakartaSans" in Path(candidate).name:
+                    font.set_variation_by_axes([800])
+                break
+            except Exception:
+                continue
+        if font is None:
+            font = ImageFont.load_default()
+        lines = self._wrap_preview_text(str(hook_text).upper(), font, int(width * 0.9))
+        line_height = int(font_px * 1.2)
+        total_height = line_height * len(lines)
+        center_x = float(style.get("position_x", 0.5)) * width
+        center_y = float(style.get("position_y", 0.2)) * height
+        block_top = center_y - total_height / 2
+        stroke_width = max(1, int(round(1.5 / 340 * width)))
+        shadow_y = max(1, int(round(3 / 340 * width)))
+        overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        for line_index, line in enumerate(lines):
+            bbox = draw.textbbox((0, 0), line, font=font, stroke_width=stroke_width)
+            text_x = center_x - (bbox[2] - bbox[0]) / 2 - bbox[0]
+            text_y = block_top + line_index * line_height - bbox[1]
+            draw.text((text_x, text_y + shadow_y), line, font=font, fill=(0, 0, 0, 128), stroke_width=stroke_width, stroke_fill=(0, 0, 0, 128))
+            draw.text((text_x, text_y), line, font=font, fill=(255, 215, 0, 255), stroke_width=stroke_width, stroke_fill=(0, 0, 0, 255))
+        overlay.save(output_path, "PNG")
+
+    def _create_credit_overlay(self, width: int, height: int, output_path: Path):
+        from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+        settings = self.credit_watermark_settings or {}
+        size = float(settings.get("size", 0.03))
+        opacity = float(settings.get("opacity", 0.7))
+        font_size = self._scale_from_preview_width(size, 320, width, minimum=max(10, int(round(10 / 340 * width))))
+        font = ImageFont.truetype(str(Path(__file__).resolve().parent / "fonts" / "PlusJakartaSans.ttf"), font_size)
+        if hasattr(font, "set_variation_by_axes"):
+            font.set_variation_by_axes([600])
+        channel = self.channel_name if self.channel_name and self.channel_name != "{channel}" else "Local Video"
+        text = str(settings.get("text") or "sc : {channel}").replace("{channel}", channel)
+        overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        shadow = Image.new("RGBA", overlay.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        shadow_draw = ImageDraw.Draw(shadow)
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_x = float(settings.get("position_x", 0.5)) * width - (bbox[2] - bbox[0]) / 2 - bbox[0]
+        text_y = float(settings.get("position_y", 0.95)) * height - (bbox[3] - bbox[1]) / 2 - bbox[1]
+        shadow_draw.text((text_x, text_y + width / 340), text, font=font, fill=(0, 0, 0, int(255 * 0.5 * opacity)))
+        overlay.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(3 / 340 * width)))
+        draw.text((text_x, text_y), text, font=font, fill=(*_hex_to_rgb(str(settings.get("color") or "#FFFFFF")), int(255 * opacity)))
+        overlay.save(output_path, "PNG")
+
+    def _create_caption_ass(self, input_path: str, clip_dir: Path):
+        audio_file = clip_dir / "caption_audio.wav"
+        result = subprocess.run(
+            [self.ffmpeg_path, "-y", "-i", input_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", str(audio_file)],
+            capture_output=True,
+            text=True,
+            creationflags=SUBPROCESS_FLAGS,
+        )
+        if result.returncode != 0 or not audio_file.exists() or audio_file.stat().st_size < 1000:
+            audio_file.unlink(missing_ok=True)
+            self.log("  Warning: Audio extraction failed, rendering without subtitles")
+            return None
+        try:
+            transcript = self._whisper_transcribe_words(str(audio_file))
+        finally:
+            audio_file.unlink(missing_ok=True)
+        ass_file = clip_dir / "captions.ass"
+        event_count = self.create_ass_subtitle_capcut(transcript, str(ass_file), 0)
+        if event_count <= 0:
+            ass_file.unlink(missing_ok=True)
+            raise Exception("Subtitle transcription produced 0 ASS events")
+        self.log(f"  ASS events: {event_count}")
+        return ass_file
+
+    def _escape_filter_path(self, path: Path):
+        return str(path).replace('\\', '/').replace(':', '\\:').replace("'", "\\'")
+
+    def _build_composite_command(self, input_path: str, output_path: str, duration: float, audio_source=None, hook_overlay=None, ass_file=None, watermark_path=None, watermark_placeholder=False, credit_overlay=None):
+        inputs = [input_path]
+        audio_index = 0
+        if audio_source and Path(audio_source).resolve() != Path(input_path).resolve():
+            audio_index = len(inputs)
+            inputs.append(str(audio_source))
+        filters = ["[0:v]setpts=PTS-STARTPTS[v0]"]
+        current = "v0"
+        layer = 1
+        if hook_overlay:
+            input_index = len(inputs)
+            inputs.append(str(hook_overlay))
+            filters.append(f"[{input_index}:v]format=rgba[hook]")
+            filters.append(f"[{current}][hook]overlay=0:0:enable='between(t,0,{max(1.0, min(10.0, float((self.hook_style_settings or {}).get('duration', 5.0)))):.3f})'[v{layer}]")
+            current = f"v{layer}"
+            layer += 1
+        if ass_file:
+            fonts_dir = self._escape_filter_path(Path(__file__).resolve().parent / "fonts")
+            ass_path = self._escape_filter_path(Path(ass_file))
+            filters.append(f"[{current}]ass='{ass_path}':fontsdir='{fonts_dir}'[v{layer}]")
+            current = f"v{layer}"
+            layer += 1
+        if watermark_path:
+            input_index = len(inputs)
+            inputs.append(str(watermark_path))
+            settings = self.watermark_settings or {}
+            watermark_width = self._scale_from_preview_width(float(settings.get("scale", 0.15)), 150, self._render_size()[0], minimum=8)
+            opacity = float(settings.get("opacity", 0.8))
+            pos_x = float(settings.get("position_x", 0.85))
+            pos_y = float(settings.get("position_y", 0.05))
+            filters.append(f"[{input_index}:v]scale={watermark_width}:-1,format=rgba,colorchannelmixer=aa={opacity}[wm]")
+            filters.append(f"[{current}][wm]overlay=x='(main_w*{pos_x})-(overlay_w/2)':y='(main_h*{pos_y})-(overlay_h/2)'[v{layer}]")
+            current = f"v{layer}"
+            layer += 1
+        elif watermark_placeholder:
+            settings = self.watermark_settings or {}
+            box_size = self._scale_from_preview_width(float(settings.get("scale", 0.15)), 150, self._render_size()[0], minimum=8)
+            opacity = float(settings.get("opacity", 0.8))
+            pos_x = float(settings.get("position_x", 0.85))
+            pos_y = float(settings.get("position_y", 0.05))
+            font_size = max(8, int(box_size * 0.16))
+            filters.append(f"[{current}]drawbox=x='(w*{pos_x})-{box_size}/2':y='(h*{pos_y})-{box_size}/2':w={box_size}:h={box_size}:color=black@{opacity}:t=fill,drawtext=text='LOGO':fontcolor=white@{opacity}:fontsize={font_size}:x='(w*{pos_x})-(text_w/2)':y='(h*{pos_y})-(text_h/2)'[v{layer}]")
+            current = f"v{layer}"
+            layer += 1
+        if credit_overlay:
+            input_index = len(inputs)
+            inputs.append(str(credit_overlay))
+            filters.append(f"[{input_index}:v]format=rgba[credit]")
+            filters.append(f"[{current}][credit]overlay=0:0[v{layer}]")
+            current = f"v{layer}"
+        filters.append(f"[{current}]format=yuv420p[vout]")
+        if audio_source:
+            filters.append(f"[{audio_index}:a]asetpts=PTS-STARTPTS[aout]")
+        cmd = [self.ffmpeg_path, "-y"]
+        for media_input in inputs:
+            cmd.extend(["-i", media_input])
+        cmd.extend(["-filter_complex", ";".join(filters), "-map", "[vout]"])
+        if audio_source:
+            cmd.extend(["-map", "[aout]"])
+        cmd.extend([*self.get_video_encoder_args(), "-pix_fmt", "yuv420p"])
+        if audio_source:
+            cmd.extend(["-c:a", "aac", "-b:a", "192k"])
+        cmd.extend(["-t", f"{duration:.3f}", "-movflags", "+faststart", "-progress", "pipe:1", output_path])
+        return cmd
 
     def process_clip(self, video_path: str, highlight: dict, index: int, total_clips: int = 1, add_captions: bool = True, add_hook: bool = True, pre_cut: bool = False):
+        if self.is_cancelled():
+            return
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S") + f"-{index:02d}"
+        clip_dir = self.output_dir / timestamp
+        clip_dir.mkdir(parents=True, exist_ok=True)
+        start = highlight["start_time"].replace(",", ".")
+        end = highlight["end_time"].replace(",", ".")
+        duration = self.parse_timestamp(end) - self.parse_timestamp(start)
+        self.log(f"  Output folder: {clip_dir}")
+        self.log(f"\n[Clip {index}] {highlight['title']}")
+
+        def clip_progress(label, value):
+            overall = 0.3 + (0.6 * ((index - 1 + max(0.0, min(1.0, value))) / total_clips))
+            self.set_progress(f"Clip {index}/{total_clips}: {label}", overall)
+
+        landscape_file = clip_dir / "temp_landscape.mp4"
+        portrait_file = clip_dir / "temp_portrait.mp4"
+        hook_overlay = clip_dir / "hook.png"
+        credit_overlay = clip_dir / "credit.png"
+        final_temp = clip_dir / "master.tmp.mp4"
+        ass_file = None
+        cleanup_paths = [landscape_file, portrait_file, hook_overlay, credit_overlay, final_temp]
+        actual_hook = bool(add_hook)
+        actual_captions = False
+        actual_watermark = bool(self.watermark_settings.get("enabled"))
+        actual_credit = bool(self.credit_watermark_settings.get("enabled") and self.channel_name)
+        try:
+            if pre_cut:
+                source_file = Path(video_path)
+                clip_progress("Section siap", 0.08)
+            else:
+                clip_progress("Memotong video", 0.02)
+                cmd = [self.ffmpeg_path, "-y", "-ss", start, "-i", video_path, "-t", str(duration), *self.get_video_encoder_args(), "-c:a", "aac", "-b:a", "192k", "-progress", "pipe:1", str(landscape_file)]
+                self.run_ffmpeg_with_progress(cmd, duration, lambda progress: clip_progress("Memotong video", progress * 0.15))
+                source_file = landscape_file
+            if getattr(self, "screen_size", "9:16") == "16:9":
+                render_input = source_file
+                clip_progress("Menyiapkan overlay", 0.55)
+            else:
+                clip_progress("Menyusun video portrait", 0.15)
+                self.convert_to_portrait_with_progress(str(source_file), str(portrait_file), lambda progress: clip_progress("Menyusun video portrait", 0.15 + progress * 0.4))
+                render_input = portrait_file
+            width, height, render_duration = self._probe_render_input(str(render_input))
+            final_duration = min(duration, render_duration) if render_duration > 0 else duration
+            audio_source = str(source_file) if self._has_audio_stream(str(source_file)) else None
+            if actual_hook:
+                self._create_hook_overlay(highlight.get("hook_text", highlight["title"]), width, height, hook_overlay)
+            if add_captions:
+                ass_file = self._create_caption_ass(str(source_file), clip_dir)
+                actual_captions = ass_file is not None
+                if ass_file:
+                    cleanup_paths.append(ass_file)
+            if actual_credit:
+                self._create_credit_overlay(width, height, credit_overlay)
+            watermark_image = str(self.watermark_settings.get("image_path") or "") if actual_watermark else ""
+            watermark_path = Path(watermark_image) if watermark_image and Path(watermark_image).exists() else None
+            clip_progress("Merender hasil akhir", 0.7)
+            cmd = self._build_composite_command(
+                str(render_input),
+                str(final_temp),
+                final_duration,
+                audio_source=audio_source,
+                hook_overlay=hook_overlay if actual_hook else None,
+                ass_file=ass_file,
+                watermark_path=watermark_path,
+                watermark_placeholder=actual_watermark and watermark_path is None,
+                credit_overlay=credit_overlay if actual_credit else None,
+            )
+            self.log_ffmpeg_command(cmd, "Final Composite")
+            self.run_ffmpeg_with_progress(cmd, final_duration, lambda progress: clip_progress("Merender hasil akhir", 0.7 + progress * 0.28))
+            if not final_temp.exists() or final_temp.stat().st_size < 1000:
+                raise Exception("Final render failed: output file not found")
+            final_file = clip_dir / "master.mp4"
+            os.replace(final_temp, final_file)
+            metadata = {
+                "title": highlight["title"],
+                "description": highlight.get("description", ""),
+                "source_title": self.video_info.get("title", ""),
+                "source_description": self.video_info.get("description", ""),
+                "hook_text": highlight.get("hook_text", highlight["title"]),
+                "start_time": highlight["start_time"],
+                "end_time": highlight["end_time"],
+                "duration_seconds": highlight["duration_seconds"],
+                "has_hook": actual_hook,
+                "has_captions": actual_captions,
+                "has_watermark": actual_watermark,
+                "has_credit": actual_credit,
+                "channel_name": self.channel_name,
+                "virality_score": int(highlight.get("virality_score", 5) or 5),
+            }
+            (clip_dir / "data.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+            try:
+                thumbnail_path = clip_dir / "thumbnail.jpg"
+                subprocess.run([self.ffmpeg_path, "-y", "-ss", str(min(1.0, duration * 0.1)), "-i", str(final_file), "-frames:v", "1", "-q:v", "3", str(thumbnail_path)], capture_output=True, timeout=30)
+            except Exception as exc:
+                self.log(f"  Thumbnail extraction failed (non-fatal): {exc}")
+            clip_progress("Selesai", 1.0)
+        finally:
+            for path in cleanup_paths:
+                try:
+                    Path(path).unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+    def _process_clip_legacy(self, video_path: str, highlight: dict, index: int, total_clips: int = 1, add_captions: bool = True, add_hook: bool = True, pre_cut: bool = False):
         """Process a single clip: cut, portrait, hook (optional), captions (optional)
         
         Args:
@@ -189,7 +504,7 @@ class ExportMixin(ClipperBase):
             # If watermark enabled, add captions to temp file first
             if self.watermark_settings.get("enabled"):
                 temp_captioned = clip_dir / "temp_captioned.mp4"
-                self.add_captions_api_with_progress(str(current_output), str(temp_captioned), audio_source, hook_duration,
+                self.add_captions_api_with_progress(str(current_output), str(temp_captioned), audio_source, 0,
                     lambda p: clip_progress("Adding captions...", current_step, p))
                 
                 if not temp_captioned.exists():
@@ -198,7 +513,7 @@ class ExportMixin(ClipperBase):
                 current_output = temp_captioned
             else:
                 # No watermark, captions go directly to final
-                self.add_captions_api_with_progress(str(current_output), str(final_file), audio_source, hook_duration,
+                self.add_captions_api_with_progress(str(current_output), str(final_file), audio_source, 0,
                     lambda p: clip_progress("Adding captions...", current_step, p))
                 
                 if not final_file.exists():
@@ -442,7 +757,7 @@ class ExportMixin(ClipperBase):
         """Create ASS subtitle file with CapCut-style word-by-word highlighting"""
         
         style = getattr(self, "subtitle_style", {}) or {}
-        font = str(style.get("font") or style.get("font_family") or "Plus Jakarta Sans").replace(",", " ")
+        font = "Plus Jakarta Sans"
         width, height = self._render_size()
         
         size_val = float(style.get("size") or 0.04)
@@ -451,20 +766,19 @@ class ExportMixin(ClipperBase):
         else:
             size = int(size_val / 1080 * width) if width != 1080 else int(size_val)
             
-        pos_x_ratio = float(style.get("position_x", 0.5))
         pos_y_ratio = float(style.get("position_y", 0.85))
-        pos_x = int(pos_x_ratio * width)
+        pos_x = width // 2
         pos_y = int(pos_y_ratio * height)
         
         alignment = 5 # Middle-center anchor for precise \pos placement
             
         # Colors (ASS is &HAABBGGRR)
-        color_hex = str(style.get("color") or "#ffffff").strip("#")
+        color_hex = "00BFFF"
         bg_color_hex = str(style.get("bg_color") or "#000000").strip("#")
         bg_opacity = float(style.get("bg_opacity", 0.8))
         # Always use box if opacity > 0, ignoring old bg_box false flag
         bg_box = True if bg_opacity > 0 else False
-        font_weight = int(style.get("font_weight", 800))
+        font_weight = 900
         
         if len(color_hex) == 6:
             r, g, b = color_hex[0:2], color_hex[2:4], color_hex[4:6]
@@ -481,7 +795,7 @@ class ExportMixin(ClipperBase):
 
         # BorderStyle: 1=Outline, 3=Opaque Box
         border_style = 1 # Force outline, no box
-        outline = max(1, int(size * 0.05)) # Thin outline
+        outline = max(1, int(round(width / 340)))
         bold = -1 if font_weight >= 700 else 0
 
         ass_content = f"""[Script Info]
@@ -627,22 +941,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         """Add hook scene as a title overlay for 4 seconds"""
         
         progress_callback(0.1)
-        hook_duration = 4.0
+        hook_duration = max(1.0, min(10.0, float((self.hook_style_settings or {}).get("duration", 5.0))))
         
-        # Format hook text
         hook_upper = hook_text.upper()
-        words = hook_upper.split()
-        
-        lines = []
-        current_line = []
-        for word in words:
-            current_line.append(word)
-            if len(current_line) >= 3:
-                lines.append(' '.join(current_line))
-                current_line = []
-        if current_line:
-            lines.append(' '.join(current_line))
-        
+
         # Get input video info
         probe_cmd = [self.ffmpeg_path, "-i", input_path]
         result = subprocess.run(probe_cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
@@ -663,7 +965,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         style = self.hook_style_settings or {}
         font_size_frac = float(style.get("font_size", 0.05))
-        font_color_hex = style.get("text_color") or style.get("font_color") or "#FFD700"
+        font_color_hex = "#FFD700"
         pos_x = float(style.get("position_x", 0.5))
         pos_y = float(style.get("position_y", 0.2))
         user_font_path = style.get("font_path") or ""
@@ -677,14 +979,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             "Super Kidpop": root / "fonts" / "SuperKidpop.ttf",
             "Capo Sfogliato": root / "fonts" / "CapoSfogliato.ttf",
         }
-        font_candidates = [user_font_path, str(family_fonts.get(font_family, "")), self._find_system_font_bold()]
+        font_candidates = [user_font_path, str(family_fonts.get(font_family, "")), str(family_fonts["Plus Jakarta Sans"]), self._find_system_font_bold()]
         pil_font = None
-        font_px = self._scale_from_preview_width(font_size_frac, 500, width, minimum=max(12, int(12 / 340 * width)))
+        font_px = max(1, int(max(16, font_size_frac * 500) / 340 * width))
         for candidate in font_candidates:
             if not candidate or not os.path.exists(candidate):
                 continue
             try:
                 pil_font = ImageFont.truetype(candidate, font_px)
+                if hasattr(pil_font, "set_variation_by_axes") and "PlusJakartaSans" in Path(candidate).name:
+                    pil_font.set_variation_by_axes([800])
                 self.log(f"  Hook font: {candidate} @ {font_px}px")
                 break
             except Exception as e:
@@ -694,73 +998,39 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             pil_font = ImageFont.load_default()
 
         font_color_rgb = _hex_to_rgb(font_color_hex)
-
-        # Per-line geometry
-        padding = max(10, int(font_px * 0.22))
-        line_spacing = max(6, int(font_px * 0.25))
-
-        line_metrics = []
-        for line in lines:
-            try:
-                bbox = pil_font.getbbox(line)
-            except AttributeError:
-                w, h = pil_font.getsize(line)
-                bbox = (0, 0, w, h)
-            text_w = bbox[2] - bbox[0]
-            text_h = bbox[3] - bbox[1]
-            line_metrics.append({
-                "text": line,
-                "bbox": bbox,
-                "box_w": text_w + padding * 2,
-                "box_h": text_h + padding * 2,
-            })
-
-        total_h = sum(m["box_h"] for m in line_metrics)
-        if len(line_metrics) > 1:
-            total_h += line_spacing * (len(line_metrics) - 1)
-
+        lines = self._wrap_preview_text(hook_upper, pil_font, int(width * 0.9))
+        line_height = int(font_px * 1.2)
+        total_h = line_height * len(lines)
         center_x = int(pos_x * width)
         center_y = int(pos_y * height)
-        block_top = center_y - total_h // 2
+        block_top = center_y - total_h / 2
 
-        # Compose the static overlay
         overlay_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay_img)
+        stroke_width = max(1, int(round(1.5 / 340 * width)))
+        shadow_y = max(1, int(round(3 / 340 * width)))
 
-        cur_y = block_top
-        stroke_width = max(1, int(font_px * 0.05))
-        shadow_offset = max(2, int(font_px * 0.08))
-
-        for m in line_metrics:
-            box_w = m["box_w"]
-            box_h = m["box_h"]
-            box_x1 = center_x - box_w // 2
-            box_y1 = cur_y
-            
-            text_x = box_x1 + padding - m["bbox"][0]
-            text_y = box_y1 + padding - m["bbox"][1]
-
-            # Draw Shadow
+        for index, line in enumerate(lines):
+            bbox = draw.textbbox((0, 0), line, font=pil_font, stroke_width=stroke_width)
+            text_x = center_x - (bbox[2] - bbox[0]) / 2 - bbox[0]
+            text_y = block_top + index * line_height - bbox[1]
             draw.text(
-                (text_x, text_y + shadow_offset),
-                m["text"],
+                (text_x, text_y + shadow_y),
+                line,
                 font=pil_font,
-                fill=(0, 0, 0, 180),
+                fill=(0, 0, 0, 128),
                 stroke_width=stroke_width,
-                stroke_fill=(0, 0, 0, 180),
+                stroke_fill=(0, 0, 0, 128),
             )
-
-            # Draw Main Text with Stroke
             draw.text(
                 (text_x, text_y),
-                m["text"],
+                line,
                 font=pil_font,
                 fill=(*font_color_rgb, 255),
                 stroke_width=stroke_width,
                 stroke_fill=(0, 0, 0, 255),
             )
 
-            cur_y = box_y1 + box_h + line_spacing
 
         import time
         overlay_png = str(self.temp_dir / f"hook_overlay_{int(time.time() * 1000)}.png")
@@ -1025,62 +1295,33 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         opacity = self.credit_watermark_settings.get("opacity", 0.7)
         color = str(self.credit_watermark_settings.get("color", "#FFFFFF")).lstrip("#") or "FFFFFF"
         
-        font_size = self._scale_from_preview_width(size, 320, video_width, minimum=max(10, int(10 / 340 * video_width)))
-        
-        # Calculate position in pixels
-        x_pixels = int(pos_x * video_width)
-        y_pixels = int(pos_y * video_height)
-        
-        # Prepare credit text
+        font_size = self._scale_from_preview_width(size, 320, video_width, minimum=max(10, int(round(10 / 340 * video_width))))
+        x_pixels = pos_x * video_width
+        y_pixels = pos_y * video_height
         channel_display = self.channel_name
         if not channel_display or channel_display == "{channel}":
-            channel_display = "Local Video" # Fallback for local files without youtube channel
-            
+            channel_display = "Local Video"
         credit_text = str(self.credit_watermark_settings.get("text") or "sc : {channel}").replace("{channel}", channel_display)
-        # Escape special characters for FFmpeg drawtext
-        credit_text_escaped = credit_text.replace("\\", "\\\\").replace("'", "'\\''").replace(":", "\\:")
-        
-        # Build FFmpeg drawtext filter
-        # Use fontfile for portable FFmpeg (avoids fontconfig dependency)
-        # Try to find a system font, fallback to built-in if not available
-        font_file = None
-        if sys.platform == "win32":
-            # Windows fonts directory
-            windows_fonts = [
-                "C:/Windows/Fonts/arial.ttf",
-                "C:/Windows/Fonts/segoeui.ttf",
-                "C:/Windows/Fonts/tahoma.ttf",
-            ]
-            for font in windows_fonts:
-                if Path(font).exists():
-                    font_file = font.replace("\\", "/").replace(":", "\\:")
-                    break
-        
-        shadow_x = max(1, int(1 / 340 * video_width))
-        shadow_y = max(1, int(1 / 340 * video_width))
 
-        # Build filter string
-        if font_file:
-            filter_str = (
-                f"drawtext=fontfile='{font_file}':"
-                f"text='{credit_text_escaped}':"
-                f"fontsize={font_size}:"
-                f"fontcolor=0x{color}@{opacity}:"
-                f"shadowcolor=0x000000@0.5:shadowx={shadow_x}:shadowy={shadow_y}:"
-                f"x=(w*{pos_x})-(text_w/2):"
-                f"y=(h*{pos_y})-(text_h/2)"
-            )
-        else:
-            # Fallback without fontfile (may cause fontconfig warning but should still work)
-            filter_str = (
-                f"drawtext=text='{credit_text_escaped}':"
-                f"fontsize={font_size}:"
-                f"fontcolor=0x{color}@{opacity}:"
-                f"shadowcolor=0x000000@0.5:shadowx={shadow_x}:shadowy={shadow_y}:"
-                f"x=(w*{pos_x})-(text_w/2):"
-                f"y=(h*{pos_y})-(text_h/2)"
-            )
-        
+        from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+        font = ImageFont.truetype(str(Path(__file__).resolve().parent / "fonts" / "PlusJakartaSans.ttf"), font_size)
+        if hasattr(font, "set_variation_by_axes"):
+            font.set_variation_by_axes([600])
+        overlay_img = Image.new("RGBA", (video_width, video_height), (0, 0, 0, 0))
+        shadow_img = Image.new("RGBA", overlay_img.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay_img)
+        shadow_draw = ImageDraw.Draw(shadow_img)
+        bbox = draw.textbbox((0, 0), credit_text, font=font)
+        text_x = x_pixels - (bbox[2] - bbox[0]) / 2 - bbox[0]
+        text_y = y_pixels - (bbox[3] - bbox[1]) / 2 - bbox[1]
+        shadow_y = video_width / 340
+        shadow_draw.text((text_x, text_y + shadow_y), credit_text, font=font, fill=(0, 0, 0, int(255 * 0.5 * opacity)))
+        overlay_img.alpha_composite(shadow_img.filter(ImageFilter.GaussianBlur(3 / 340 * video_width)))
+        draw.text((text_x, text_y), credit_text, font=font, fill=(*_hex_to_rgb(color), int(255 * opacity)))
+        overlay_png = str(self.temp_dir / f"credit_overlay_{time.time_ns()}.png")
+        overlay_img.save(overlay_png, "PNG")
+
         progress_callback(0.3)
         
         # Get video duration for progress
@@ -1095,7 +1336,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         cmd = [
             self.ffmpeg_path, "-y",
             "-i", input_path,
-            "-vf", filter_str,
+            "-i", overlay_png,
+            "-filter_complex", "[0:v][1:v]overlay=0:0[v]",
+            "-map", "[v]",
+            "-map", "0:a?",
             *encoder_args,
             "-c:a", "copy",
             "-movflags", "+faststart",
@@ -1109,6 +1353,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         self.run_ffmpeg_with_progress(cmd, video_duration,
             lambda p: progress_callback(0.3 + p * 0.7))
         
+        try:
+            os.unlink(overlay_png)
+        except OSError:
+            pass
         if not Path(output_path).exists():
             raise Exception("Failed to apply credit watermark")
 

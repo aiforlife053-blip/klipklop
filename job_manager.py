@@ -40,6 +40,7 @@ class WebJobManager:
         self._job_start_time = None
         self._job_timeout = 3600  # 1 hour default timeout
         self._cancel_requested = False
+        self._active_url = ""
 
     def start(self, payload):
         if not isinstance(payload, dict):
@@ -83,6 +84,7 @@ class WebJobManager:
             self._progress = 0.0
             self._error = ""
             self._cancel_requested = False
+            self._active_url = url
             self._add_log(f"Task {datetime.now().strftime('%d %b %Y %H:%M:%S')} | {url}", "Task")
             self._add_log("Job started")
             self._add_log(f"URL accepted: {url}")
@@ -107,6 +109,12 @@ class WebJobManager:
             self._job_start_time = datetime.now()
         return {"status": "started"}
 
+    @staticmethod
+    def _parallel_workers_for_quality(configured_workers, quality):
+        configured = max(1, int(configured_workers or 1))
+        cap = {"1080": 2, "1440": 1, "2160": 1}.get(str(quality), configured)
+        return min(configured, cap)
+
     def _settings_from_start_payload(self, payload):
         start_settings = dict(payload["settings"])
         if "video_quality" in payload:
@@ -124,6 +132,7 @@ class WebJobManager:
             "message": self._public_text(self._message),
             "progress": self._progress,
             "error": self._public_text(self._error),
+            "url": self._active_url,
             "logs": self._logs[-500:],
         }
 
@@ -265,7 +274,7 @@ class WebJobManager:
         local_whisper["enabled"] = True
         local_whisper["device"] = str(local_whisper.get("device") or "cpu")
         local_whisper["compute_type"] = str(local_whisper.get("compute_type") or "int8")
-        if video_quality not in {"480", "720", "1080"}:
+        if video_quality not in {"480", "720", "1080", "1440", "2160"}:
             video_quality = "720"
         subtitle_style = cfg_mgr.config.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360})
         if isinstance(payload.get("subtitle_style"), dict):
@@ -514,7 +523,8 @@ class WebJobManager:
                 "position": cfg.get("subtitle_position", "auto")
             }
             ai_providers = dict(cfg.get("ai_providers") or {})
-            ai_providers["parallel_workers"] = int(cfg.get("parallel_workers", 1))
+            quality = str(cfg.get("video_quality", "720"))
+            ai_providers["parallel_workers"] = self._parallel_workers_for_quality(cfg.get("parallel_workers", 1), quality)
             core = AutoClipperCore(
                 client=None,
                 ffmpeg_path=get_ffmpeg_path(),
@@ -544,8 +554,7 @@ class WebJobManager:
             if cfg.get("gpu_acceleration", {}).get("enabled", False):
                 self._add_log("GPU acceleration requested")
                 core.enable_gpu_acceleration(True)
-            quality = str(cfg.get("video_quality", "720"))
-            resolution_map = {"16:9": {"480": "854x480", "720": "1280x720", "1080": "1920x1080"}, "9:16": {"480": "540x960", "720": "720x1280", "1080": "1080x1920"}}
+            resolution_map = {"16:9": {"480": "854x480", "720": "1280x720", "1080": "1920x1080", "1440": "2560x1440", "2160": "3840x2160"}, "9:16": {"480": "540x960", "720": "720x1280", "1080": "1080x1920", "1440": "1440x2560", "2160": "2160x3840"}}
             resolution = resolution_map.get(screen_size, resolution_map["9:16"]).get(quality, resolution_map.get(screen_size, resolution_map["9:16"])["720"])
             self._add_log(f"Video quality: {quality}p")
             self._add_log(f"Output resolution: {resolution}")

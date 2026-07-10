@@ -129,7 +129,10 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         self.subtitle_engine = subtitle_engine or "local"
         self.local_whisper = local_whisper or {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"}
         self._local_whisper_model = None
-        resolutions = {"16:9": {"480": "854:480", "720": "1280:720", "1080": "1920:1080"}, "9:16": {"480": "540:960", "720": "720:1280", "1080": "1080:1920"}}
+        resolutions = {
+            "16:9": {"480": "854:480", "720": "1280:720", "1080": "1920:1080", "1440": "2560:1440", "2160": "3840:2160"},
+            "9:16": {"480": "540:960", "720": "720:1280", "1080": "1080:1920", "1440": "1440:2560", "2160": "2160:3840"}
+        }
         self.output_resolution = resolutions[self.screen_size].get(self.video_quality, resolutions[self.screen_size]["720"])
         self._progress_lock = threading.Lock()
         

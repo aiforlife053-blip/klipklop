@@ -127,15 +127,15 @@ export default function Preview() {
   }, [settings]);
 
   return (
-    <div className="flex flex-row-reverse w-full h-[calc(100vh-53px)] overflow-hidden bg-slate-50/50">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-slate-50/50 lg:grid lg:grid-cols-2 lg:overflow-hidden">
       
       {/* Settings Panel: Configuration Accordions (50%) */}
-      <div className="w-[50%] shrink-0 border-l border-slate-200 bg-white h-full overflow-y-auto flex flex-col z-10 shadow-[-4px_0_24px_rgba(0,0,0,0.02)]">
-        <div className="p-5 border-b border-slate-100 sticky top-0 bg-white z-20">
+      <div className="order-2 flex min-w-0 flex-col border-t border-slate-200 bg-white lg:min-h-0 lg:border-l lg:border-t-0 lg:overflow-hidden">
+        <div className="shrink-0 border-b border-slate-100 bg-white px-4 py-3">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-[20px] font-bold text-slate-900 tracking-tight">Studio Editor</h2>
-              <p className="text-[13px] text-slate-500 mt-0.5">Konfigurasi overlay dan efek klip. Drag elemen langsung di preview!</p>
+              <h2 className="text-[18px] font-bold leading-6 tracking-tight text-slate-900">Studio Editor</h2>
+              <p className="mt-0.5 text-[12px] leading-4 text-slate-500">Atur overlay, lalu drag elemen langsung di preview.</p>
               <div className="flex items-center gap-1.5 mt-1.5">
                 {isDirty ? (
                   <>
@@ -157,7 +157,7 @@ export default function Preview() {
             <button
               onClick={handleSaveSettings}
               disabled={saveState === 'saving'}
-              className={`shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl text-[13px] font-semibold transition shadow-sm border ${
+              className={`flex min-h-11 shrink-0 items-center gap-2 rounded-xl border px-4 py-2 text-[13px] font-semibold shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 ${
                 saveState === 'saved'
                   ? 'bg-emerald-500 text-white border-emerald-500'
                   : saveState === 'error'
@@ -232,18 +232,18 @@ export default function Preview() {
         document.body
       )}
 
-        <div className="flex-1 p-3 grid grid-cols-2 gap-3 overflow-y-auto content-start bg-slate-50">
+        <div className="grid grid-cols-1 gap-2 bg-slate-50 p-3 sm:grid-cols-2 items-start lg:min-h-0 lg:flex-1 lg:content-center lg:overflow-y-auto">
           
           {/* Watermark Section */}
-          <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-col gap-2.5">
+          <div className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:h-[212px]">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <h4 className="text-[13px] font-bold text-slate-900 flex items-center gap-2">
                 <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
                 Watermark Logo
               </h4>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" className="sr-only peer" checked={settings.watermark.enabled} onChange={(e) => setSettings({...settings, watermark: {...settings.watermark, enabled: e.target.checked}})} />
-                <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
+              <label className="relative inline-flex h-11 w-11 cursor-pointer items-center justify-center">
+                <input type="checkbox" aria-label="Aktifkan watermark logo" className="sr-only peer" checked={settings.watermark.enabled} onChange={(e) => setSettings({...settings, watermark: {...settings.watermark, enabled: e.target.checked}})} />
+                <div className="peer h-4 w-8 rounded-full bg-slate-200 after:absolute after:left-[8px] after:top-[16px] after:h-3 after:w-3 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-primary peer-checked:after:translate-x-4 peer-checked:after:border-white peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2"></div>
               </label>
             </div>
             {settings.watermark.enabled && (
@@ -271,15 +271,15 @@ export default function Preview() {
           </div>
 
           {/* Credit Section */}
-          <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-col gap-2.5">
+          <div className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:h-[212px]">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <h4 className="text-[13px] font-bold text-slate-900 flex items-center gap-2">
                 <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                 Credit Text
               </h4>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" className="sr-only peer" checked={settings.credit_watermark.enabled} onChange={(e) => setSettings({...settings, credit_watermark: {...settings.credit_watermark, enabled: e.target.checked}})} />
-                <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
+              <label className="relative inline-flex h-11 w-11 cursor-pointer items-center justify-center">
+                <input type="checkbox" aria-label="Aktifkan credit text" className="sr-only peer" checked={settings.credit_watermark.enabled} onChange={(e) => setSettings({...settings, credit_watermark: {...settings.credit_watermark, enabled: e.target.checked}})} />
+                <div className="peer h-4 w-8 rounded-full bg-slate-200 after:absolute after:left-[8px] after:top-[16px] after:h-3 after:w-3 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-primary peer-checked:after:translate-x-4 peer-checked:after:border-white peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2"></div>
               </label>
             </div>
             {settings.credit_watermark.enabled && (
@@ -312,15 +312,15 @@ export default function Preview() {
           </div>
 
           {/* Hook Section */}
-          <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-col gap-2.5">
+          <div className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:h-[92px]">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <h4 className="text-[13px] font-bold text-slate-900 flex items-center gap-2">
                 <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path></svg>
                 Hook Title
               </h4>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" className="sr-only peer" checked={settings.hook_style.enabled} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, enabled: e.target.checked}})} />
-                <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
+              <label className="relative inline-flex h-11 w-11 cursor-pointer items-center justify-center">
+                <input type="checkbox" aria-label="Aktifkan hook title" className="sr-only peer" checked={settings.hook_style.enabled} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, enabled: e.target.checked}})} />
+                <div className="peer h-4 w-8 rounded-full bg-slate-200 after:absolute after:left-[8px] after:top-[16px] after:h-3 after:w-3 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-primary peer-checked:after:translate-x-4 peer-checked:after:border-white peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2"></div>
               </label>
             </div>
             {settings.hook_style.enabled && (
@@ -331,15 +331,15 @@ export default function Preview() {
           </div>
 
           {/* Subtitle Section */}
-          <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-col gap-2.5">
+          <div className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:h-[92px]">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <h4 className="text-[13px] font-bold text-slate-900 flex items-center gap-2">
                 <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
                 Subtitle
               </h4>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" className="sr-only peer" checked={settings.subtitle?.enabled} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, enabled: e.target.checked}})} />
-                <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
+              <label className="relative inline-flex h-11 w-11 cursor-pointer items-center justify-center">
+                <input type="checkbox" aria-label="Aktifkan subtitle" className="sr-only peer" checked={settings.subtitle?.enabled} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, enabled: e.target.checked}})} />
+                <div className="peer h-4 w-8 rounded-full bg-slate-200 after:absolute after:left-[8px] after:top-[16px] after:h-3 after:w-3 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-primary peer-checked:after:translate-x-4 peer-checked:after:border-white peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2"></div>
               </label>
             </div>
             {settings.subtitle?.enabled && (
@@ -351,34 +351,34 @@ export default function Preview() {
 
 
           {/* Background Blur Section */}
-          <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-col gap-2.5">
+          <div className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:col-span-2">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <h4 className="text-[13px] font-bold text-slate-900 flex items-center gap-2">
-                <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
-                Bg Blur
+              <h4 className="flex items-center gap-2 text-[13px] font-bold text-slate-900">
+                <svg className="h-4 w-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
+                Latar Video
               </h4>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" className="sr-only peer" checked={settings.blur_background.enabled} onChange={(e) => setSettings({...settings, blur_background: {...settings.blur_background, enabled: e.target.checked}})} />
-                <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
+              <label className="relative inline-flex h-11 w-11 cursor-pointer items-center justify-center">
+                <input type="checkbox" aria-label="Aktifkan latar video blur" className="sr-only peer" checked={settings.blur_background.enabled} onChange={(e) => setSettings({...settings, blur_background: {...settings.blur_background, enabled: e.target.checked}})} />
+                <div className="peer h-4 w-8 rounded-full bg-slate-200 after:absolute after:left-[8px] after:top-[16px] after:h-3 after:w-3 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-primary peer-checked:after:translate-x-4 peer-checked:after:border-white peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2"></div>
               </label>
             </div>
             {settings.blur_background.enabled && (
-              <div className="space-y-3 pt-1">
-                <div className="space-y-1.5">
+              <div className="grid grid-cols-1 gap-3 pt-1 sm:grid-cols-3">
+                <div className="min-w-0 space-y-1.5">
                   <div className="flex items-center justify-between">
                     <label className="text-[11px] font-semibold text-slate-600">Video Scale</label>
                     <span className="text-[10px] font-medium text-slate-400">{Math.round((settings.blur_background.scale || 1.0) * 100)}%</span>
                   </div>
                   <input type="range" min="0.5" max="1.5" step="0.01" value={settings.blur_background.scale || 1.0} onChange={(e) => setSettings({...settings, blur_background: {...settings.blur_background, scale: parseFloat(e.target.value)}})} className="w-full h-1 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
                 </div>
-                <div className="space-y-1.5">
+                <div className="min-w-0 space-y-1.5">
                   <div className="flex items-center justify-between">
                     <label className="text-[11px] font-semibold text-slate-600">Bg Zoom</label>
                     <span className="text-[10px] font-medium text-slate-400">{Math.round(settings.blur_background.zoom * 100)}%</span>
                   </div>
                   <input type="range" min="1.0" max="3.0" step="0.01" value={settings.blur_background.zoom} onChange={(e) => setSettings({...settings, blur_background: {...settings.blur_background, zoom: parseFloat(e.target.value)}})} className="w-full h-1 bg-orange-100 rounded-lg appearance-none cursor-pointer accent-primary" />
                 </div>
-                <div className="space-y-1.5">
+                <div className="min-w-0 space-y-1.5">
                   <div className="flex items-center justify-between">
                     <label className="text-[11px] font-semibold text-slate-600">Blur Strength</label>
                     <span className="text-[10px] font-medium text-slate-400">{settings.blur_background.strength}</span>
@@ -393,12 +393,12 @@ export default function Preview() {
       </div>
 
       {/* Preview Panel: Interactive 9:16 Preview (50%) */}
-      <div className="w-[50%] flex flex-col items-center justify-center p-6 relative overflow-hidden bg-muted" style={{ backgroundImage: 'radial-gradient(rgba(0, 0, 0, 0.05) 1.5px, transparent 1.5px)', backgroundSize: '20px 20px', backgroundPosition: '10px 10px' }}>
+      <div className="relative order-1 grid h-[min(42rem,75dvh)] shrink-0 place-items-center overflow-hidden bg-muted p-4 [container-type:size] lg:h-auto lg:min-h-0" style={{ backgroundImage: 'radial-gradient(rgba(0, 0, 0,0.05) 1.5px, transparent 1.5px)', backgroundSize: '20px 20px', backgroundPosition: '10px 10px' }}>
         
         {/* Aspect Ratio Container */}
         <div 
           ref={previewRef}
-          className="relative w-full max-w-[340px] aspect-[9/16] bg-black rounded-[2rem] shadow-2xl overflow-hidden ring-8 ring-white/50 group select-none"
+          className="group relative aspect-[9/16] w-[min(100cqw,53cqh)] select-none overflow-hidden rounded-[1.5rem] bg-black shadow-2xl ring-4 ring-white/60 [container-type:inline-size] sm:rounded-[2rem]"
         >
           {/* 1. Background Blur Layer */}
           <div className="absolute inset-0 w-full h-full">
@@ -437,7 +437,7 @@ export default function Preview() {
               left: `${settings.watermark.position_x * 100}%`,
               top: `${settings.watermark.position_y * 100}%`,
               transform: 'translate(-50%, -50%)',
-              opacity: settings.watermark.opacity,
+              opacity: settings.watermark.enabled ? settings.watermark.opacity : 0,
             }}
             onMouseDown={(e) => handleDragStart(e, 'watermark')}
             onTouchStart={(e) => handleDragStart(e, 'watermark')}
@@ -445,12 +445,13 @@ export default function Preview() {
             <div 
               className="bg-black/80 flex items-center justify-center rounded-xl overflow-hidden"
               style={{
-                width: `${settings.watermark.scale * 150}px`,
-                height: `${settings.watermark.scale * 150}px`,
-                boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+                 width: `${settings.watermark.scale * 44.12}cqw`,
+                 height: `${settings.watermark.scale * 44.12}cqw`,
+                 boxShadow: '0 1.18cqw 3.53cqw rgba(0,0,0,0.5)'
+
               }}
             >
-              <span className="text-white font-bold" style={{ fontSize: `${settings.watermark.scale * 24}px` }}>LOGO</span>
+              <span className="font-bold text-white" style={{ fontSize: `${settings.watermark.scale * 7.06}cqw` }}>LOGO</span>
             </div>
           </div>
 
@@ -463,7 +464,7 @@ export default function Preview() {
               transform: 'translate(-50%, -50%)',
               opacity: settings.credit_watermark.opacity,
               color: settings.credit_watermark.color,
-              fontSize: `${Math.max(10, settings.credit_watermark.size * 320)}px`,
+              fontSize: `max(2.94cqw, ${settings.credit_watermark.size * 94.12}cqw)`,
               fontWeight: '600',
               textShadow: '0px 1px 3px rgba(0,0,0,0.5)'
             }}
@@ -482,14 +483,15 @@ export default function Preview() {
                 top: `${settings.hook_style.position_y * 100}%`,
                 transform: 'translate(-50%, -50%)',
                 color: '#FFD700',
-                fontSize: `${Math.max(16, (settings.hook_style.font_size || 0.05) * 500)}px`,
+                fontSize: `max(4.71cqw, ${(settings.hook_style.font_size || 0.05) * 147.06}cqw)`,
                 fontFamily: `'Super Kidpop', 'Capo Sfogliato', 'Plus Jakarta Sans', sans-serif`,
                 fontWeight: 900,
                 textAlign: 'center',
                 whiteSpace: 'pre-wrap',
                 lineHeight: '1.2',
-                WebkitTextStroke: '1.5px black',
-                textShadow: '0px 3px 0px black, 0px 4px 4px rgba(0,0,0,0.5)',
+                 WebkitTextStroke: '0.44cqw black',
+                 textShadow: '0 0.88cqw 0 black, 0 1.18cqw 1.18cqw rgba(0,0,0,0.5)',
+
                 width: '90%',
               }}
               onMouseDown={(e) => handleDragStart(e, 'hook')}
@@ -517,12 +519,14 @@ export default function Preview() {
             >
               <div style={{
                 color: '#FFFFFF',
-                fontSize: `${Math.max(12, (settings.subtitle?.size || 0.04) * 500)}px`,
+                 fontSize: `max(3.53cqw, ${(settings.subtitle?.size || 0.04) * 147.06}cqw)`,
+
                 fontWeight: 900,
                 fontFamily: `'Plus Jakarta Sans', sans-serif`,
                 textTransform: 'uppercase',
-                WebkitTextStroke: '1px black',
-                textShadow: '0px 1px 2px rgba(0,0,0,0.5)',
+                 WebkitTextStroke: '0.29cqw black',
+                 textShadow: '0 0.29cqw 0.59cqw rgba(0,0,0,0.5)',
+
               }}>
                 CONTOH <span style={{ color: '#00BFFF' }}>SUBTITLE KLIP</span> VIDEO
               </div>
@@ -540,12 +544,6 @@ export default function Preview() {
 
         </div>
         
-        {/* Helper Badge */}
-        <div className="absolute bottom-6 bg-white/80 backdrop-blur-md px-4 py-2 rounded-full border border-slate-200 shadow-sm text-[12px] font-semibold text-slate-600 flex items-center gap-2">
-          <svg className="w-4 h-4 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>
-          Akktifkan setting lalu klik & tahan elemen di dalam preview untuk memindahkannya
-        </div>
-
       </div>
     </div>
   );

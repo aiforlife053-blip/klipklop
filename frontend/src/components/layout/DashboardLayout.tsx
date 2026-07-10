@@ -97,7 +97,7 @@ export default function DashboardLayout() {
   };
 
   return (
-    <div className="bg-background text-foreground h-screen overflow-hidden flex flex-col antialiased">
+    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground antialiased">
       <header className="bg-white border-b border-border px-4 py-3 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center space-x-2 text-black font-extrabold text-[20px] tracking-tight">
           <img src="/logo%20klipklop.png?v=3" className="h-10 w-10 rounded-md object-contain" alt="KlipKlop Logo" />
@@ -180,8 +180,8 @@ export default function DashboardLayout() {
         </nav>
       </header>
 
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        <main className="flex-1 min-w-0 flex flex-col">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <Outlet context={{ settings, setSettings, status }} />
         </main>
       </div>

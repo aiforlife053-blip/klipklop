@@ -13,8 +13,16 @@ from utils.logger import debug_log
 class DownloadMixin(ClipperBase):
     def _format_selector(self):
         quality = str(getattr(self, "video_quality", "720") or "720")
-        max_height = {"480": 480, "720": 720, "1080": 1080}.get(quality, 720)
-        return f"bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]/best"
+        max_height = {"480": 480, "720": 720, "1080": 1080, "1440": 1440, "2160": 2160}.get(quality, 720)
+        return (
+            f"bestvideo[height<={max_height}][fps<=30]+bestaudio/"
+            f"best[height<={max_height}][fps<=30]/"
+            f"bestvideo[height<={max_height}]+bestaudio/"
+            f"best[height<={max_height}]"
+        )
+
+    def _format_sort(self):
+        return ['res', 'vcodec:h264', 'fps:30', 'br']
 
     def _cookies_path(self):
         from utils.helpers import get_app_dir
@@ -212,7 +220,8 @@ class DownloadMixin(ClipperBase):
         # Base yt-dlp options
         ydl_opts = {
             'format': format_selector,
-            'format_sort': ['res', 'br'],
+            'format_sort': self._format_sort(),
+            'format_sort_force': True,
             'merge_output_format': 'mp4',
             'outtmpl': str(self.temp_dir / 'source.%(ext)s'),
             'progress_hooks': [progress_hook],
@@ -1160,7 +1169,8 @@ class DownloadMixin(ClipperBase):
         
         ydl_opts = {
             'format': format_selector,
-            'format_sort': ['res', 'br'],
+            'format_sort': self._format_sort(),
+            'format_sort_force': True,
             'merge_output_format': 'mp4',
             'outtmpl': output_path,
             'progress_hooks': [progress_hook],
@@ -1170,7 +1180,9 @@ class DownloadMixin(ClipperBase):
                 self.parse_timestamp(start_time),
                 self.parse_timestamp(end_time)
             )]),
-            'force_keyframes_at_cuts': True,
+            'concurrent_fragment_downloads': 4,
+            'fragment_retries': 5,
+            'retries': 5,
         }
         
         # Add Deno JS runtime
@@ -1240,9 +1252,13 @@ class DownloadMixin(ClipperBase):
         cmd = [
             self.ytdlp_path,
             "-f", format_selector,
-            "--format-sort", "res,br",
+            "--format-sort", ",".join(self._format_sort()),
+            "--format-sort-force",
             "--download-sections", section_str,
-            "--force-keyframes-at-cuts",
+            "--concurrent-fragments", "4",
+            "--fragment-retries", "5",
+            "--retries", "5",
+            "--newline",
             "--merge-output-format", "mp4",
             "-o", output_path,
         ]
@@ -1266,11 +1282,12 @@ class DownloadMixin(ClipperBase):
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
             creationflags=SUBPROCESS_FLAGS
         )
         
+        output_lines = []
         while True:
             if self.is_cancelled():
                 process.terminate()
@@ -1282,6 +1299,9 @@ class DownloadMixin(ClipperBase):
                 break
             
             line = line.strip()
+            if line:
+                output_lines.append(line)
+                output_lines = output_lines[-100:]
             if "[download]" in line and "%" in line:
                 match = re.search(r'(\d+\.?\d*)%', line)
                 if match:
@@ -1290,9 +1310,9 @@ class DownloadMixin(ClipperBase):
                     self.set_progress(f"Downloading video section... {percent}%", 0.32 + float(percent) / 100 * 0.08)
         
         if process.returncode != 0:
-            stderr_output = process.stderr.read() if process.stderr else ""
-            self.log(f"  ✗ Section download failed: {stderr_output[:200]}")
-            raise Exception(f"Failed to download video section!\n\n{stderr_output[:200]}")
+            error_output = "\n".join(output_lines[-20:])
+            self.log(f"  ✗ Section download failed: {error_output[-200:]}")
+            raise Exception(f"Failed to download video section!\n\n{error_output[-200:]}")
         
         self.log(f"  ✓ Section downloaded!")
         
