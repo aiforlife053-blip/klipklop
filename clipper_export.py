@@ -76,18 +76,13 @@ class ExportMixin(ClipperBase):
         style = self.hook_style_settings or {}
         font_size_frac = float(style.get("font_size", 0.05))
         root = Path(__file__).resolve().parent
+        font_family = str(style.get("font_family") or "Plus Jakarta Sans")
+        font_weight = max(100, min(900, int(style.get("font_weight") or 800)))
         family_fonts = {
             "Plus Jakarta Sans": root / "fonts" / "PlusJakartaSans.ttf",
-            "Poppins": root / "fonts" / "Poppins-Bold.ttf",
-            "Super Kidpop": root / "fonts" / "SuperKidpop.ttf",
-            "Capo Sfogliato": root / "fonts" / "CapoSfogliato.ttf",
+            "Poppins": root / "fonts" / ("Poppins-Bold.ttf" if font_weight >= 600 else "Poppins-Regular.ttf"),
         }
-        font_candidates = [
-            style.get("font_path") or "",
-            str(family_fonts.get(str(style.get("font_family") or ""), "")),
-            str(family_fonts["Plus Jakarta Sans"]),
-            self._find_system_font_bold(),
-        ]
+        font_candidates = [str(family_fonts.get(font_family, family_fonts["Plus Jakarta Sans"])), str(family_fonts["Plus Jakarta Sans"])]
         font_px = max(1, int(max(16, font_size_frac * 500) / 340 * width))
         font = None
         for candidate in font_candidates:
@@ -96,7 +91,7 @@ class ExportMixin(ClipperBase):
             try:
                 font = ImageFont.truetype(candidate, font_px)
                 if hasattr(font, "set_variation_by_axes") and "PlusJakartaSans" in Path(candidate).name:
-                    font.set_variation_by_axes([800])
+                    font.set_variation_by_axes([max(200, min(800, font_weight))])
                 break
             except Exception:
                 continue
@@ -108,7 +103,9 @@ class ExportMixin(ClipperBase):
         center_x = float(style.get("position_x", 0.5)) * width
         center_y = float(style.get("position_y", 0.2)) * height
         block_top = center_y - total_height / 2
-        stroke_width = max(1, int(round(1.5 / 340 * width)))
+        stroke_width = max(0, int(round(float(style.get("outline_thickness", 1.5)) / 340 * width)))
+        text_color = _hex_to_rgb(str(style.get("text_color") or "#FFD700"))
+        outline_color = _hex_to_rgb(str(style.get("outline_color") or "#000000"))
         shadow_y = max(1, int(round(3 / 340 * width)))
         overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
@@ -117,7 +114,7 @@ class ExportMixin(ClipperBase):
             text_x = center_x - (bbox[2] - bbox[0]) / 2 - bbox[0]
             text_y = block_top + line_index * line_height - bbox[1]
             draw.text((text_x, text_y + shadow_y), line, font=font, fill=(0, 0, 0, 128), stroke_width=stroke_width, stroke_fill=(0, 0, 0, 128))
-            draw.text((text_x, text_y), line, font=font, fill=(255, 215, 0, 255), stroke_width=stroke_width, stroke_fill=(0, 0, 0, 255))
+            draw.text((text_x, text_y), line, font=font, fill=(*text_color, 255), stroke_width=stroke_width, stroke_fill=(*outline_color, 255))
         overlay.save(output_path, "PNG")
 
     def _create_credit_overlay(self, width: int, height: int, output_path: Path):
@@ -757,7 +754,7 @@ class ExportMixin(ClipperBase):
         """Create ASS subtitle file with CapCut-style word-by-word highlighting"""
         
         style = getattr(self, "subtitle_style", {}) or {}
-        font = "Plus Jakarta Sans"
+        font = str(style.get("font_family") or style.get("font") or "Plus Jakarta Sans")
         width, height = self._render_size()
         
         size_val = float(style.get("size") or 0.04)
@@ -766,25 +763,30 @@ class ExportMixin(ClipperBase):
         else:
             size = int(size_val / 1080 * width) if width != 1080 else int(size_val)
             
+        pos_x_ratio = float(style.get("position_x", 0.5))
         pos_y_ratio = float(style.get("position_y", 0.85))
-        pos_x = width // 2
+        pos_x = int(pos_x_ratio * width)
         pos_y = int(pos_y_ratio * height)
         
         alignment = 5 # Middle-center anchor for precise \pos placement
             
         # Colors (ASS is &HAABBGGRR)
-        color_hex = "00BFFF"
+        color_hex = str(style.get("color") or "#00BFFF").strip("#")
+        text_color_hex = str(style.get("text_color") or "#FFFFFF").strip("#")
+        outline_color_hex = str(style.get("outline_color") or "#000000").strip("#")
         bg_color_hex = str(style.get("bg_color") or "#000000").strip("#")
-        bg_opacity = float(style.get("bg_opacity", 0.8))
-        # Always use box if opacity > 0, ignoring old bg_box false flag
-        bg_box = True if bg_opacity > 0 else False
-        font_weight = 900
-        
-        if len(color_hex) == 6:
-            r, g, b = color_hex[0:2], color_hex[2:4], color_hex[4:6]
-            primary_colour = f"&H00{b}{g}{r}"
-        else:
-            primary_colour = "&H00FFFFFF"
+        bg_opacity = float(style.get("bg_opacity", 0.0))
+        font_weight = int(style.get("font_weight") or 800)
+
+        def ass_color(value, fallback):
+            if len(value) != 6:
+                return fallback
+            r, g, b = value[0:2], value[2:4], value[4:6]
+            return f"&H00{b}{g}{r}"
+
+        highlight_colour = ass_color(color_hex, "&H00FFBF00")
+        primary_colour = ass_color(text_color_hex, "&H00FFFFFF")
+        outline_colour = ass_color(outline_color_hex, "&H00000000")
 
         if len(bg_color_hex) == 6:
             r, g, b = bg_color_hex[0:2], bg_color_hex[2:4], bg_color_hex[4:6]
@@ -793,10 +795,9 @@ class ExportMixin(ClipperBase):
         else:
             back_colour = "&H80000000"
 
-        # BorderStyle: 1=Outline, 3=Opaque Box
-        border_style = 1 # Force outline, no box
-        outline = max(1, int(round(width / 340)))
-        bold = -1 if font_weight >= 700 else 0
+        border_style = 1
+        outline = max(0, int(round(float(style.get("outline_thickness", 1.0)) / 340 * width)))
+        bold = -1 if font_weight >= 600 else 0
 
         ass_content = f"""[Script Info]
 Title: Auto-generated captions
@@ -808,7 +809,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{size},&H00FFFFFF,&H00FFFFFF,&H00000000,{back_colour},{bold},0,0,0,100,100,0,0,{border_style},{outline},0,{alignment},0,0,0,1
+Style: Default,{font},{size},{primary_colour},{primary_colour},{outline_colour},{back_colour},{bold},0,0,0,100,100,0,0,{border_style},{outline},0,{alignment},0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -858,10 +859,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     for j, w in enumerate(chunk):
                         if i == j:
                             # Active word: Blue/Custom color
-                            text_parts.append(f"{{\\c{primary_colour}}}{w['text']}{{\\c&HFFFFFF&}}")
+                            text_parts.append(f"{{\\c{highlight_colour}}}{w['text']}{{\\c{primary_colour}}}")
                         else:
-                            # Inactive word: White
-                            text_parts.append(f"{{\\c&HFFFFFF&}}{w['text']}")
+                            text_parts.append(f"{{\\c{primary_colour}}}{w['text']}")
                     
                     event_text = " ".join(text_parts)
                     
@@ -1007,7 +1007,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         overlay_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay_img)
-        stroke_width = max(1, int(round(1.5 / 340 * width)))
+        stroke_width = max(0, int(round(float(style.get("outline_thickness", 1.5)) / 340 * width)))
+        text_color = _hex_to_rgb(str(style.get("text_color") or "#FFD700"))
+        outline_color = _hex_to_rgb(str(style.get("outline_color") or "#000000"))
         shadow_y = max(1, int(round(3 / 340 * width)))
 
         for index, line in enumerate(lines):

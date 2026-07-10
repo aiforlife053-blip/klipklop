@@ -43,7 +43,7 @@ class ConfigManager:
                 "subtitle_engine": "local",
                 "local_whisper": {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"},
                 "subtitle_style": {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360},
-                "subtitle": {"enabled": False, "color": "#00BFFF", "size": 0.04, "position_x": 0.5, "position_y": 0.85, "text_transform": "uppercase", "bg_color": "#000000", "bg_opacity": 0.0, "font_family": "Plus Jakarta Sans", "font_weight": 900},
+                "subtitle": {"enabled": False, "color": "#00BFFF", "text_color": "#FFFFFF", "size": 0.04, "position_x": 0.5, "position_y": 0.85, "text_transform": "uppercase", "bg_color": "#000000", "bg_opacity": 0.0, "font_family": "Plus Jakarta Sans", "font_weight": 800, "outline_color": "#000000", "outline_thickness": 1.0},
                 "subtitle_position": "auto",
                 "mediapipe_settings": {
                     "lip_activity_threshold": 0.15,
@@ -62,7 +62,7 @@ class ConfigManager:
                     "scale": 0.15
                 },
                 "credit_watermark": {"enabled": False, "text": "sc : {channel}", "color": "#FFFFFF", "size": 0.032, "opacity": 0.55, "position_x": 0.06, "position_y": 0.23},
-                "hook_style": {"enabled": False, "font_size": 0.054, "text_color": "#0033ff", "background_color": "#ffffff", "corner_radius": 28, "duration": 5.0, "position_x": 0.5, "position_y": 0.2},
+                "hook_style": {"enabled": False, "font_size": 0.054, "font_family": "Plus Jakarta Sans", "font_weight": 800, "text_color": "#FFD700", "outline_color": "#000000", "outline_thickness": 1.5, "duration": 5.0, "position_x": 0.5, "position_y": 0.2},
                 "blur_background": {"enabled": False, "zoom": 1.08, "strength": 30},
                 "ai_providers": self._get_default_ai_providers(),
             }
@@ -84,6 +84,13 @@ class ConfigManager:
                 config["landscape_blur"] = True
                 config["_blur_default_migrated"] = True
                 dirty = True
+            if not config.get("_text_style_controls_migrated"):
+                hook_style = config.setdefault("hook_style", {})
+                hook_style.update({"font_family": "Plus Jakarta Sans", "font_weight": 800, "text_color": "#FFD700", "font_color": "#FFD700", "outline_color": "#000000", "outline_thickness": 1.5})
+                subtitle = config.setdefault("subtitle", {})
+                subtitle.update({"font_family": "Plus Jakarta Sans", "font_weight": 800, "text_color": "#FFFFFF", "color": "#00BFFF", "outline_color": "#000000", "outline_thickness": 1.0})
+                config["_text_style_controls_migrated"] = True
+                dirty = True
             if dirty:
                 self.save_config(config)
             return config
@@ -96,6 +103,7 @@ class ConfigManager:
             "model": "gemini-2.5-flash",  # Kept for backward compatibility
             "tts_model": "tts-1",  # Kept for backward compatibility
             "temperature": 1.0,
+            "_text_style_controls_migrated": True,
             "output_dir": str(self.output_dir),
             "system_prompt": AutoClipperCore.get_default_prompt(),
             "installation_id": str(uuid.uuid4()),
@@ -109,7 +117,7 @@ class ConfigManager:
                 "scale": 0.15
             },
             "credit_watermark": {"enabled": False, "text": "sc : {channel}", "color": "#FFFFFF", "size": 0.032, "opacity": 0.55, "position_x": 0.06, "position_y": 0.23},
-            "hook_style": {"enabled": False, "font_size": 0.054, "text_color": "#0033ff", "background_color": "#ffffff", "corner_radius": 28, "duration": 5.0, "position_x": 0.5, "position_y": 0.2},
+            "hook_style": {"enabled": False, "font_size": 0.054, "font_family": "Plus Jakarta Sans", "font_weight": 800, "text_color": "#FFD700", "outline_color": "#000000", "outline_thickness": 1.5, "duration": 5.0, "position_x": 0.5, "position_y": 0.2},
             "blur_background": {"enabled": False, "zoom": 1.08, "strength": 30},
             "face_tracking_mode": "center",
             "video_quality": "720",
@@ -117,7 +125,7 @@ class ConfigManager:
             "subtitle_engine": "local",
             "local_whisper": {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"},
             "subtitle_style": {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360},
-            "subtitle": {"enabled": False, "color": "#ffff00", "size": 0.035, "position_x": 0.5, "position_y": 0.85, "text_transform": "none", "bg_color": "#000000", "bg_opacity": 0.8, "font_family": "Plus Jakarta Sans", "font_weight": 800},
+            "subtitle": {"enabled": False, "color": "#00BFFF", "text_color": "#FFFFFF", "size": 0.04, "position_x": 0.5, "position_y": 0.85, "text_transform": "uppercase", "bg_color": "#000000", "bg_opacity": 0.0, "font_family": "Plus Jakarta Sans", "font_weight": 800, "outline_color": "#000000", "outline_thickness": 1.0},
             "subtitle_position": "auto",
             "mediapipe_settings": {
                 "lip_activity_threshold": 0.15,

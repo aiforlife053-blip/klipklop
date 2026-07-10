@@ -110,6 +110,38 @@ def test_clear_api_key_removes_saved_key(tmp_path):
     assert settings["api_key_saved"] is False
 
 
+def test_text_style_settings_are_validated(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    settings = manager.save_settings({
+        "hook_style": {
+            "font_family": "Unknown Font",
+            "font_weight": "broken",
+            "text_color": "red",
+            "outline_color": "#112233",
+            "outline_thickness": 99,
+        },
+        "subtitle": {
+            "font_family": "Poppins",
+            "font_weight": 555,
+            "text_color": "#ABCDEF",
+            "color": "invalid",
+            "outline_color": "#123456",
+            "outline_thickness": -4,
+        },
+    })["settings"]
+    assert settings["hook_style"]["font_family"] == "Plus Jakarta Sans"
+    assert settings["hook_style"]["font_weight"] == 800
+    assert settings["hook_style"]["text_color"] == "#FFD700"
+    assert settings["hook_style"]["outline_color"] == "#112233"
+    assert settings["hook_style"]["outline_thickness"] == 6.0
+    assert settings["subtitle"]["font_family"] == "Poppins"
+    assert settings["subtitle"]["font_weight"] == 600
+    assert settings["subtitle"]["text_color"] == "#ABCDEF"
+    assert settings["subtitle"]["color"] == "#00BFFF"
+    assert settings["subtitle"]["outline_color"] == "#123456"
+    assert settings["subtitle"]["outline_thickness"] == 0.0
+
+
 def test_activity_log_records_to_console(tmp_path):
     manager = mod.WebJobManager(app_dir=tmp_path)
     result = manager.log_activity({"action": "download_click", "detail": "clip.mp4"})
@@ -348,7 +380,17 @@ def test_save_output_ignores_clips_outside_session(tmp_path):
 
 
 class SubtitleHarness(ExportMixin):
-    subtitle_style = {"font": "Arial", "size": 60, "bottom_margin": 300}
+    subtitle_style = {
+        "font_family": "Poppins",
+        "size": 60,
+        "font_weight": 400,
+        "text_color": "#11AA22",
+        "color": "#123456",
+        "outline_color": "#654321",
+        "outline_thickness": 2.0,
+        "position_x": 0.4,
+        "position_y": 0.8,
+    }
     landscape_blur = False
 
     def format_time(self, seconds):
@@ -367,10 +409,33 @@ def test_ass_subtitle_groups_words_in_dynamic_chunks(tmp_path):
     assert count == 7
     assert "PlayResX: 720" in text
     assert "Fontname, Fontsize" in text
-    assert "Style: Default,Plus Jakarta Sans,40" in text
-    assert "{\\pos(360,1088)}" in text
-    assert "{\\c&H00FFBF00}" in text
+    assert "Style: Default,Poppins,40,&H0022AA11,&H0022AA11,&H00214365" in text
+    assert ",0,0,0,0,100,100,0,0,1,4,0,5," in text
+    assert "{\\pos(288,1024)}" in text
+    assert "{\\c&H00563412}" in text
     assert "w0" in text and "w1" in text
+
+
+def test_hook_overlay_uses_selected_colors_weight_and_outline(tmp_path):
+    from PIL import Image
+
+    harness = object.__new__(SubtitleHarness)
+    harness.hook_style_settings = {
+        "font_family": "Plus Jakarta Sans",
+        "font_weight": 400,
+        "font_size": 0.054,
+        "text_color": "#FF0000",
+        "outline_color": "#00FF00",
+        "outline_thickness": 3.0,
+        "position_x": 0.5,
+        "position_y": 0.2,
+    }
+    output = tmp_path / "hook.png"
+    harness._create_hook_overlay("TEST", 340, 604, output)
+    image = Image.open(output).convert("RGBA")
+    colors = image.getdata()
+    assert any(red > 200 and green < 80 and blue < 80 and alpha > 0 for red, green, blue, alpha in colors)
+    assert any(green > 200 and red < 80 and blue < 80 and alpha > 0 for red, green, blue, alpha in colors)
 
 
 def test_hook_wrap_uses_preview_width():

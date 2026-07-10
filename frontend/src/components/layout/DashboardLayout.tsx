@@ -20,8 +20,8 @@ export default function DashboardLayout() {
     output_dir: '',
     watermark: { enabled: false, image_path: "", position_x: 0.22, position_y: 0.17, opacity: 0.49, scale: 0.53 },
     credit_watermark: { enabled: true, text: "sc : {channel}", color: "#ffffff", size: 0.032, opacity: 0.55, position_x: 0.22, position_y: 0.17 },
-    hook_style: { enabled: false, font_size: 0.025, text_color: "#0033ff", background_color: "#ffffff", corner_radius: 22, duration: 5.0, position_x: 0.22, position_y: 0.17 },
-    subtitle: { enabled: true, color: "#ffff00", size: 0.035, position_x: 0.5, position_y: 0.85, text_transform: 'uppercase', bg_box: false, bg_color: '#000000', bg_opacity: 0.8 },
+    hook_style: { enabled: false, font_size: 0.054, font_family: "Plus Jakarta Sans", font_weight: 800, text_color: "#FFD700", outline_color: "#000000", outline_thickness: 1.5, duration: 5.0, position_x: 0.5, position_y: 0.2 },
+    subtitle: { enabled: true, color: "#00BFFF", text_color: "#FFFFFF", size: 0.04, font_family: "Plus Jakarta Sans", font_weight: 800, outline_color: "#000000", outline_thickness: 1.0, position_x: 0.5, position_y: 0.85, text_transform: 'uppercase', bg_box: false, bg_color: '#000000', bg_opacity: 0.0 },
     blur_background: { enabled: true, zoom: 1.08, strength: 31, scale: 1.0 }
   });
 

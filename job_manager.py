@@ -208,10 +208,10 @@ class WebJobManager:
             "local_whisper": cfg.get("local_whisper", {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"}),
             "subtitle_style": cfg.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360}),
             "subtitle_position": cfg.get("subtitle_position", "auto"),
-            "subtitle": cfg.get("subtitle", {"enabled": True, "color": "#ffff00", "size": 0.035, "position_x": 0.5, "position_y": 0.85, "text_transform": "none", "bg_color": "#000000", "bg_opacity": 0.8, "font_family": "Plus Jakarta Sans", "font_weight": 800}),
+            "subtitle": cfg.get("subtitle", {"enabled": True, "color": "#00BFFF", "text_color": "#FFFFFF", "size": 0.04, "position_x": 0.5, "position_y": 0.85, "text_transform": "uppercase", "bg_color": "#000000", "bg_opacity": 0.0, "font_family": "Plus Jakarta Sans", "font_weight": 800, "outline_color": "#000000", "outline_thickness": 1.0}),
             "watermark": cfg.get("watermark", {"enabled": False}),
             "credit_watermark": cfg.get("credit_watermark", {"enabled": True, "text": "sc : {channel}", "color": "#FFFFFF", "size": 0.032, "opacity": 0.55, "position_x": 0.06, "position_y": 0.23}),
-            "hook_style": cfg.get("hook_style", {"enabled": True, "font_size": 0.054, "text_color": "#0033ff", "background_color": "#ffffff", "corner_radius": 28, "duration": 5.0, "position_x": 0.5, "position_y": 0.2}),
+            "hook_style": cfg.get("hook_style", {"enabled": True, "font_size": 0.054, "font_family": "Plus Jakarta Sans", "font_weight": 800, "text_color": "#FFD700", "outline_color": "#000000", "outline_thickness": 1.5, "duration": 5.0, "position_x": 0.5, "position_y": 0.2}),
             "blur_background": cfg.get("blur_background", {"enabled": True, "scale": 1.0, "zoom": 1.08, "strength": 30}),
             "output_dir": cfg.get("output_dir", str(self.output_dir)),
             "parallel_workers": int(cfg.get("parallel_workers", 1)),
@@ -302,29 +302,35 @@ class WebJobManager:
         hook_style = {**cfg_mgr.config.get("hook_style", {}), **(payload.get("hook_style") if isinstance(payload.get("hook_style"), dict) else {})}
         hook_style["enabled"] = self._as_bool(hook_style.get("enabled", False), False)
         hook_style["font_size"] = max(0.01, min(0.1, float(self._as_float(hook_style.get("font_size"), 0.054))))
-        hook_style["text_color"] = str(hook_style.get("text_color") or hook_style.get("font_color") or "#0033ff")[:16]
+        hook_style["text_color"] = self._as_color(hook_style.get("text_color") or hook_style.get("font_color"), "#FFD700")
         hook_style["font_color"] = hook_style["text_color"]
-        hook_style["background_color"] = str(hook_style.get("background_color") or hook_style.get("bg_color") or "#ffffff")[:16]
-        hook_style["bg_color"] = hook_style["background_color"]
-        hook_style["corner_radius"] = max(0, min(100, self._as_int(hook_style.get("corner_radius"), 28)))
+        hook_style["font_weight"] = max(100, min(900, round(self._as_int(hook_style.get("font_weight"), 800) / 100) * 100))
+        hook_style["outline_color"] = self._as_color(hook_style.get("outline_color"), "#000000")
+        hook_style["outline_thickness"] = max(0.0, min(6.0, self._as_float(hook_style.get("outline_thickness"), 1.5)))
         hook_style["duration"] = max(1.0, min(10.0, float(self._as_float(hook_style.get("duration"), 5.0))))
         hook_style["position_x"] = max(0.0, min(1.0, float(self._as_float(hook_style.get("position_x"), 0.5))))
         hook_style["position_y"] = max(0.0, min(1.0, float(self._as_float(hook_style.get("position_y"), 0.2))))
-        hook_style["shape"] = str(hook_style.get("shape") or "rectangle")
-        hook_style["font_family"] = str(hook_style.get("font_family") or "Capo Sfogliato")[:80]
+        hook_style["font_family"] = str(hook_style.get("font_family") or "Plus Jakarta Sans")
+        if hook_style["font_family"] not in {"Plus Jakarta Sans", "Poppins"}:
+            hook_style["font_family"] = "Plus Jakarta Sans"
         # Subtitle settings
         _sub_payload = payload.get("subtitle") if isinstance(payload.get("subtitle"), dict) else {}
         subtitle_cfg = {**cfg_mgr.config.get("subtitle", {}), **_sub_payload}
         subtitle_cfg["enabled"] = self._as_bool(subtitle_cfg.get("enabled", False), False)
-        subtitle_cfg["color"] = str(subtitle_cfg.get("color") or "#00BFFF")[:16]
-        subtitle_cfg["bg_color"] = str(subtitle_cfg.get("bg_color") or "#000000")[:16]
+        subtitle_cfg["color"] = self._as_color(subtitle_cfg.get("color"), "#00BFFF")
+        subtitle_cfg["text_color"] = self._as_color(subtitle_cfg.get("text_color"), "#FFFFFF")
+        subtitle_cfg["bg_color"] = self._as_color(subtitle_cfg.get("bg_color"), "#000000")
         subtitle_cfg["size"] = max(0.01, min(0.1, float(self._as_float(subtitle_cfg.get("size"), 0.04))))
         subtitle_cfg["position_x"] = max(0.0, min(1.0, float(self._as_float(subtitle_cfg.get("position_x"), 0.5))))
         subtitle_cfg["position_y"] = max(0.0, min(1.0, float(self._as_float(subtitle_cfg.get("position_y"), 0.85))))
         subtitle_cfg["text_transform"] = str(subtitle_cfg.get("text_transform") or "uppercase")
         subtitle_cfg["bg_opacity"] = max(0.0, min(1.0, float(self._as_float(subtitle_cfg.get("bg_opacity"), 0.0))))
-        subtitle_cfg["font_family"] = str(subtitle_cfg.get("font_family") or "Plus Jakarta Sans")[:80]
-        subtitle_cfg["font_weight"] = max(100, min(900, int(subtitle_cfg.get("font_weight") or 900)))
+        subtitle_cfg["font_family"] = str(subtitle_cfg.get("font_family") or "Plus Jakarta Sans")
+        if subtitle_cfg["font_family"] not in {"Plus Jakarta Sans", "Poppins"}:
+            subtitle_cfg["font_family"] = "Plus Jakarta Sans"
+        subtitle_cfg["font_weight"] = max(100, min(900, round(self._as_int(subtitle_cfg.get("font_weight"), 800) / 100) * 100))
+        subtitle_cfg["outline_color"] = self._as_color(subtitle_cfg.get("outline_color"), "#000000")
+        subtitle_cfg["outline_thickness"] = max(0.0, min(6.0, self._as_float(subtitle_cfg.get("outline_thickness"), 1.0)))
         blur_background = {**cfg_mgr.config.get("blur_background", {"enabled": False, "zoom": 1.08, "strength": 30}), **(payload.get("blur_background") if isinstance(payload.get("blur_background"), dict) else {})}
         blur_background["enabled"] = self._as_bool(blur_background.get("enabled", False), False)
         blur_background["scale"] = max(0.5, min(1.5, float(self._as_float(blur_background.get("scale"), 1.0))))
@@ -783,6 +789,10 @@ class WebJobManager:
             return int(value)
         except (TypeError, ValueError):
             return default
+
+    def _as_color(self, value, default):
+        color = str(value or "").strip()
+        return color.upper() if re.fullmatch(r"#[0-9A-Fa-f]{6}", color) else default
 
     def _as_bool(self, value, default=False):
         if isinstance(value, bool):

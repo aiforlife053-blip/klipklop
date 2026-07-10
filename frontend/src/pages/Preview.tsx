@@ -127,10 +127,10 @@ export default function Preview() {
   }, [settings]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-slate-50/50 lg:grid lg:grid-cols-2 lg:overflow-hidden">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-slate-50/50 md:grid md:grid-cols-2 md:overflow-hidden">
       
       {/* Settings Panel: Configuration Accordions (50%) */}
-      <div className="order-2 flex min-w-0 flex-col border-t border-slate-200 bg-white lg:min-h-0 lg:border-l lg:border-t-0 lg:overflow-hidden">
+      <div className="order-2 flex min-w-0 flex-col border-t border-slate-200 bg-white md:min-h-0 md:border-l md:border-t-0 md:overflow-hidden">
         <div className="shrink-0 border-b border-slate-100 bg-white px-4 py-3">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -232,7 +232,7 @@ export default function Preview() {
         document.body
       )}
 
-        <div className="grid grid-cols-1 gap-2 bg-slate-50 p-3 sm:grid-cols-2 items-start lg:min-h-0 lg:flex-1 lg:content-center lg:overflow-y-auto">
+        <div className="grid grid-cols-1 gap-2 bg-slate-50 p-3 items-start md:min-h-0 md:flex-1 md:content-center md:overflow-y-auto sm:grid-cols-2">
           
           {/* Watermark Section */}
           <div className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:h-[212px]">
@@ -312,10 +312,10 @@ export default function Preview() {
           </div>
 
           {/* Hook Section */}
-          <div className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:h-[92px]">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <h4 className="text-[13px] font-bold text-slate-900 flex items-center gap-2">
-                <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path></svg>
+          <div className={`flex min-w-0 flex-col gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm ${settings.hook_style.enabled ? 'sm:h-[214px]' : 'sm:h-[92px]'}`}>
+            <div className="flex items-center justify-between border-b border-slate-100 pb-1">
+              <h4 className="flex items-center gap-2 text-[13px] font-bold text-slate-900">
+                <svg className="h-4 w-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path></svg>
                 Hook Title
               </h4>
               <label className="relative inline-flex h-11 w-11 cursor-pointer items-center justify-center">
@@ -324,17 +324,48 @@ export default function Preview() {
               </label>
             </div>
             {settings.hook_style.enabled && (
-              <div className="space-y-2 pt-1">
-                <p className="text-[10px] text-slate-500 leading-snug">Geser hook title di preview untuk mengubah posisi.</p>
+              <div className="grid min-w-0 grid-cols-3 gap-x-2 gap-y-1.5">
+                <label className="col-span-2 min-w-0">
+                  <span className="mb-1 block text-[9px] font-semibold text-slate-500">Font</span>
+                  <select aria-label="Font hook" value={['Plus Jakarta Sans', 'Poppins'].includes(settings.hook_style.font_family) ? settings.hook_style.font_family : 'Plus Jakarta Sans'} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, font_family: e.target.value}})} className="h-8 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 text-[10px] font-medium text-slate-700 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary">
+                    <option value="Plus Jakarta Sans">Plus Jakarta</option>
+                    <option value="Poppins">Poppins</option>
+                  </select>
+                </label>
+                <label className="min-w-0">
+                  <span className="mb-1 block text-[9px] font-semibold text-slate-500">Ketebalan</span>
+                  <select aria-label="Ketebalan font hook" value={settings.hook_style.font_weight || 800} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, font_weight: Number(e.target.value)}})} className="h-8 w-full rounded-lg border border-slate-200 bg-slate-50 px-1.5 text-[10px] font-medium text-slate-700 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary">
+                    <option value={400}>Regular</option>
+                    <option value={600}>Semi</option>
+                    <option value={800}>Bold</option>
+                  </select>
+                </label>
+                <label className="col-span-2 min-w-0">
+                  <span className="flex items-center justify-between text-[9px] font-semibold text-slate-500"><span>Ukuran</span><span>{Math.round((settings.hook_style.font_size || 0.054) * 500)}px</span></span>
+                  <input aria-label="Ukuran font hook" type="range" min="0.032" max="0.1" step="0.002" value={settings.hook_style.font_size || 0.054} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, font_size: Number(e.target.value)}})} className="mt-1 h-1 w-full cursor-pointer appearance-none rounded-lg bg-orange-100 accent-primary" />
+                </label>
+                <label className="min-w-0">
+                  <span className="flex items-center justify-between text-[9px] font-semibold text-slate-500"><span>Outline</span><span>{settings.hook_style.outline_thickness ?? 1.5}</span></span>
+                  <input aria-label="Tebal outline hook" type="range" min="0" max="6" step="0.25" value={settings.hook_style.outline_thickness ?? 1.5} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, outline_thickness: Number(e.target.value)}})} className="mt-1 h-1 w-full cursor-pointer appearance-none rounded-lg bg-orange-100 accent-primary" />
+                </label>
+                <label className="min-w-0">
+                  <span className="mb-1 block text-[9px] font-semibold text-slate-500">Warna Teks</span>
+                  <input aria-label="Warna teks hook" type="color" value={settings.hook_style.text_color || '#FFD700'} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, text_color: e.target.value}})} className="h-8 w-full cursor-pointer rounded-lg border border-slate-200 bg-white p-1" />
+                </label>
+                <label className="min-w-0">
+                  <span className="mb-1 block text-[9px] font-semibold text-slate-500">Warna Outline</span>
+                  <input aria-label="Warna outline hook" type="color" value={settings.hook_style.outline_color || '#000000'} onChange={(e) => setSettings({...settings, hook_style: {...settings.hook_style, outline_color: e.target.value}})} className="h-8 w-full cursor-pointer rounded-lg border border-slate-200 bg-white p-1" />
+                </label>
+                <p className="self-end pb-1 text-[9px] leading-3 text-slate-400">Drag untuk posisi</p>
               </div>
             )}
           </div>
 
           {/* Subtitle Section */}
-          <div className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:h-[92px]">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <h4 className="text-[13px] font-bold text-slate-900 flex items-center gap-2">
-                <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
+          <div className={`flex min-w-0 flex-col gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm ${settings.subtitle?.enabled ? 'sm:h-[214px]' : 'sm:h-[92px]'}`}>
+            <div className="flex items-center justify-between border-b border-slate-100 pb-1">
+              <h4 className="flex items-center gap-2 text-[13px] font-bold text-slate-900">
+                <svg className="h-4 w-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
                 Subtitle
               </h4>
               <label className="relative inline-flex h-11 w-11 cursor-pointer items-center justify-center">
@@ -343,8 +374,42 @@ export default function Preview() {
               </label>
             </div>
             {settings.subtitle?.enabled && (
-              <div className="space-y-2 pt-1">
-                <p className="text-[10px] text-slate-500 leading-snug">Geser subtitle di preview untuk mengubah posisi.</p>
+              <div className="grid min-w-0 grid-cols-3 gap-x-2 gap-y-1.5">
+                <label className="col-span-2 min-w-0">
+                  <span className="mb-1 block text-[9px] font-semibold text-slate-500">Font</span>
+                  <select aria-label="Font subtitle" value={['Plus Jakarta Sans', 'Poppins'].includes(settings.subtitle.font_family) ? settings.subtitle.font_family : 'Plus Jakarta Sans'} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, font_family: e.target.value}})} className="h-8 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 text-[10px] font-medium text-slate-700 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary">
+                    <option value="Plus Jakarta Sans">Plus Jakarta</option>
+                    <option value="Poppins">Poppins</option>
+                  </select>
+                </label>
+                <label className="min-w-0">
+                  <span className="mb-1 block text-[9px] font-semibold text-slate-500">Ketebalan</span>
+                  <select aria-label="Ketebalan font subtitle" value={settings.subtitle.font_weight || 800} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, font_weight: Number(e.target.value)}})} className="h-8 w-full rounded-lg border border-slate-200 bg-slate-50 px-1.5 text-[10px] font-medium text-slate-700 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary">
+                    <option value={400}>Regular</option>
+                    <option value={600}>Semi</option>
+                    <option value={800}>Bold</option>
+                  </select>
+                </label>
+                <label className="col-span-2 min-w-0">
+                  <span className="flex items-center justify-between text-[9px] font-semibold text-slate-500"><span>Ukuran</span><span>{Math.round((settings.subtitle.size || 0.04) * 500)}px</span></span>
+                  <input aria-label="Ukuran font subtitle" type="range" min="0.024" max="0.1" step="0.002" value={settings.subtitle.size || 0.04} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, size: Number(e.target.value)}})} className="mt-1 h-1 w-full cursor-pointer appearance-none rounded-lg bg-orange-100 accent-primary" />
+                </label>
+                <label className="min-w-0">
+                  <span className="flex items-center justify-between text-[9px] font-semibold text-slate-500"><span>Outline</span><span>{settings.subtitle.outline_thickness ?? 1}</span></span>
+                  <input aria-label="Tebal outline subtitle" type="range" min="0" max="6" step="0.25" value={settings.subtitle.outline_thickness ?? 1} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, outline_thickness: Number(e.target.value)}})} className="mt-1 h-1 w-full cursor-pointer appearance-none rounded-lg bg-orange-100 accent-primary" />
+                </label>
+                <label className="min-w-0">
+                  <span className="mb-1 block text-[9px] font-semibold text-slate-500">Warna Teks</span>
+                  <input aria-label="Warna teks subtitle" type="color" value={settings.subtitle.text_color || '#FFFFFF'} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, text_color: e.target.value}})} className="h-8 w-full cursor-pointer rounded-lg border border-slate-200 bg-white p-1" />
+                </label>
+                <label className="min-w-0">
+                  <span className="mb-1 block text-[9px] font-semibold text-slate-500">Highlight</span>
+                  <input aria-label="Warna highlight subtitle" type="color" value={settings.subtitle.color || '#00BFFF'} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, color: e.target.value}})} className="h-8 w-full cursor-pointer rounded-lg border border-slate-200 bg-white p-1" />
+                </label>
+                <label className="min-w-0">
+                  <span className="mb-1 block text-[9px] font-semibold text-slate-500">Warna Outline</span>
+                  <input aria-label="Warna outline subtitle" type="color" value={settings.subtitle.outline_color || '#000000'} onChange={(e) => setSettings({...settings, subtitle: {...settings.subtitle, outline_color: e.target.value}})} className="h-8 w-full cursor-pointer rounded-lg border border-slate-200 bg-white p-1" />
+                </label>
               </div>
             )}
           </div>
@@ -393,7 +458,7 @@ export default function Preview() {
       </div>
 
       {/* Preview Panel: Interactive 9:16 Preview (50%) */}
-      <div className="relative order-1 grid h-[min(42rem,75dvh)] shrink-0 place-items-center overflow-hidden bg-muted p-4 [container-type:size] lg:h-auto lg:min-h-0" style={{ backgroundImage: 'radial-gradient(rgba(0, 0, 0,0.05) 1.5px, transparent 1.5px)', backgroundSize: '20px 20px', backgroundPosition: '10px 10px' }}>
+      <div className="relative order-1 grid h-[min(42rem,75dvh)] shrink-0 place-items-center overflow-hidden bg-muted p-4 [container-type:size] md:h-auto md:min-h-0" style={{ backgroundImage: 'radial-gradient(rgba(0, 0, 0,0.05) 1.5px, transparent 1.5px)', backgroundSize: '20px 20px', backgroundPosition: '10px 10px' }}>
         
         {/* Aspect Ratio Container */}
         <div 
@@ -482,15 +547,15 @@ export default function Preview() {
                 left: `${settings.hook_style.position_x * 100}%`,
                 top: `${settings.hook_style.position_y * 100}%`,
                 transform: 'translate(-50%, -50%)',
-                color: '#FFD700',
-                fontSize: `max(4.71cqw, ${(settings.hook_style.font_size || 0.05) * 147.06}cqw)`,
-                fontFamily: `'Super Kidpop', 'Capo Sfogliato', 'Plus Jakarta Sans', sans-serif`,
-                fontWeight: 900,
+                color: settings.hook_style.text_color || '#FFD700',
+                fontSize: `max(4.71cqw, ${(settings.hook_style.font_size || 0.054) * 147.06}cqw)`,
+                fontFamily: `'${['Plus Jakarta Sans', 'Poppins'].includes(settings.hook_style.font_family) ? settings.hook_style.font_family : 'Plus Jakarta Sans'}', sans-serif`,
+                fontWeight: settings.hook_style.font_weight || 800,
                 textAlign: 'center',
                 whiteSpace: 'pre-wrap',
                 lineHeight: '1.2',
-                 WebkitTextStroke: '0.44cqw black',
-                 textShadow: '0 0.88cqw 0 black, 0 1.18cqw 1.18cqw rgba(0,0,0,0.5)',
+                 WebkitTextStroke: `${(settings.hook_style.outline_thickness ?? 1.5) * 0.294}cqw ${settings.hook_style.outline_color || '#000000'}`,
+                 textShadow: '0 0.88cqw 0 rgba(0,0,0,0.75), 0 1.18cqw 1.18cqw rgba(0,0,0,0.5)',
 
                 width: '90%',
               }}
@@ -506,7 +571,8 @@ export default function Preview() {
             <div
               className={`absolute w-full z-10 hover:ring-2 ring-primary/50 transition-opacity cursor-move flex flex-col items-center justify-center`}
               style={{
-                left: `50%`,
+                 left: `${(settings.subtitle?.position_x ?? 0.5) * 100}%`,
+
                 top: `${(settings.subtitle?.position_y ?? 0.85) * 100}%`,
                 transform: 'translate(-50%, -50%)',
                 textAlign: 'center',
@@ -518,17 +584,17 @@ export default function Preview() {
               onTouchStart={(e) => handleDragStart(e, 'subtitle')}
             >
               <div style={{
-                color: '#FFFFFF',
+                 color: settings.subtitle?.text_color || '#FFFFFF',
                  fontSize: `max(3.53cqw, ${(settings.subtitle?.size || 0.04) * 147.06}cqw)`,
+                 fontWeight: settings.subtitle?.font_weight || 800,
+                 fontFamily: `'${['Plus Jakarta Sans', 'Poppins'].includes(settings.subtitle?.font_family) ? settings.subtitle.font_family : 'Plus Jakarta Sans'}', sans-serif`,
+                 textTransform: settings.subtitle?.text_transform || 'uppercase',
+                 WebkitTextStroke: `${(settings.subtitle?.outline_thickness ?? 1) * 0.294}cqw ${settings.subtitle?.outline_color || '#000000'}`,
 
-                fontWeight: 900,
-                fontFamily: `'Plus Jakarta Sans', sans-serif`,
-                textTransform: 'uppercase',
-                 WebkitTextStroke: '0.29cqw black',
                  textShadow: '0 0.29cqw 0.59cqw rgba(0,0,0,0.5)',
 
               }}>
-                CONTOH <span style={{ color: '#00BFFF' }}>SUBTITLE KLIP</span> VIDEO
+                CONTOH <span style={{ color: settings.subtitle?.color || '#00BFFF' }}>SUBTITLE KLIP</span> VIDEO
               </div>
             </div>
           )}
