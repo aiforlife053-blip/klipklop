@@ -3,12 +3,16 @@ cookie.txt
 cookies.txt
 output/
 _temp/
+cache/
 error.log
 __pycache__/
 *.pyc
+.pytest_cache/
 .env
 bin/
 ffmpeg/
+static/watermarks/
+tickets.json
 
 testsprite_tests\tmp\config.json
 client_secret*.json

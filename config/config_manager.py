@@ -29,6 +29,13 @@ class ConfigManager:
             if "api_key" in config and "ai_providers" not in config:
                 config = self._migrate_to_multi_provider(config)
                 dirty = True
+            # Fill missing providers
+            if "ai_providers" in config:
+                default_providers = self._get_default_ai_providers()
+                for provider_name, provider_data in default_providers.items():
+                    if provider_name not in config["ai_providers"]:
+                        config["ai_providers"][provider_name] = provider_data
+                        dirty = True
             if "system_prompt" not in config:
                 from clipper_core import AutoClipperCore
                 config["system_prompt"] = AutoClipperCore.get_default_prompt()
@@ -40,8 +47,6 @@ class ConfigManager:
                 "face_tracking_mode": "center",
                 "video_quality": "720",
                 "landscape_blur": False,
-                "subtitle_engine": "local",
-                "local_whisper": {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"},
                 "subtitle_style": {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360},
                 "subtitle": {"enabled": False, "color": "#00BFFF", "text_color": "#FFFFFF", "size": 0.04, "position_x": 0.5, "position_y": 0.85, "text_transform": "uppercase", "bg_color": "#000000", "bg_opacity": 0.0, "font_family": "Plus Jakarta Sans", "font_weight": 800, "outline_color": "#000000", "outline_thickness": 1.0},
                 "subtitle_position": "auto",
@@ -92,6 +97,16 @@ class ConfigManager:
                 config["_text_style_controls_migrated"] = True
                 dirty = True
             if dirty:
+                # Remove obsolete fields
+                config.pop("subtitle_engine", None)
+                config.pop("local_whisper", None)
+                # Migrate old OpenAI default to Groq if empty key
+                caption_maker = config.get("ai_providers", {}).get("caption_maker", {})
+                if (caption_maker.get("api_key") == "" and
+                    caption_maker.get("base_url") == "https://api.openai.com/v1" and
+                    caption_maker.get("model") == "whisper-1"):
+                    caption_maker["base_url"] = "https://api.groq.com/openai/v1"
+                    caption_maker["model"] = "whisper-large-v3-turbo"
                 self.save_config(config)
             return config
         
@@ -122,8 +137,6 @@ class ConfigManager:
             "face_tracking_mode": "center",
             "video_quality": "720",
             "landscape_blur": False,
-            "subtitle_engine": "local",
-            "local_whisper": {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"},
             "subtitle_style": {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360},
             "subtitle": {"enabled": False, "color": "#00BFFF", "text_color": "#FFFFFF", "size": 0.04, "position_x": 0.5, "position_y": 0.85, "text_transform": "uppercase", "bg_color": "#000000", "bg_opacity": 0.0, "font_family": "Plus Jakarta Sans", "font_weight": 800, "outline_color": "#000000", "outline_thickness": 1.0},
             "subtitle_position": "auto",
@@ -153,9 +166,9 @@ class ConfigManager:
                 "model": "gemini-2.5-flash"
             },
             "caption_maker": {
-                "base_url": "https://api.openai.com/v1",
+                "base_url": "https://api.groq.com/openai/v1",
                 "api_key": "",
-                "model": "whisper-1"
+                "model": "whisper-large-v3-turbo"
             },
             "youtube_title_maker": {
                 "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -182,9 +195,9 @@ class ConfigManager:
                 "model": model
             },
             "caption_maker": {
-                "base_url": base_url,
-                "api_key": api_key,
-                "model": "whisper-1"
+                "base_url": "https://api.groq.com/openai/v1",
+                "api_key": "",
+                "model": "whisper-large-v3-turbo"
             },
             "youtube_title_maker": {
                 "base_url": base_url,

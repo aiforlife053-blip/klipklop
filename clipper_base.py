@@ -50,8 +50,6 @@ class ClipperBase:
     hook_style_settings: dict
     blur_background_settings: dict
     subtitle_style: dict
-    subtitle_engine: str
-    local_whisper: dict
     face_tracking_mode: str
     mediapipe_settings: dict
     optimize_mode: str
@@ -64,8 +62,6 @@ class ClipperBase:
     # --- MediaPipe ---
     mp_face_mesh: Any
     mp_drawing: Any
-    _local_whisper_model: Any
-
     # --- Callbacks ---
     log: Callable[..., None]
     set_progress: Callable[..., None]

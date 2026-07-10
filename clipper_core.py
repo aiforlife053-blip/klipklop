@@ -14,7 +14,13 @@ from clipper_download import DownloadMixin
 from clipper_export import ExportMixin
 from clipper_ffmpeg import FfmpegMixin
 from clipper_portrait import PortraitMixin
-from clipper_shared import SubtitleNotFoundError, _hex_to_rgb
+from clipper_shared import (
+    SubtitleNotFoundError,
+    TimedTranscript,
+    _hex_to_rgb,
+    slice_timed_transcript,
+    timed_segments_to_prompt,
+)
 from utils.helpers import get_deno_path, get_ffmpeg_path
 from utils.logger import debug_log
 
@@ -62,8 +68,6 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         landscape_blur: bool = False,
         screen_size: str = "9:16",
         subtitle_style: dict = None,
-        subtitle_engine: str = "local",
-        local_whisper: dict = None,
         log_callback=None,
         progress_callback=None,
         token_callback=None,
@@ -126,9 +130,6 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         self.optimize_mode = str((self.ai_providers or {}).get("optimize_mode") or os.environ.get("KLIPKLOP_OPTIMIZE_MODE") or "local").lower()
         self.use_download_sections = self.optimize_mode in {"local", "hosting_2cpu", "fast_cpu"}
         self.subtitle_style = subtitle_style or {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360}
-        self.subtitle_engine = subtitle_engine or "local"
-        self.local_whisper = local_whisper or {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"}
-        self._local_whisper_model = None
         resolutions = {
             "16:9": {"480": "854:480", "720": "1280:720", "1080": "1920:1080", "1440": "2560:1440", "2160": "3840:2160"},
             "9:16": {"480": "540:960", "720": "720:1280", "1080": "1080:1920", "1440": "1440:2560", "2160": "2160:3840"}
@@ -225,11 +226,13 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
             self.channel_name = video_info.get("channel", "") if video_info else ""
             if self.is_cancelled():
                 return
+            full_transcript = None
             if not srt_path:
-                self.set_progress("Subtitle tidak ditemukan, download audio-only untuk transkripsi lokal...", 0.18)
+                self.set_progress("Subtitle tidak ditemukan, download audio-only untuk transkripsi Groq...", 0.18)
                 audio_path = self.download_audio_only(url)
                 try:
-                    transcript = self.transcribe_audio_local(audio_path)
+                    full_transcript = self.transcribe_audio_with_timestamps(audio_path, require_words=add_captions)
+                    transcript = timed_segments_to_prompt(full_transcript)
                 finally:
                     try:
                         Path(audio_path).unlink(missing_ok=True)
@@ -252,7 +255,14 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
                 raise Exception("No valid highlights found!")
             total_clips = len(highlights)
             if use_sections:
-                self._process_clips_with_sections(url, highlights, total_clips, add_captions, add_hook)
+                self._process_clips_with_sections(
+                    url,
+                    highlights,
+                    total_clips,
+                    add_captions,
+                    add_hook,
+                    full_transcript=full_transcript,
+                )
             else:
                 raise Exception("Section-only flow required: full video download is disabled.")
             self.set_progress("Complete!", 1.0)
@@ -260,22 +270,40 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         finally:
             self.cleanup()
 
-    def _process_clips_with_sections(self, url, highlights, total_clips, add_captions, add_hook):
-        workers = self.parallel_workers
+    def _process_clips_with_sections(
+        self,
+        url,
+        highlights,
+        total_clips,
+        add_captions,
+        add_hook,
+        full_transcript: TimedTranscript | None = None,
+    ):
+        workers = getattr(self, "parallel_workers", 1)
         self.log(f"  Processing {total_clips} clip(s) [pipeline, {workers} worker(s)]")
 
-        def _do_clip(clip_source, highlight, idx):
+        def _do_clip(clip_source, highlight, idx, caption_transcript):
             try:
                 if not self.is_cancelled():
                     self.process_clip(
                         clip_source, highlight, idx, total_clips,
                         add_captions=add_captions, add_hook=add_hook, pre_cut=True,
+                        caption_transcript=caption_transcript,
                     )
             finally:
                 try:
                     Path(clip_source).unlink(missing_ok=True)
                 except Exception:
                     pass
+
+        def _slice_for_clip(highlight):
+            if not add_captions or full_transcript is None:
+                return None
+            return slice_timed_transcript(
+                full_transcript,
+                self.parse_timestamp(highlight["start_time"]),
+                self.parse_timestamp(highlight["end_time"]),
+            )
 
         if workers == 1:
             for i, highlight in enumerate(highlights, 1):
@@ -284,7 +312,7 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
                 self.set_progress(f"Clip {i}/{total_clips}: Downloading section...", 0.32 + (0.08 * (i - 1) / total_clips))
                 section_path = str(self.temp_dir / f"section_{i:03d}.mp4")
                 clip_source = self.download_video_section(url, highlight["start_time"], highlight["end_time"], section_path)
-                _do_clip(clip_source, highlight, i)
+                _do_clip(clip_source, highlight, i, _slice_for_clip(highlight))
             return
 
         futures = {}
@@ -295,7 +323,8 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
                 self.set_progress(f"Clip {i}/{total_clips}: Downloading section...", 0.32 + (0.08 * (i - 1) / total_clips))
                 section_path = str(self.temp_dir / f"section_{i:03d}.mp4")
                 clip_source = self.download_video_section(url, highlight["start_time"], highlight["end_time"], section_path)
-                futures[executor.submit(_do_clip, clip_source, highlight, i)] = i
+                caption_transcript = _slice_for_clip(highlight)
+                futures[executor.submit(_do_clip, clip_source, highlight, i, caption_transcript)] = i
             for future in as_completed(futures):
                 clip_idx = futures[future]
                 try:
@@ -306,63 +335,4 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
                 if self.is_cancelled():
                     executor.shutdown(wait=False, cancel_futures=True)
                     break
-
-    def _process_clips_parallel(
-        self,
-        source_path,
-        highlights,
-        total_clips,
-        add_captions,
-        add_hook,
-        pre_cut=False,
-        sections=None,
-    ):
-        """Run process_clip in parallel using ThreadPoolExecutor.
-
-        Falls back to sequential (max_workers=1) if parallel_workers == 1.
-        Thread-safe: each clip writes to its own output subdirectory.
-        """
-        workers = self.parallel_workers
-        mode = f"parallel ({workers} workers)" if workers > 1 else "sequential"
-        self.log(f"  Processing {total_clips} clip(s) [{mode}]")
-
-        def _do_clip(args):
-            if self.is_cancelled():
-                return
-            clip_source, highlight, idx = args
-            try:
-                self.process_clip(
-                    clip_source, highlight, idx, total_clips,
-                    add_captions=add_captions, add_hook=add_hook, pre_cut=pre_cut,
-                )
-            finally:
-                if pre_cut:
-                    try:
-                        Path(clip_source).unlink(missing_ok=True)
-                    except Exception:
-                        pass
-
-        if sections is not None:
-            tasks = sections
-        else:
-            tasks = [(source_path, h, i) for i, h in enumerate(highlights, 1)]
-
-        if workers == 1:
-            for task in tasks:
-                if self.is_cancelled():
-                    break
-                _do_clip(task)
-        else:
-            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="clip-worker") as executor:
-                futures = {executor.submit(_do_clip, task): task[2] for task in tasks}
-                for future in as_completed(futures):
-                    clip_idx = futures[future]
-                    try:
-                        future.result()
-                    except Exception as exc:
-                        self.log(f"  Clip {clip_idx} failed: {exc}")
-                        raise
-                    if self.is_cancelled():
-                        executor.shutdown(wait=False, cancel_futures=True)
-                        break
 

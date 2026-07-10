@@ -4,16 +4,365 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "job_manager.py"
 spec = importlib.util.spec_from_file_location("web_klip_job_manager", MODULE)
 mod = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = mod
 spec.loader.exec_module(mod)
+import clipper_ai
+import clipper_export
 from clipper_core import AutoClipperCore
+from clipper_shared import slice_timed_transcript, timed_segments_to_prompt, validate_timed_transcript
 from clipper_download import DownloadMixin
 from clipper_export import ExportMixin
 from clipper_portrait import PortraitMixin
+
+
+def test_validate_timed_transcript_sorts_and_returns_json_safe_copy():
+    source = {
+        "duration": 10,
+        "words": [
+            {"word": "late", "start": 2, "end": 3},
+            {"word": "early", "start": 1, "end": 1.5},
+        ],
+        "segments": [
+            {"text": "late", "start": 2, "end": 3},
+            {"text": "early", "start": 1, "end": 1.5},
+        ],
+    }
+    original = json.loads(json.dumps(source))
+
+    result = validate_timed_transcript(source, require_words=True)
+
+    assert result == {
+        "duration": 10.0,
+        "words": [
+            {"word": "early", "start": 1.0, "end": 1.5},
+            {"word": "late", "start": 2.0, "end": 3.0},
+        ],
+        "segments": [
+            {"text": "early", "start": 1.0, "end": 1.5},
+            {"text": "late", "start": 2.0, "end": 3.0},
+        ],
+    }
+    assert source == original
+    assert json.loads(json.dumps(result)) == result
+
+
+@pytest.mark.parametrize(
+    ("source", "require_words"),
+    [
+        ({"duration": float("nan"), "words": [], "segments": []}, False),
+        ({"duration": float("inf"), "words": [], "segments": []}, False),
+        ({"duration": -1.0, "words": [], "segments": []}, False),
+        ({"duration": 1.0, "words": [{"word": "x", "start": -0.1, "end": 0.5}], "segments": []}, False),
+        ({"duration": 1.0, "words": [{"word": "x", "start": 0.5, "end": 0.5}], "segments": []}, False),
+        ({"duration": 1.0, "words": [], "segments": [{"text": "x", "start": 0.8, "end": 0.2}]}, False),
+        ({"duration": 1.0, "words": [{"word": " ", "start": 0.0, "end": 0.5}], "segments": []}, False),
+        ({"duration": 1.0, "words": [], "segments": [{"text": "", "start": 0.0, "end": 0.5}]}, False),
+        ({"duration": 1.0, "words": [], "segments": []}, True),
+    ],
+)
+def test_validate_timed_transcript_rejects_invalid_values(source, require_words):
+    with pytest.raises(ValueError):
+        validate_timed_transcript(source, require_words=require_words)
+
+
+def test_timed_segments_to_prompt_formats_gemini_timestamps():
+    source = {
+        "duration": 75.0,
+        "words": [],
+        "segments": [{"text": "isi ucapan", "start": 70.2, "end": 74.8}],
+    }
+    assert timed_segments_to_prompt(source) == "[00:01:10,200 - 00:01:14,800] isi ucapan"
+
+
+def test_slice_timed_transcript_rebases_and_clamps_without_mutation():
+    source = {
+        "duration": 20.0,
+        "words": [
+            {"word": "awal", "start": 4.8, "end": 5.2},
+            {"word": "tengah", "start": 6.0, "end": 6.5},
+            {"word": "akhir", "start": 8.8, "end": 9.2},
+        ],
+        "segments": [{"text": "awal tengah akhir", "start": 4.8, "end": 9.2}],
+    }
+    original = json.loads(json.dumps(source))
+
+    sliced = slice_timed_transcript(source, 5.0, 9.0)
+
+    assert sliced == {
+        "duration": 4.0,
+        "words": [
+            {"word": "awal", "start": 0.0, "end": 0.2},
+            {"word": "tengah", "start": 1.0, "end": 1.5},
+            {"word": "akhir", "start": 3.8, "end": 4.0},
+        ],
+        "segments": [{"text": "awal tengah akhir", "start": 0.0, "end": 4.0}],
+    }
+    assert source == original
+
+
+def test_slice_timed_transcript_uses_half_open_boundaries():
+    source = {
+        "duration": 10.0,
+        "words": [
+            {"word": "before", "start": 4.0, "end": 5.0},
+            {"word": "inside", "start": 5.0, "end": 6.0},
+            {"word": "after", "start": 7.0, "end": 8.0},
+        ],
+        "segments": [{"text": "inside", "start": 5.0, "end": 6.0}],
+    }
+    assert [item["word"] for item in slice_timed_transcript(source, 5.0, 7.0)["words"]] == ["inside"]
+
+
+def test_slice_timed_transcript_supports_overlapping_slices():
+    source = {
+        "duration": 10.0,
+        "words": [{"word": "shared", "start": 4.0, "end": 6.0}],
+        "segments": [{"text": "shared", "start": 4.0, "end": 6.0}],
+    }
+    first = slice_timed_transcript(source, 3.0, 5.0)
+    second = slice_timed_transcript(source, 5.0, 7.0)
+    assert first["words"] == [{"word": "shared", "start": 1.0, "end": 2.0}]
+    assert second["words"] == [{"word": "shared", "start": 0.0, "end": 1.0}]
+
+
+@pytest.mark.parametrize(("start", "end"), [(float("nan"), 1.0), (0.0, float("inf")), (-1.0, 1.0), (1.0, 1.0), (2.0, 1.0)])
+def test_slice_timed_transcript_rejects_invalid_range(start, end):
+    source = {"duration": 3.0, "words": [], "segments": []}
+    with pytest.raises(ValueError):
+        slice_timed_transcript(source, start, end)
+
+
+class GroqResponse:
+    def __init__(self, status_code, data=None, headers=None, text=""):
+        self.status_code = status_code
+        self._data = data
+        self.headers = headers or {}
+        self.text = text
+
+    def json(self):
+        return self._data
+
+
+class GroqHarness(clipper_ai.AiMixin):
+    def __init__(self, language="id"):
+        self.caption_client = SimpleNamespace(base_url="https://api.groq.test/openai/v1", api_key="gsk_secret")
+        self.whisper_model = "whisper-large-v3-turbo"
+        self.subtitle_language = language
+        self.ffmpeg_path = "ffmpeg"
+        self.logs = []
+        self.tokens = []
+
+    def log(self, message):
+        self.logs.append(message)
+
+    def set_progress(self, *_args):
+        pass
+
+    def report_tokens(self, *args):
+        self.tokens.append(args)
+
+    def is_cancelled(self):
+        return False
+
+
+def groq_transcript(text="halo dunia", duration=2.0):
+    return {
+        "duration": duration,
+        "text": text,
+        "words": [
+            {"word": "halo", "start": 0.0, "end": 0.8},
+            {"word": "dunia", "start": 0.9, "end": 1.8},
+        ],
+        "segments": [{"text": text, "start": 0.0, "end": 1.8}],
+    }
+
+
+def test_groq_chunk_request_shape_and_normalization(tmp_path, monkeypatch):
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    captured = {}
+
+    def post(url, **kwargs):
+        captured.update(url=url, **kwargs)
+        return GroqResponse(200, groq_transcript())
+
+    monkeypatch.setattr(clipper_ai.requests, "post", post)
+    result = GroqHarness()._transcribe_groq_chunk(str(audio))
+
+    assert captured["url"] == "https://api.groq.test/openai/v1/audio/transcriptions"
+    assert captured["headers"] == {"Authorization": "Bearer gsk_secret"}
+    assert captured["data"] == [
+        ("model", "whisper-large-v3-turbo"),
+        ("response_format", "verbose_json"),
+        ("timestamp_granularities[]", "word"),
+        ("timestamp_granularities[]", "segment"),
+        ("language", "id"),
+    ]
+    assert captured["files"]["file"][0] == "audio.mp3"
+    assert result == {
+        "duration": 2.0,
+        "words": [
+            {"word": "halo", "start": 0.0, "end": 0.8},
+            {"word": "dunia", "start": 0.9, "end": 1.8},
+        ],
+        "segments": [{"text": "halo dunia", "start": 0.0, "end": 1.8}],
+    }
+    assert isinstance(result, dict)
+
+
+@pytest.mark.parametrize("language", ["", "none", "auto", " AUTO "])
+def test_groq_language_auto_is_omitted(tmp_path, monkeypatch, language):
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    captured = {}
+
+    def post(_url, **kwargs):
+        captured.update(kwargs)
+        return GroqResponse(200, groq_transcript())
+
+    monkeypatch.setattr(clipper_ai.requests, "post", post)
+    GroqHarness(language)._transcribe_groq_chunk(str(audio))
+    assert not any(key == "language" for key, _value in captured["data"])
+
+
+def test_groq_words_required(tmp_path, monkeypatch):
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    response = groq_transcript()
+    response["words"] = []
+    monkeypatch.setattr(clipper_ai.requests, "post", lambda *_args, **_kwargs: GroqResponse(200, response))
+    monkeypatch.setattr(GroqHarness, "_probe_media_duration", lambda self, _path: 2.0)
+    with pytest.raises(ValueError, match="word timestamps"):
+        GroqHarness().transcribe_audio_with_timestamps(str(audio), require_words=True)
+
+
+def test_groq_http_401_does_not_retry_or_leak_key(tmp_path, monkeypatch):
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    attempts = []
+    monkeypatch.setattr(clipper_ai.requests, "post", lambda *_args, **_kwargs: attempts.append(1) or GroqResponse(401, text="bad gsk_secret"))
+    with pytest.raises(Exception) as exc_info:
+        GroqHarness()._transcribe_groq_chunk(str(audio))
+    message = str(exc_info.value)
+    assert len(attempts) == 1
+    assert "HTTP 401" in message
+    assert "https://api.groq.test/openai/v1" in message
+    assert "whisper-large-v3-turbo" in message
+    assert "gsk_secret" not in message
+
+
+def test_groq_http_429_then_200_retries(tmp_path, monkeypatch):
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    responses = [GroqResponse(429, headers={"Retry-After": "99"}), GroqResponse(200, groq_transcript())]
+    sleeps = []
+    monkeypatch.setattr(clipper_ai.requests, "post", lambda *_args, **_kwargs: responses.pop(0))
+    monkeypatch.setattr(clipper_ai.time, "sleep", sleeps.append)
+    result = GroqHarness()._transcribe_groq_chunk(str(audio))
+    assert result["segments"][0]["text"] == "halo dunia"
+    assert sleeps == [30.0]
+
+
+def test_groq_http_500_stops_after_three_attempts(tmp_path, monkeypatch):
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    attempts = []
+    monkeypatch.setattr(clipper_ai.requests, "post", lambda *_args, **_kwargs: attempts.append(1) or GroqResponse(500))
+    monkeypatch.setattr(clipper_ai.time, "sleep", lambda _seconds: None)
+    with pytest.raises(Exception, match="HTTP 500"):
+        GroqHarness()._transcribe_groq_chunk(str(audio))
+    assert len(attempts) == 3
+
+
+@pytest.mark.parametrize("error", [clipper_ai.requests.Timeout(), clipper_ai.requests.ConnectionError()])
+def test_groq_transport_errors_stop_after_three_attempts(tmp_path, monkeypatch, error):
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    attempts = []
+
+    def post(*_args, **_kwargs):
+        attempts.append(1)
+        raise error
+
+    monkeypatch.setattr(clipper_ai.requests, "post", post)
+    monkeypatch.setattr(clipper_ai.time, "sleep", lambda _seconds: None)
+    with pytest.raises(Exception, match="after 3 attempts"):
+        GroqHarness()._transcribe_groq_chunk(str(audio))
+    assert len(attempts) == 3
+
+
+def test_groq_chunk_offset_merge_and_cleanup(tmp_path, monkeypatch):
+    audio = tmp_path / "large.mp3"
+    audio.write_bytes(b"x")
+    chunks = [tmp_path / "chunk-1.mp3", tmp_path / "chunk-2.mp3"]
+    for chunk in chunks:
+        chunk.write_bytes(b"chunk")
+    harness = GroqHarness()
+    offsets = []
+    monkeypatch.setattr(clipper_ai.os.path, "getsize", lambda _path: clipper_ai.MAX_GROQ_UPLOAD_BYTES + 1)
+    monkeypatch.setattr(GroqHarness, "_probe_media_duration", lambda self, _path: 20.0)
+    monkeypatch.setattr(GroqHarness, "_create_groq_chunks", lambda self, _path, _duration, _count, chunk_paths: chunk_paths.extend(map(str, chunks)) or [(str(chunks[0]), 0.0), (str(chunks[1]), 10.0)])
+
+    def transcribe(_self, _path, time_offset=0.0):
+        offsets.append(time_offset)
+        return {
+            "duration": 10.0,
+            "words": [{"word": str(int(time_offset)), "start": time_offset, "end": time_offset + 1.0}],
+            "segments": [{"text": str(int(time_offset)), "start": time_offset, "end": time_offset + 1.0}],
+        }
+
+    monkeypatch.setattr(GroqHarness, "_transcribe_groq_chunk", transcribe)
+    result = harness.transcribe_audio_with_timestamps(str(audio), require_words=True)
+    assert offsets == [0.0, 10.0]
+    assert result == {
+        "duration": 20.0,
+        "words": [
+            {"word": "0", "start": 0.0, "end": 1.0},
+            {"word": "10", "start": 10.0, "end": 11.0},
+        ],
+        "segments": [
+            {"text": "0", "start": 0.0, "end": 1.0},
+            {"text": "10", "start": 10.0, "end": 11.0},
+        ],
+    }
+    assert all(not chunk.exists() for chunk in chunks)
+    assert harness.tokens == [(0, 0, 20.0, 0)]
+
+
+def test_groq_chunk_cleanup_on_failure(tmp_path, monkeypatch):
+    audio = tmp_path / "large.mp3"
+    audio.write_bytes(b"x")
+    chunk = tmp_path / "chunk.mp3"
+    chunk.write_bytes(b"chunk")
+    monkeypatch.setattr(clipper_ai.os.path, "getsize", lambda _path: clipper_ai.MAX_GROQ_UPLOAD_BYTES + 1)
+    monkeypatch.setattr(GroqHarness, "_probe_media_duration", lambda self, _path: 20.0)
+    monkeypatch.setattr(GroqHarness, "_create_groq_chunks", lambda self, _path, _duration, _count, chunk_paths: chunk_paths.append(str(chunk)) or [(str(chunk), 0.0)])
+    monkeypatch.setattr(GroqHarness, "_transcribe_groq_chunk", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("failed")))
+    with pytest.raises(RuntimeError, match="failed"):
+        GroqHarness().transcribe_audio_with_timestamps(str(audio))
+    assert not chunk.exists()
+
+
+def test_groq_chunk_cleanup_on_cancellation(tmp_path, monkeypatch):
+    audio = tmp_path / "large.mp3"
+    audio.write_bytes(b"x")
+    chunk = tmp_path / "chunk.mp3"
+    chunk.write_bytes(b"chunk")
+    harness = GroqHarness()
+    checks = iter([False, True])
+    monkeypatch.setattr(clipper_ai.os.path, "getsize", lambda _path: clipper_ai.MAX_GROQ_UPLOAD_BYTES + 1)
+    monkeypatch.setattr(GroqHarness, "_probe_media_duration", lambda self, _path: 20.0)
+    monkeypatch.setattr(GroqHarness, "_create_groq_chunks", lambda self, _path, _duration, _count, chunk_paths: chunk_paths.append(str(chunk)) or [(str(chunk), 0.0)])
+    monkeypatch.setattr(harness, "is_cancelled", lambda: next(checks))
+    with pytest.raises(Exception, match="cancelled"):
+        harness.transcribe_audio_with_timestamps(str(audio))
+    assert not chunk.exists()
 
 
 def test_status_keeps_active_job_url(tmp_path):
@@ -161,7 +510,7 @@ def test_save_settings_updates_title_provider_too(tmp_path):
     cfg = manager._config().config
     assert cfg["ai_providers"]["highlight_finder"]["model"] == "gemini-test"
     assert cfg["ai_providers"]["youtube_title_maker"]["model"] == "gemini-test"
-    assert cfg["ai_providers"]["caption_maker"]["model"] == "whisper-1"
+    assert cfg["ai_providers"]["caption_maker"]["model"] == "whisper-large-v3-turbo"
 
 
 def test_output_listing_is_limited_to_known_file_types(tmp_path):
@@ -402,9 +751,16 @@ class SubtitleHarness(ExportMixin):
 
 
 def test_ass_subtitle_groups_words_in_dynamic_chunks(tmp_path):
-    words = [SimpleNamespace(word=f"w{i}", start=i * 0.2, end=i * 0.2 + 0.1) for i in range(7)]
+    transcript = {
+        "duration": 2.0,
+        "words": [
+            {"word": f"w{i}", "start": i * 0.2, "end": i * 0.2 + 0.1}
+            for i in range(7)
+        ],
+        "segments": [],
+    }
     output = tmp_path / "sub.ass"
-    count = SubtitleHarness().create_ass_subtitle_capcut(SimpleNamespace(words=words), str(output))
+    count = SubtitleHarness().create_ass_subtitle_capcut(transcript, str(output))
     text = output.read_text(encoding="utf-8")
     assert count == 7
     assert "PlayResX: 720" in text
@@ -546,57 +902,298 @@ def test_short_ai_highlight_is_expanded(tmp_path):
     assert result[0]["hook_text"] == "Short"
 
 
-class NoSubtitleCore(AutoClipperCore):
-    def __init__(self):
-        self.output_dir = Path("out")
+class PipelineCore(AutoClipperCore):
+    def __init__(self, root, has_srt=False, parallel_workers=1):
+        self.output_dir = root / "out"
         self.temp_dir = self.output_dir / "_temp"
+        self.temp_dir.mkdir(parents=True)
         self.cache_dir = self.output_dir / "cache"
-        self.parallel_workers = 1
+        self.parallel_workers = parallel_workers
         self.use_download_sections = True
+        self.has_srt = has_srt
+        self.downloaded_audio = 0
+        self.downloaded_sections = 0
+        self.transcription_calls = []
+        self.caption_transcripts = {}
+        self.highlight_transcript = None
 
-    def set_progress(self, stage, progress):
+    def set_progress(self, *_args):
         pass
 
     def is_cancelled(self):
         return False
 
-    def download_subtitle_only(self, url):
-        return None, {"title": "video"}
+    def download_subtitle_only(self, _url):
+        if not self.has_srt:
+            return None, {"title": "video"}
+        path = self.temp_dir / "source.srt"
+        path.write_text("srt", encoding="utf-8")
+        return str(path), {"title": "video"}
 
-    def download_audio_only(self, url):
-        self.downloaded_audio = getattr(self, "downloaded_audio", 0) + 1
-        return "source_audio.mp3"
+    def parse_srt(self, _path):
+        return "[00:00:01,000 - 00:00:02,000] transcript SRT"
 
-    def transcribe_audio_local(self, audio_path):
-        self.transcribed = audio_path
-        return "[00:00:00,000 - 00:00:03,000] halo indonesia"
+    def download_audio_only(self, _url):
+        self.downloaded_audio += 1
+        path = self.temp_dir / "source_audio.mp3"
+        path.write_bytes(b"audio")
+        return str(path)
 
-    def download_video_section(self, url, start_time, end_time, output_path):
-        self.downloaded_sections = getattr(self, "downloaded_sections", 0) + 1
-        return "section.mp4"
+    def transcribe_audio_with_timestamps(self, audio_path, require_words=False):
+        self.transcription_calls.append((Path(audio_path).name, require_words))
+        return {
+            "duration": 90.0,
+            "words": [
+                {"word": "pertama", "start": 10.0, "end": 10.5},
+                {"word": "kedua", "start": 70.0, "end": 70.5},
+            ],
+            "segments": [
+                {"text": "pertama", "start": 9.0, "end": 12.0},
+                {"text": "kedua", "start": 69.0, "end": 72.0},
+            ],
+        }
 
-    def find_highlights(self, transcript, video_info, num_clips):
+    def download_video_section(self, _url, _start_time, _end_time, output_path):
+        self.downloaded_sections += 1
+        path = Path(output_path)
+        path.write_bytes(b"section")
+        return str(path)
+
+    def find_highlights(self, transcript, _video_info, num_clips):
         self.highlight_transcript = transcript
-        return [{"start_time": "00:00:00,000", "end_time": "00:00:03,000"}]
+        return [
+            {
+                "start_time": "00:00:09,000",
+                "end_time": "00:00:12,000",
+                "title": "first",
+                "duration_seconds": 3.0,
+            },
+            {
+                "start_time": "00:01:09,000",
+                "end_time": "00:01:12,000",
+                "title": "second",
+                "duration_seconds": 3.0,
+            },
+        ][:num_clips]
 
-    def process_clip(self, source_path, highlight, index, total_clips, add_captions=True, add_hook=True, pre_cut=False):
-        self.processed = source_path
+    def process_clip(
+        self,
+        source_path,
+        _highlight,
+        index,
+        _total_clips,
+        add_captions=True,
+        add_hook=True,
+        pre_cut=False,
+        caption_transcript=None,
+    ):
+        self.caption_transcripts[index] = caption_transcript
+        if add_captions and caption_transcript is None:
+            self.transcribe_audio_with_timestamps(source_path, require_words=True)
 
     def cleanup(self):
-        self.cleaned = True
+        pass
 
-    def log(self, message):
+    def log(self, _message):
         pass
 
 
-def test_process_falls_back_to_audio_only_whisper_then_section_download(tmp_path):
-    core = NoSubtitleCore()
-    core.process("https://www.youtube.com/watch?v=abc", num_clips=1)
-    assert core.transcribed == "source_audio.mp3"
-    assert core.highlight_transcript == "[00:00:00,000 - 00:00:03,000] halo indonesia"
+def test_missing_srt_transcribes_once_and_reuses_words_for_caption(tmp_path):
+    core = PipelineCore(tmp_path)
+    core.process("https://www.youtube.com/watch?v=abc", num_clips=2, add_captions=True)
     assert core.downloaded_audio == 1
-    assert core.downloaded_sections == 1
-    assert core.processed == "section.mp4"
+    assert core.transcription_calls == [("source_audio.mp3", True)]
+    assert core.highlight_transcript == (
+        "[00:00:09,000 - 00:00:12,000] pertama\n"
+        "[00:01:09,000 - 00:01:12,000] kedua"
+    )
+    assert core.caption_transcripts[1]["words"] == [{"word": "pertama", "start": 1.0, "end": 1.5}]
+    assert core.caption_transcripts[2]["words"] == [{"word": "kedua", "start": 1.0, "end": 1.5}]
+
+
+def test_missing_srt_captions_off_transcribes_once_without_passing_words(tmp_path):
+    core = PipelineCore(tmp_path)
+    core.process("https://www.youtube.com/watch?v=abc", num_clips=2, add_captions=False)
+    assert core.transcription_calls == [("source_audio.mp3", False)]
+    assert core.caption_transcripts == {1: None, 2: None}
+
+
+def test_srt_captions_on_uses_srt_and_transcribes_each_selected_clip(tmp_path):
+    core = PipelineCore(tmp_path, has_srt=True)
+    core.process("https://www.youtube.com/watch?v=abc", num_clips=2, add_captions=True)
+    assert core.highlight_transcript == "[00:00:01,000 - 00:00:02,000] transcript SRT"
+    assert core.downloaded_audio == 0
+    assert core.transcription_calls == [("section_001.mp4", True), ("section_002.mp4", True)]
+
+
+def test_srt_captions_off_never_calls_groq(tmp_path):
+    core = PipelineCore(tmp_path, has_srt=True)
+    core.process("https://www.youtube.com/watch?v=abc", num_clips=2, add_captions=False)
+    assert core.downloaded_audio == 0
+    assert core.transcription_calls == []
+
+
+def test_parallel_missing_srt_transcribes_once_and_passes_distinct_slices(tmp_path):
+    core = PipelineCore(tmp_path, parallel_workers=2)
+    core.process("https://www.youtube.com/watch?v=abc", num_clips=2, add_captions=True)
+    assert core.transcription_calls == [("source_audio.mp3", True)]
+    assert core.caption_transcripts[1]["words"][0]["word"] == "pertama"
+    assert core.caption_transcripts[2]["words"][0]["word"] == "kedua"
+    assert core.caption_transcripts[1] is not core.caption_transcripts[2]
+
+
+def timed_words(*words, duration=5.0):
+    return {
+        "duration": duration,
+        "words": [
+            {"word": word, "start": start, "end": end}
+            for word, start, end in words
+        ],
+        "segments": [],
+    }
+
+
+def test_supplied_caption_transcript_never_extracts_or_retranscribes(tmp_path, monkeypatch):
+    harness = SubtitleHarness()
+    harness.log = lambda *_args: None
+    harness.transcribe_audio_with_timestamps = lambda *_args, **_kwargs: pytest.fail("retranscribed")
+    monkeypatch.setattr(clipper_export.subprocess, "run", lambda *_args, **_kwargs: pytest.fail("extracted"))
+    ass_file = harness._create_caption_ass(
+        "section.mp4",
+        tmp_path,
+        timed_words(("halo", 0.0, 0.5)),
+    )
+    assert ass_file == tmp_path / "captions.ass"
+    assert ass_file.exists()
+
+
+def test_caption_without_supplied_transcript_extracts_mp3_and_requires_words(tmp_path, monkeypatch):
+    harness = SubtitleHarness()
+    harness.ffmpeg_path = "ffmpeg"
+    harness.log = lambda *_args: None
+    calls = []
+
+    def run(command, **_kwargs):
+        Path(command[-1]).write_bytes(b"x" * 1000)
+        calls.append(command)
+        return SimpleNamespace(returncode=0)
+
+    def transcribe(path, require_words=False):
+        calls.append((Path(path).name, require_words))
+        return timed_words(("halo", 0.0, 0.5))
+
+    monkeypatch.setattr(clipper_export.subprocess, "run", run)
+    harness.transcribe_audio_with_timestamps = transcribe
+    harness._create_caption_ass("section.mp4", tmp_path)
+    assert calls[0][-1].endswith("caption_audio.mp3")
+    assert calls[0][calls[0].index("-ar") + 1] == "16000"
+    assert calls[0][calls[0].index("-ac") + 1] == "1"
+    assert calls[1] == ("caption_audio.mp3", True)
+
+
+def test_supplied_zero_word_transcript_is_fatal_without_extraction(tmp_path, monkeypatch):
+    harness = SubtitleHarness()
+    monkeypatch.setattr(clipper_export.subprocess, "run", lambda *_args, **_kwargs: pytest.fail("extracted"))
+    with pytest.raises(ValueError, match="word timestamps"):
+        harness._create_caption_ass(
+            "section.mp4",
+            tmp_path,
+            {"duration": 1.0, "words": [], "segments": [{"text": "halo", "start": 0.0, "end": 1.0}]},
+        )
+
+
+def test_rebased_transcript_creates_ass_near_clip_start(tmp_path):
+    source = timed_words(("jam", 3601.0, 3601.5), duration=3610.0)
+    transcript = slice_timed_transcript(source, 3600.0, 3605.0)
+    output = tmp_path / "rebased.ass"
+    SubtitleHarness().create_ass_subtitle_capcut(transcript, str(output))
+    dialogue = next(line for line in output.read_text(encoding="utf-8").splitlines() if line.startswith("Dialogue:"))
+    assert ",0:00:01.00," in dialogue
+    assert "1:00:" not in dialogue
+
+
+def test_ass_escapes_backslashes_braces_and_newlines(tmp_path):
+    output = tmp_path / "escaped.ass"
+    transcript = timed_words(("slash\\{teks}\nbar", 0.0, 0.5))
+    SubtitleHarness().create_ass_subtitle_capcut(transcript, str(output))
+    dialogue = next(line for line in output.read_text(encoding="utf-8").splitlines() if line.startswith("Dialogue:"))
+    assert r"slash\\\{teks\} bar" in dialogue
+    assert "\n" not in dialogue
+
+
+class ProcessClipHarness(SubtitleHarness):
+    def __init__(self, root):
+        self.output_dir = root
+        self.screen_size = "9:16"
+        self.output_resolution = "720:1280"
+        self.ffmpeg_path = "ffmpeg"
+        self.watermark_settings = {"enabled": False}
+        self.credit_watermark_settings = {"enabled": False}
+        self.hook_style_settings = {}
+        self.channel_name = ""
+        self.video_info = {}
+        self.events = []
+
+    def is_cancelled(self):
+        return False
+
+    def parse_timestamp(self, timestamp):
+        hours, minutes, seconds = timestamp.replace(",", ".").split(":")
+        return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+    def log(self, *_args):
+        pass
+
+    def set_progress(self, *_args):
+        pass
+
+    def _create_caption_ass(self, _input_path, clip_dir, transcript=None):
+        self.events.append(("caption", transcript))
+        path = clip_dir / "captions.ass"
+        path.write_text("ass", encoding="utf-8")
+        return path
+
+    def convert_to_portrait_with_progress(self, _source, output, _progress):
+        self.events.append(("portrait", None))
+        Path(output).write_bytes(b"x" * 1000)
+
+    def _probe_render_input(self, _path):
+        return 720, 1280, 3.0
+
+    def _has_audio_stream(self, _path):
+        return True
+
+    def get_video_encoder_args(self):
+        return ["-c:v", "libx264"]
+
+    def log_ffmpeg_command(self, *_args):
+        pass
+
+    def run_ffmpeg_with_progress(self, command, _duration, _progress):
+        Path(command[-1]).write_bytes(b"x" * 1000)
+
+
+def test_process_clip_prepares_captions_before_portrait_conversion(tmp_path, monkeypatch):
+    source = tmp_path / "section.mp4"
+    source.write_bytes(b"x" * 1000)
+    harness = ProcessClipHarness(tmp_path / "out")
+    transcript = timed_words(("halo", 0.0, 0.5))
+    monkeypatch.setattr(clipper_export.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(returncode=0))
+    harness.process_clip(
+        str(source),
+        {
+            "start_time": "00:00:00,000",
+            "end_time": "00:00:03,000",
+            "duration_seconds": 3.0,
+            "title": "clip",
+        },
+        1,
+        add_captions=True,
+        add_hook=False,
+        pre_cut=True,
+        caption_transcript=transcript,
+    )
+    assert harness.events[:2] == [("caption", transcript), ("portrait", None)]
 
 
 if __name__ == "__main__":

@@ -20,6 +20,8 @@ from utils.helpers import get_app_dir, get_ffmpeg_path, get_ytdlp_path
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 GEMINI_MODEL = "gemini-2.5-flash"
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+GROQ_MODEL = "whisper-large-v3-turbo"
 
 
 class WebJobManager:
@@ -196,16 +198,15 @@ class WebJobManager:
             "api_key": "",
             "api_key_saved": key_saved,
             "caption_key_saved": caption_key_saved,
-            "caption_base_url": caption_provider.get("base_url", "https://api.openai.com/v1"),
-            "caption_model": caption_provider.get("model", "whisper-1"),
+            "caption_api_key": "",
+            "caption_base_url": caption_provider.get("base_url", GROQ_BASE_URL),
+            "caption_model": caption_provider.get("model", GROQ_MODEL),
             "hook_key_saved": hook_key_saved,
             "model": model,
             "provider": {"base_url": base_url, "api_key": "", "model": model},
             "subtitle_language": str(cfg.get("subtitle_language", "id")),
             "video_quality": str(cfg.get("video_quality", "720")),
             "landscape_blur": bool(cfg.get("landscape_blur", False)),
-            "subtitle_engine": cfg.get("subtitle_engine", "local"),
-            "local_whisper": cfg.get("local_whisper", {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"}),
             "subtitle_style": cfg.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360}),
             "subtitle_position": cfg.get("subtitle_position", "auto"),
             "subtitle": cfg.get("subtitle", {"enabled": True, "color": "#00BFFF", "text_color": "#FFFFFF", "size": 0.04, "position_x": 0.5, "position_y": 0.85, "text_transform": "uppercase", "bg_color": "#000000", "bg_opacity": 0.0, "font_family": "Plus Jakarta Sans", "font_weight": 800, "outline_color": "#000000", "outline_thickness": 1.0}),
@@ -224,10 +225,20 @@ class WebJobManager:
     def check_ai_provider(self, payload):
         if not isinstance(payload, dict):
             return {"status": "error", "message": "Invalid payload"}
+        provider_name = str(payload.get("provider_name", "highlight_finder")).strip()
         provider_payload = payload.get("provider", {}) if isinstance(payload.get("provider", {}), dict) else {}
         base_url = str(payload.get("base_url", provider_payload.get("base_url", ""))).strip().rstrip("/")
         api_key = str(payload.get("api_key", provider_payload.get("api_key", ""))).strip()
         model = str(payload.get("model", provider_payload.get("model", ""))).strip()
+        cfg_mgr = self._config()
+        if not api_key:
+            if provider_name == "highlight_finder":
+                api_key = cfg_mgr.config.get("ai_providers", {}).get("highlight_finder", {}).get("api_key", "")
+                if not api_key:
+                    api_key = cfg_mgr.config.get("api_key", "")
+            elif provider_name == "caption_maker":
+                api_key = cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("api_key", "")
+
         if not base_url:
             return {"status": "error", "message": "Base URL kosong"}
         if not api_key:
@@ -236,16 +247,36 @@ class WebJobManager:
             return {"status": "error", "message": "Model kosong"}
         try:
             client = OpenAI(api_key=api_key, base_url=base_url, timeout=20.0)
-            response = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": "Reply OK only."}],
-                max_tokens=4,
-                temperature=0,
-            )
-            content = (response.choices[0].message.content or "").strip() if response and response.choices else ""
-            return {"status": "ok", "message": "API key, base URL, dan model valid", "base_url": base_url, "model": model, "response": content[:80]}
+            if provider_name == "caption_maker":
+                try:
+                    import requests
+                    headers = {"Authorization": f"Bearer {api_key}"}
+                    resp = requests.get(f"{base_url}/models", headers=headers, timeout=20.0)
+                    resp.raise_for_status()
+                    models_data = resp.json().get("data", [])
+                    available_models = [m.get("id") for m in models_data if isinstance(m, dict)]
+                    if model not in available_models and len(available_models) > 0:
+                        return {"status": "error", "message": f"Model '{model}' tidak tersedia di provider ini.", "base_url": base_url, "model": model}
+                    return {"status": "ok", "message": "API key, base URL, dan model valid", "base_url": base_url, "model": model}
+                except Exception as e:
+                    # Fallback to standard OpenAI models check if requests fails
+                    models = client.models.list()
+                    available_models = [m.id for m in models.data]
+                    if model not in available_models and len(available_models) > 0:
+                        return {"status": "error", "message": f"Model '{model}' tidak tersedia.", "base_url": base_url, "model": model}
+                    return {"status": "ok", "message": "API key, base URL, dan model valid", "base_url": base_url, "model": model}
+            else:
+                # Default text completion check for highlight finder
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": "Reply OK only."}],
+                    max_tokens=4,
+                    temperature=0,
+                )
+                content = (response.choices[0].message.content or "").strip() if response and response.choices else ""
+                return {"status": "ok", "message": "API key, base URL, dan model valid", "base_url": base_url, "model": model, "response": content[:80]}
         except Exception as exc:
-            return {"status": "error", "message": str(exc), "base_url": base_url, "model": model}
+            return {"status": "error", "message": str(exc).replace(api_key, "***") if api_key else str(exc), "base_url": base_url, "model": model}
 
     def save_settings(self, payload):
         if not isinstance(payload, dict):
@@ -255,25 +286,21 @@ class WebJobManager:
         base_url = str(payload.get("base_url", provider_payload.get("base_url", GEMINI_BASE_URL))).strip() or GEMINI_BASE_URL
         api_key = str(payload.get("api_key", provider_payload.get("api_key", ""))).strip()
         clear_api_key = bool(payload.get("clear_api_key", False))
+        clear_highlight_api_key = bool(payload.get("clear_highlight_api_key", False))
+        clear_caption_api_key = bool(payload.get("clear_caption_api_key", False))
         model = str(payload.get("model", provider_payload.get("model", GEMINI_MODEL))).strip() or GEMINI_MODEL
-        caption_base_url = str(payload.get("caption_base_url", cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("base_url", "https://api.openai.com/v1"))).strip() or "https://api.openai.com/v1"
+        caption_base_url = str(payload.get("caption_base_url", cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("base_url", GROQ_BASE_URL))).strip() or GROQ_BASE_URL
         caption_api_key = str(payload.get("caption_api_key", "")).strip()
-        caption_model = str(payload.get("caption_model", cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("model", "whisper-1"))).strip() or "whisper-1"
+        caption_model = str(payload.get("caption_model", cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("model", GROQ_MODEL))).strip() or GROQ_MODEL
         hook_model = str(payload.get("hook_model", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("model", ""))).strip()
         hook_voice = str(payload.get("hook_voice", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("voice", "id-ID-ArdiNeural"))).strip() or "id-ID-ArdiNeural"
         output_dir = str(payload.get("output_dir", cfg_mgr.config.get("output_dir", str(self.output_dir)))).strip() or str(self.output_dir)
         subtitle_language = str(payload.get("subtitle_language", cfg_mgr.config.get("subtitle_language", "id")) or "id")[:10]
         video_quality = str(payload.get("video_quality", cfg_mgr.config.get("video_quality", "720")) or "720")
         landscape_blur = self._as_bool(payload.get("landscape_blur", cfg_mgr.config.get("landscape_blur", True)), True)
-        subtitle_engine = "local"
         subtitle_position = str(payload.get("subtitle_position", cfg_mgr.config.get("subtitle_position", "auto")) or "auto")
         if subtitle_position not in {"auto", "top", "middle", "bottom"}:
             subtitle_position = "auto"
-        local_whisper = cfg_mgr.config.get("local_whisper", {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"})
-        local_whisper["model"] = "small"
-        local_whisper["enabled"] = True
-        local_whisper["device"] = str(local_whisper.get("device") or "cpu")
-        local_whisper["compute_type"] = str(local_whisper.get("compute_type") or "int8")
         if video_quality not in {"480", "720", "1080", "1440", "2160"}:
             video_quality = "720"
         subtitle_style = cfg_mgr.config.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360})
@@ -341,14 +368,14 @@ class WebJobManager:
             current = providers.setdefault(name, {})
             current["base_url"] = base_url
             current["model"] = model
-            if clear_api_key:
+            if clear_api_key or clear_highlight_api_key:
                 current["api_key"] = ""
             elif api_key:
                 current["api_key"] = api_key
         caption_current = providers.setdefault("caption_maker", {})
         caption_current["base_url"] = caption_base_url
         caption_current["model"] = caption_model
-        if clear_api_key:
+        if clear_api_key or clear_caption_api_key:
             caption_current["api_key"] = ""
         elif caption_api_key:
             caption_current["api_key"] = caption_api_key
@@ -365,9 +392,7 @@ class WebJobManager:
         cfg_mgr.config["subtitle_language"] = subtitle_language
         cfg_mgr.config["video_quality"] = video_quality
         cfg_mgr.config["landscape_blur"] = landscape_blur
-        cfg_mgr.config["subtitle_engine"] = subtitle_engine
         cfg_mgr.config["subtitle_position"] = subtitle_position
-        cfg_mgr.config["local_whisper"] = local_whisper
         cfg_mgr.config["subtitle_style"] = subtitle_style
         cfg_mgr.config["watermark"] = watermark
         cfg_mgr.config["credit_watermark"] = credit_watermark
@@ -551,8 +576,6 @@ class WebJobManager:
                 landscape_blur=landscape_blur,
                 screen_size=screen_size,
                 subtitle_style=subtitle_style,
-                subtitle_engine="local",
-                local_whisper=cfg.get("local_whisper", {"enabled": True, "model": "small", "device": "cpu", "compute_type": "int8"}),
                 cancel_check=lambda: self._cancel_requested,
                 log_callback=self._set_message,
                 progress_callback=self._set_progress,

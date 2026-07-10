@@ -1,5 +1,105 @@
+import math
 import subprocess
 import sys
+from typing import TypedDict
+
+
+class TimedWord(TypedDict):
+    word: str
+    start: float
+    end: float
+
+
+class TimedSegment(TypedDict):
+    text: str
+    start: float
+    end: float
+
+
+class TimedTranscript(TypedDict):
+    duration: float
+    words: list[TimedWord]
+    segments: list[TimedSegment]
+
+
+def _timestamp(value, name):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f"{name} must be a finite number")
+    value = float(value)
+    if value < 0:
+        raise ValueError(f"{name} must not be negative")
+    return value
+
+
+def _timed_items(items, text_key):
+    if not isinstance(items, list):
+        raise ValueError(f"{text_key} items must be a list")
+    normalized = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError(f"{text_key} item must be a dictionary")
+        text = item.get(text_key)
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError(f"{text_key} must not be empty")
+        start = _timestamp(item.get("start"), "start")
+        end = _timestamp(item.get("end"), "end")
+        if end <= start:
+            raise ValueError("end must be greater than start")
+        normalized.append({text_key: text, "start": start, "end": end})
+    return sorted(normalized, key=lambda item: (item["start"], item["end"]))
+
+
+def validate_timed_transcript(transcript: TimedTranscript, require_words: bool = False) -> TimedTranscript:
+    if not isinstance(transcript, dict):
+        raise ValueError("transcript must be a dictionary")
+    duration = _timestamp(transcript.get("duration"), "duration")
+    words = _timed_items(transcript.get("words"), "word")
+    segments = _timed_items(transcript.get("segments"), "text")
+    if require_words and not words:
+        raise ValueError("word timestamps are required")
+    return {"duration": duration, "words": words, "segments": segments}
+
+
+def _format_timestamp(seconds):
+    total_milliseconds = int(round(seconds * 1000))
+    hours, remainder = divmod(total_milliseconds, 3600000)
+    minutes, remainder = divmod(remainder, 60000)
+    seconds, milliseconds = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
+
+
+def timed_segments_to_prompt(transcript: TimedTranscript) -> str:
+    transcript = validate_timed_transcript(transcript)
+    return "\n".join(
+        f"[{_format_timestamp(item['start'])} - {_format_timestamp(item['end'])}] {item['text']}"
+        for item in transcript["segments"]
+    )
+
+
+def slice_timed_transcript(transcript: TimedTranscript, start: float, end: float) -> TimedTranscript:
+    transcript = validate_timed_transcript(transcript)
+    start = _timestamp(start, "start")
+    end = _timestamp(end, "end")
+    if end <= start:
+        raise ValueError("end must be greater than start")
+
+    def sliced(items, text_key):
+        return [
+            {
+                text_key: item[text_key],
+                "start": round(max(item["start"], start) - start, 3),
+                "end": round(min(item["end"], end) - start, 3),
+            }
+            for item in items
+            if item["end"] > start and item["start"] < end
+        ]
+
+    return {
+        "duration": round(end - start, 3),
+        "words": sliced(transcript["words"], "word"),
+        "segments": sliced(transcript["segments"], "text"),
+    }
+
 
 SUBPROCESS_FLAGS = 0
 if sys.platform == "win32":

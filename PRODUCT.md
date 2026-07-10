@@ -19,9 +19,10 @@ Fast, compact, direct.
 - Preserve accessibility and keyboard focus for critical actions.
 
 ## Defaults
+- Highlight finder: Gemini API.
+- Subtitle engine: Groq Whisper API.
+- Speech-to-text model: whisper-large-v3-turbo.
 - Subtitle language: Indonesian.
-- Subtitle engine: local faster-whisper.
-- Local model: small.
 - Screen size: 9:16.
 - Captions: always on.
 - Output: one clip per run.

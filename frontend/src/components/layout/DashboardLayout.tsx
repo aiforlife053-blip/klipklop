@@ -14,9 +14,14 @@ export default function DashboardLayout() {
 
   const [status, setStatus] = useState<any>(null);
   const [settings, setSettings] = useState<any>({
-    base_url: '',
+    base_url: 'https://generativelanguage.googleapis.com/v1beta/openai',
     api_key: '',
-    model: '',
+    model: 'gemini-2.5-flash',
+    caption_base_url: 'https://api.groq.com/openai/v1',
+    caption_api_key: '',
+    caption_model: 'whisper-large-v3-turbo',
+    api_key_saved: false,
+    caption_key_saved: false,
     output_dir: '',
     watermark: { enabled: false, image_path: "", position_x: 0.22, position_y: 0.17, opacity: 0.49, scale: 0.53 },
     credit_watermark: { enabled: true, text: "sc : {channel}", color: "#ffffff", size: 0.032, opacity: 0.55, position_x: 0.22, position_y: 0.17 },
@@ -42,9 +47,14 @@ export default function DashboardLayout() {
       try {
         const data = await api('/api/settings');
         if (data && !data.error) {
+          const { api_key: _apiKey, caption_api_key: _captionApiKey, ...safeSettings } = data;
+          void _apiKey;
+          void _captionApiKey;
           setSettings((prev: any) => ({
             ...prev,
-            ...data,
+            ...safeSettings,
+            api_key: '',
+            caption_api_key: '',
             watermark: { ...prev.watermark, ...(data.watermark || {}) },
             credit_watermark: { ...prev.credit_watermark, ...(data.credit_watermark || {}) },
             hook_style: { ...prev.hook_style, ...(data.hook_style || {}) },

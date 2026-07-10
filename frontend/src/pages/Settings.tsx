@@ -2,20 +2,42 @@ import { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { api } from '@/lib/api';
 
+type ApiCheckState = 'idle' | 'checking' | 'ok' | 'error';
+type ProviderName = 'highlight_finder' | 'caption_maker';
+
 export default function Settings() {
   const { settings, setSettings } = useOutletContext<any>();
   const [isSaving, setIsSaving] = useState(false);
+  const [clearingProvider, setClearingProvider] = useState<ProviderName | null>(null);
   const [saveMessage, setSaveMessage] = useState('');
   const [youtubeConnected, setYoutubeConnected] = useState(false);
-  const [apiCheckState, setApiCheckState] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle');
-  const [apiCheckMessage, setApiCheckMessage] = useState('');
+  const [geminiCheckState, setGeminiCheckState] = useState<ApiCheckState>('idle');
+  const [geminiCheckMessage, setGeminiCheckMessage] = useState('');
+  const [groqCheckState, setGroqCheckState] = useState<ApiCheckState>('idle');
+  const [groqCheckMessage, setGroqCheckMessage] = useState('');
 
   useEffect(() => {
-    // Check YT connection status
     api('/api/social/youtube/oauth-status').then((res: any) => {
       setYoutubeConnected(res.connected);
     }).catch(() => {});
   }, []);
+
+  const applySavedSettings = (savedSettings: any) => {
+    const { api_key: _apiKey, caption_api_key: _captionApiKey, ...safeSettings } = savedSettings || {};
+    void _apiKey;
+    void _captionApiKey;
+    setSettings((prev: any) => ({
+      ...prev,
+      ...safeSettings,
+      api_key: '',
+      caption_api_key: '',
+    }));
+  };
+
+  const showSaveMessage = (message: string) => {
+    setSaveMessage(message);
+    setTimeout(() => setSaveMessage(''), 3000);
+  };
 
   const handleConnectYoutube = async () => {
     try {
@@ -45,42 +67,87 @@ export default function Settings() {
     setIsSaving(true);
     setSaveMessage('');
     try {
-      await api('/api/settings', {
+      const res = await api('/api/settings', {
         method: 'POST',
         body: JSON.stringify(settings)
       });
-      setSaveMessage('Konfigurasi berhasil disimpan! ✨');
-      setTimeout(() => setSaveMessage(''), 3000);
+      applySavedSettings(res.settings);
+      showSaveMessage('Konfigurasi berhasil disimpan.');
     } catch {
-      setSaveMessage('Gagal menyimpan konfigurasi.');
-      setTimeout(() => setSaveMessage(''), 3000);
+      showSaveMessage('Gagal menyimpan konfigurasi.');
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleCheckApiKey = async () => {
-    setApiCheckState('checking');
-    setApiCheckMessage('');
+  const handleCheckGemini = async () => {
+    setGeminiCheckState('checking');
+    setGeminiCheckMessage('');
     try {
       const res = await api('/api/check-api-key', {
         method: 'POST',
         body: JSON.stringify({
+          provider_name: 'highlight_finder',
           base_url: settings.base_url,
           api_key: settings.api_key,
           model: settings.model,
         }),
       });
-      setApiCheckState('ok');
-      setApiCheckMessage(res.message || 'API valid');
+      setGeminiCheckState('ok');
+      setGeminiCheckMessage(res.message || 'Gemini valid');
     } catch (e: any) {
-      setApiCheckState('error');
-      setApiCheckMessage(e.message || 'API tidak valid');
+      setGeminiCheckState('error');
+      setGeminiCheckMessage(e.message || 'Gemini tidak valid');
     }
   };
 
-  const handleClearApiKey = () => {
-    setSettings((prev: any) => ({ ...prev, api_key: '' }));
+  const handleCheckGroq = async () => {
+    setGroqCheckState('checking');
+    setGroqCheckMessage('');
+    try {
+      const res = await api('/api/check-api-key', {
+        method: 'POST',
+        body: JSON.stringify({
+          provider_name: 'caption_maker',
+          base_url: settings.caption_base_url,
+          api_key: settings.caption_api_key,
+          model: settings.caption_model,
+        }),
+      });
+      setGroqCheckState('ok');
+      setGroqCheckMessage(res.message || 'Groq valid');
+    } catch (e: any) {
+      setGroqCheckState('error');
+      setGroqCheckMessage(e.message || 'Groq tidak valid');
+    }
+  };
+
+  const handleClearProvider = async (providerName: ProviderName) => {
+    setClearingProvider(providerName);
+    setSaveMessage('');
+    try {
+      const clearSetting = providerName === 'highlight_finder'
+        ? { clear_highlight_api_key: true }
+        : { clear_caption_api_key: true };
+      const res = await api('/api/settings', {
+        method: 'POST',
+        body: JSON.stringify({ ...settings, api_key: '', caption_api_key: '', ...clearSetting }),
+      });
+      applySavedSettings(res.settings);
+      if (providerName === 'highlight_finder') {
+        setGeminiCheckState('idle');
+        setGeminiCheckMessage('');
+        showSaveMessage('Gemini API key berhasil dihapus.');
+      } else {
+        setGroqCheckState('idle');
+        setGroqCheckMessage('');
+        showSaveMessage('Groq API key berhasil dihapus.');
+      }
+    } catch {
+      showSaveMessage('Gagal menghapus API key.');
+    } finally {
+      setClearingProvider(null);
+    }
   };
 
   return (
@@ -92,60 +159,158 @@ export default function Settings() {
         </div>
         
         <div className="grid grid-cols-1 gap-4 max-w-4xl mx-auto">
-          {/* LLM Config */}
           <div className="bg-white rounded-2xl border border-border p-6 shadow-sm space-y-5">
-            <div className="flex items-center gap-2 mb-2">
-              <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-              <h3 className="font-bold text-slate-900 text-[15px]">Core Engine</h3>
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                <h3 className="font-bold text-slate-900 text-[15px]">Highlight Finder — Gemini</h3>
+              </div>
+              {settings.api_key_saved && (
+                <span className="shrink-0 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100">API key tersimpan</span>
+              )}
             </div>
             
             <div className="space-y-4">
               <div>
-                <label className="block text-[13px] font-bold text-slate-700 mb-1.5">Base URL / Provider</label>
-                <input 
-                  type="text" 
-                  placeholder="https://generativelanguage.googleapis.com/v1beta/openai" 
+                <label htmlFor="gemini-base-url" className="block text-[13px] font-bold text-slate-700 mb-1.5">Base URL</label>
+                <input
+                  id="gemini-base-url"
+                  type="url"
+                  placeholder="https://generativelanguage.googleapis.com/v1beta/openai"
                   value={settings.base_url}
                   onChange={(e) => setSettings({ ...settings, base_url: e.target.value })}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-[13px] text-slate-900 bg-slate-50/50 transition-all placeholder:text-slate-400" 
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-[13px] text-slate-900 bg-slate-50/50 transition-all placeholder:text-slate-500"
                 />
               </div>
 
               <div>
-                <label className="block text-[13px] font-bold text-slate-700 mb-1.5">API Key</label>
-                <div className="flex gap-2">
-                  <input 
-                    type="password" 
-                    placeholder="Gemini/Groq API key" 
+                <label htmlFor="gemini-api-key" className="block text-[13px] font-bold text-slate-700 mb-1.5">Gemini API Key</label>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    id="gemini-api-key"
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder={settings.api_key_saved ? 'Kosongkan untuk mempertahankan key tersimpan' : 'Masukkan Gemini API key'}
                     value={settings.api_key}
                     onChange={(e) => setSettings({ ...settings, api_key: e.target.value })}
-                    className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-[13px] text-slate-900 bg-slate-50/50 transition-all font-mono placeholder:text-slate-400" 
+                    aria-describedby={geminiCheckMessage ? 'gemini-check-result' : undefined}
+                    className="min-w-0 flex-1 px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-[13px] text-slate-900 bg-slate-50/50 transition-all font-mono placeholder:text-slate-500"
                   />
                   <button
                     type="button"
-                    onClick={handleCheckApiKey}
-                    disabled={apiCheckState === 'checking'}
-                    className="px-4 py-2.5 rounded-xl border border-primary/30 bg-primary/10 text-primary text-[13px] font-bold hover:bg-primary/15 disabled:opacity-60 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                    onClick={handleCheckGemini}
+                    disabled={geminiCheckState === 'checking'}
+                    className="px-4 py-2.5 rounded-xl border border-primary/30 bg-primary/10 text-primary text-[13px] font-bold hover:bg-primary/15 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
                   >
-                    {apiCheckState === 'checking' ? 'Checking...' : 'Check API'}
+                    {geminiCheckState === 'checking' ? 'Memeriksa...' : 'Check Gemini'}
                   </button>
                 </div>
-                {apiCheckMessage && (
-                  <p className={`mt-2 text-[12px] font-medium ${apiCheckState === 'ok' ? 'text-emerald-600' : 'text-red-600'}`}>
-                    {apiCheckMessage}
+                {geminiCheckMessage && (
+                  <p id="gemini-check-result" role={geminiCheckState === 'error' ? 'alert' : 'status'} className={`mt-2 text-[12px] font-medium ${geminiCheckState === 'ok' ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {geminiCheckMessage}
                   </p>
                 )}
               </div>
 
               <div>
-                <label className="block text-[13px] font-bold text-slate-700 mb-1.5">Model LLM / Pemrosesan</label>
-                <input 
-                  type="text" 
-                  placeholder="gemini-2.5-flash" 
+                <label htmlFor="gemini-model" className="block text-[13px] font-bold text-slate-700 mb-1.5">Model</label>
+                <input
+                  id="gemini-model"
+                  type="text"
+                  placeholder="gemini-2.5-flash"
                   value={settings.model}
                   onChange={(e) => setSettings({ ...settings, model: e.target.value })}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-[13px] text-slate-900 bg-slate-50/50 transition-all placeholder:text-slate-400" 
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-[13px] text-slate-900 bg-slate-50/50 transition-all placeholder:text-slate-500"
                 />
+              </div>
+
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={() => handleClearProvider('highlight_finder')}
+                  disabled={!settings.api_key_saved || clearingProvider !== null}
+                  className="px-4 py-2.5 border border-red-200 text-red-600 text-[13px] font-bold rounded-xl hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                >
+                  {clearingProvider === 'highlight_finder' ? 'Menghapus...' : 'Hapus Gemini API Key'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-border p-6 shadow-sm space-y-5">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3v3m0 12v3M5.64 5.64l2.12 2.12m8.48 8.48 2.12 2.12M3 12h3m12 0h3M5.64 18.36l2.12-2.12m8.48-8.48 2.12-2.12"></path><circle cx="12" cy="12" r="3" strokeWidth="2"></circle></svg>
+                <h3 className="font-bold text-slate-900 text-[15px]">Caption Maker — Groq</h3>
+              </div>
+              {settings.caption_key_saved && (
+                <span className="shrink-0 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100">API key tersimpan</span>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="groq-base-url" className="block text-[13px] font-bold text-slate-700 mb-1.5">Base URL</label>
+                <input
+                  id="groq-base-url"
+                  type="url"
+                  placeholder="https://api.groq.com/openai/v1"
+                  value={settings.caption_base_url}
+                  onChange={(e) => setSettings({ ...settings, caption_base_url: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-[13px] text-slate-900 bg-slate-50/50 transition-all placeholder:text-slate-500"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="groq-api-key" className="block text-[13px] font-bold text-slate-700 mb-1.5">Groq API Key</label>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    id="groq-api-key"
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder={settings.caption_key_saved ? 'Kosongkan untuk mempertahankan key tersimpan' : 'Masukkan Groq API key'}
+                    value={settings.caption_api_key}
+                    onChange={(e) => setSettings({ ...settings, caption_api_key: e.target.value })}
+                    aria-describedby={groqCheckMessage ? 'groq-check-result' : undefined}
+                    className="min-w-0 flex-1 px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-[13px] text-slate-900 bg-slate-50/50 transition-all font-mono placeholder:text-slate-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCheckGroq}
+                    disabled={groqCheckState === 'checking'}
+                    className="px-4 py-2.5 rounded-xl border border-primary/30 bg-primary/10 text-primary text-[13px] font-bold hover:bg-primary/15 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                  >
+                    {groqCheckState === 'checking' ? 'Memeriksa...' : 'Check Groq'}
+                  </button>
+                </div>
+                {groqCheckMessage && (
+                  <p id="groq-check-result" role={groqCheckState === 'error' ? 'alert' : 'status'} className={`mt-2 text-[12px] font-medium ${groqCheckState === 'ok' ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {groqCheckMessage}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label htmlFor="groq-model" className="block text-[13px] font-bold text-slate-700 mb-1.5">Transcription Model</label>
+                <input
+                  id="groq-model"
+                  type="text"
+                  placeholder="whisper-large-v3-turbo"
+                  value={settings.caption_model}
+                  onChange={(e) => setSettings({ ...settings, caption_model: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-[13px] text-slate-900 bg-slate-50/50 transition-all placeholder:text-slate-500"
+                />
+              </div>
+
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={() => handleClearProvider('caption_maker')}
+                  disabled={!settings.caption_key_saved || clearingProvider !== null}
+                  className="px-4 py-2.5 border border-red-200 text-red-600 text-[13px] font-bold rounded-xl hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                >
+                  {clearingProvider === 'caption_maker' ? 'Menghapus...' : 'Hapus Groq API Key'}
+                </button>
               </div>
             </div>
           </div>
@@ -224,31 +389,22 @@ export default function Settings() {
         </div>
 
         <div className="border-t border-slate-200 pt-6 mt-8 flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="text-[13px] font-medium text-emerald-600 bg-emerald-50 px-4 py-2 rounded-lg border border-emerald-100 animate-in fade-in data-[state=hidden]:animate-out data-[state=hidden]:fade-out transition-all" data-state={saveMessage ? 'visible' : 'hidden'}>
+          <div role="status" aria-live="polite" className="text-[13px] font-medium text-emerald-600 bg-emerald-50 px-4 py-2 rounded-lg border border-emerald-100 animate-in fade-in data-[state=hidden]:animate-out data-[state=hidden]:fade-out transition-all" data-state={saveMessage ? 'visible' : 'hidden'}>
             {saveMessage}
           </div>
-          <div className="flex items-center space-x-3 w-full md:w-auto">
-            <button 
-              onClick={handleClearApiKey}
-              type="button" 
-              className="flex-1 md:flex-none px-4 py-2.5 border border-slate-200 text-slate-700 text-[13px] font-bold rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
-            >
-              Hapus API Key
-            </button>
-            <button 
-              onClick={handleSaveSettings}
-              disabled={isSaving}
-              type="button" 
-              className="flex-1 md:flex-none px-6 py-2.5 bg-orange-600 text-white text-[13px] font-bold rounded-xl hover:bg-orange-700 transition-all shadow-sm shadow-orange-600/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              {isSaving ? (
-                <>
-                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                  Menyimpan...
-                </>
-              ) : 'Simpan Pengaturan'}
-            </button>
-          </div>
+          <button
+            onClick={handleSaveSettings}
+            disabled={isSaving || clearingProvider !== null}
+            type="button"
+            className="w-full md:w-auto px-6 py-2.5 bg-orange-600 text-white text-[13px] font-bold rounded-xl hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-300 transition-all shadow-sm shadow-orange-600/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {isSaving ? (
+              <>
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                Menyimpan...
+              </>
+            ) : 'Simpan Pengaturan'}
+          </button>
         </div>
       </section>
     </div>
