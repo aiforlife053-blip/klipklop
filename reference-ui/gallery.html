@@ -1,0 +1,870 @@
+<!doctype html>
+<html lang="id" class="bg">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Galeri — KlipKlop</title>
+    <meta
+      name="description"
+      content="Semua klip viral yang pernah Anda proses tersimpan di sini."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --background: #131417;
+        --foreground: #ebecef;
+        --card: #1c1d22;
+        --secondary: #24262c;
+        --muted-foreground: #8f929c;
+        --primary: #f2a33c;
+        --primary-foreground: #2b1e08;
+        --destructive: #e05d47;
+        --border: rgba(255, 255, 255, 0.08);
+        --input: rgba(255, 255, 255, 0.1);
+        --font-sans: "Inter", system-ui, sans-serif;
+        --font-display: "Space Grotesk", system-ui, sans-serif;
+        color-scheme: dark;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        border-color: var(--border);
+      }
+      html.bg,
+      body {
+        background: var(--background);
+        color: var(--foreground);
+      }
+      body {
+        font-family: var(--font-sans);
+        line-height: 1.5;
+        min-height: 100dvh;
+      }
+      button {
+        font-family: inherit;
+        cursor: pointer;
+        color: inherit;
+        background: none;
+        border: none;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      img {
+        display: block;
+      }
+
+      .site-nav {
+        position: sticky;
+        top: 0;
+        z-index: 40;
+        border-bottom: 1px solid var(--border);
+        background: rgba(19, 20, 23, 0.8);
+        backdrop-filter: blur(12px);
+      }
+      .nav-inner {
+        margin: 0 auto;
+        display: flex;
+        height: 4rem;
+        max-width: 80rem;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 1.5rem;
+      }
+      .logo {
+        display: flex;
+        align-items: center;
+        gap: 0.625rem;
+      }
+      .logo-mark {
+        display: flex;
+        width: 2rem;
+        height: 2rem;
+        align-items: center;
+        justify-content: center;
+        border-radius: 0.5rem;
+        background: var(--primary);
+        color: var(--primary-foreground);
+      }
+      .logo-text {
+        font-family: var(--font-display);
+        font-size: 1.125rem;
+        font-weight: 700;
+        letter-spacing: -0.025em;
+      }
+      .nav-links {
+        display: none;
+        align-items: center;
+        gap: 0.25rem;
+      }
+      .nav-links a {
+        border-radius: 9999px;
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
+        color: var(--muted-foreground);
+        transition:
+          background 0.15s,
+          color 0.15s;
+      }
+      .nav-links a:hover {
+        background: var(--secondary);
+        color: var(--foreground);
+      }
+      .nav-links a.active {
+        background: rgba(242, 163, 60, 0.15);
+        font-weight: 500;
+        color: var(--primary);
+      }
+      .nav-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .icon-btn {
+        display: flex;
+        width: 2.25rem;
+        height: 2.25rem;
+        align-items: center;
+        justify-content: center;
+        border-radius: 9999px;
+        border: 1px solid var(--border);
+        color: var(--muted-foreground);
+        transition:
+          background 0.15s,
+          color 0.15s;
+      }
+      .icon-btn:hover {
+        background: var(--secondary);
+        color: var(--foreground);
+      }
+      .nav-mobile {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        overflow-x: auto;
+        border-top: 1px solid var(--border);
+        padding: 0.5rem 1rem;
+      }
+      .nav-mobile a {
+        white-space: nowrap;
+        border-radius: 9999px;
+        padding: 0.375rem 0.875rem;
+        font-size: 0.875rem;
+        color: var(--muted-foreground);
+      }
+      .nav-mobile a.active {
+        background: rgba(242, 163, 60, 0.15);
+        font-weight: 500;
+        color: var(--primary);
+      }
+      @media (min-width: 768px) {
+        .nav-links {
+          display: flex;
+        }
+        .nav-mobile {
+          display: none;
+        }
+      }
+
+      .page {
+        margin: 0 auto;
+        display: flex;
+        max-width: 80rem;
+        flex-direction: column;
+        gap: 2rem;
+        padding: 2.5rem 1.5rem;
+      }
+      .page-head {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .eyebrow {
+        font-size: 0.875rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--primary);
+      }
+      .page-title {
+        font-family: var(--font-display);
+        font-size: 2rem;
+        font-weight: 700;
+        letter-spacing: -0.025em;
+      }
+      @media (min-width: 768px) {
+        .page-title {
+          font-size: 2.25rem;
+        }
+      }
+      .page-sub {
+        color: var(--muted-foreground);
+      }
+
+      .gallery-grid {
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: repeat(2, 1fr);
+      }
+      @media (min-width: 768px) {
+        .gallery-grid {
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
+      @media (min-width: 1024px) {
+        .gallery-grid {
+          grid-template-columns: repeat(4, 1fr);
+        }
+      }
+      @media (min-width: 1280px) {
+        .gallery-grid {
+          grid-template-columns: repeat(5, 1fr);
+        }
+      }
+
+      .clip-card {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 1rem;
+        background: var(--card);
+        transition: border-color 0.15s;
+      }
+      .clip-card:hover {
+        border-color: rgba(242, 163, 60, 0.4);
+      }
+      .clip-thumb {
+        position: relative;
+        aspect-ratio: 4 / 5;
+        overflow: hidden;
+        width: 100%;
+        text-align: left;
+        padding: 0;
+      }
+      .clip-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transition: transform 0.3s;
+      }
+      .clip-card:hover .clip-thumb img {
+        transform: scale(1.05);
+      }
+      .thumb-top {
+        position: absolute;
+        inset: 0 0 auto 0;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        padding: 0.75rem;
+      }
+      .badge-virality {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        border-radius: 9999px;
+        background: var(--primary);
+        padding: 0.25rem 0.625rem;
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: var(--primary-foreground);
+      }
+      .badge-duration {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        border-radius: 9999px;
+        background: rgba(19, 20, 23, 0.7);
+        padding: 0.25rem 0.625rem;
+        font-size: 0.75rem;
+        font-weight: 500;
+        backdrop-filter: blur(4px);
+      }
+      .clip-hover {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.625rem;
+        background: rgba(19, 20, 23, 0.6);
+        opacity: 0;
+        transition: opacity 0.15s;
+      }
+      .clip-card:hover .clip-hover {
+        opacity: 1;
+      }
+      .play-circle {
+        display: flex;
+        width: 2.75rem;
+        height: 2.75rem;
+        align-items: center;
+        justify-content: center;
+        border-radius: 9999px;
+        background: var(--primary);
+        color: var(--primary-foreground);
+      }
+      .hover-label {
+        border-radius: 9999px;
+        background: var(--primary);
+        padding: 0.25rem 0.875rem;
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: var(--primary-foreground);
+      }
+      .clip-info {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        gap: 0.375rem;
+        padding: 0.875rem;
+      }
+      .clip-title {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        font-family: var(--font-display);
+        font-size: 0.875rem;
+        font-weight: 700;
+        line-height: 1.375;
+      }
+      .clip-meta {
+        margin-top: auto;
+        font-size: 0.75rem;
+        color: var(--muted-foreground);
+      }
+
+      /* Modal */
+      .modal-root {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+      }
+      .modal-root.open {
+        display: flex;
+      }
+      .modal-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(19, 20, 23, 0.8);
+        border: none;
+      }
+      .modal-panel {
+        position: relative;
+        display: grid;
+        max-height: 90vh;
+        width: 100%;
+        max-width: 56rem;
+        gap: 1.5rem;
+        overflow-y: auto;
+        border: 1px solid var(--border);
+        border-radius: 1rem;
+        background: var(--card);
+        padding: 2rem;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      }
+      @media (min-width: 768px) {
+        .modal-panel {
+          grid-template-columns: 280px 1fr;
+        }
+      }
+      .modal-close {
+        position: absolute;
+        right: 1rem;
+        top: 1rem;
+        z-index: 10;
+        display: flex;
+        width: 2.25rem;
+        height: 2.25rem;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--border);
+        border-radius: 9999px;
+        background: var(--secondary);
+        color: var(--muted-foreground);
+        transition: color 0.15s;
+      }
+      .modal-close:hover {
+        color: var(--foreground);
+      }
+      .modal-preview {
+        position: relative;
+        margin: 0 auto;
+        aspect-ratio: 9 / 16;
+        width: 100%;
+        max-width: 280px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+      }
+      .modal-preview img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .modal-preview .badge-virality {
+        position: absolute;
+        left: 0.75rem;
+        top: 0.75rem;
+      }
+      .modal-play {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.15s;
+      }
+      .modal-play:hover {
+        background: rgba(19, 20, 23, 0.3);
+      }
+      .modal-play .play-circle {
+        width: 3.5rem;
+        height: 3.5rem;
+      }
+      .modal-body {
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+      }
+      @media (min-width: 768px) {
+        .modal-body {
+          padding-right: 2rem;
+        }
+      }
+      .hint {
+        font-size: 0.875rem;
+        color: var(--muted-foreground);
+      }
+      .modal-title {
+        font-family: var(--font-display);
+        font-size: 1.75rem;
+        font-weight: 700;
+        letter-spacing: -0.025em;
+        line-height: 1.2;
+      }
+      .desc-box {
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        background: rgba(36, 38, 44, 0.5);
+        padding: 1rem;
+      }
+      .desc-box p {
+        font-size: 0.875rem;
+        line-height: 1.6;
+        color: var(--muted-foreground);
+      }
+      .desc-box p + p {
+        margin-top: 0.75rem;
+      }
+      .modal-actions {
+        margin-top: auto;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        padding-top: 1rem;
+      }
+      .btn-modal {
+        display: flex;
+        height: 2.75rem;
+        align-items: center;
+        gap: 0.5rem;
+        border-radius: 0.75rem;
+        padding: 0 1.25rem;
+        font-size: 0.875rem;
+        transition:
+          opacity 0.15s,
+          background 0.15s;
+      }
+      .btn-modal.primary {
+        background: var(--primary);
+        font-weight: 700;
+        color: var(--primary-foreground);
+      }
+      .btn-modal.primary:hover {
+        opacity: 0.9;
+      }
+      .btn-modal.secondary {
+        border: 1px solid var(--border);
+        background: var(--secondary);
+        font-weight: 500;
+      }
+      .btn-modal.secondary:hover {
+        background: rgba(36, 38, 44, 0.7);
+      }
+      .btn-modal.danger {
+        border: 1px solid rgba(224, 93, 71, 0.4);
+        background: rgba(224, 93, 71, 0.1);
+        font-weight: 500;
+        color: var(--destructive);
+      }
+      .btn-modal.danger:hover {
+        background: rgba(224, 93, 71, 0.2);
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site-nav">
+      <div class="nav-inner">
+        <a href="index.html" class="logo">
+          <span class="logo-mark">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <circle cx="6" cy="6" r="3" />
+              <path d="M8.12 8.12 12 12" />
+              <path d="M20 4 8.12 15.88" />
+              <circle cx="6" cy="18" r="3" />
+              <path d="M14.8 14.8 20 20" />
+            </svg>
+          </span>
+          <span class="logo-text">KlipKlop</span>
+        </a>
+        <nav class="nav-links" aria-label="Navigasi utama">
+          <a href="index.html">Dashboard</a>
+          <a href="galeri.html" class="active" aria-current="page">Galeri</a>
+          <a href="konsol.html">Konsol</a>
+          <a href="preview-editor.html">Preview Editor</a>
+        </nav>
+        <div class="nav-actions">
+          <a href="pengaturan.html" class="icon-btn" aria-label="Pengaturan">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path
+                d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"
+              />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </a>
+          <button
+            type="button"
+            class="icon-btn"
+            style="background: var(--secondary)"
+            aria-label="Akun"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <nav class="nav-mobile" aria-label="Navigasi mobile">
+        <a href="index.html">Dashboard</a>
+        <a href="galeri.html" class="active" aria-current="page">Galeri</a>
+        <a href="konsol.html">Konsol</a>
+        <a href="preview-editor.html">Preview Editor</a>
+      </nav>
+    </header>
+
+    <main class="page">
+      <div class="page-head">
+        <p class="eyebrow">Galeri</p>
+        <h1 class="page-title">Koleksi Klip</h1>
+        <p class="page-sub">
+          Semua klip viral yang pernah Anda proses tersimpan di sini.
+        </p>
+      </div>
+
+      <div class="gallery-grid" id="gallery-grid"></div>
+    </main>
+
+    <!-- Modal detail klip -->
+    <div
+      class="modal-root"
+      id="clip-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Detail klip"
+    >
+      <button
+        type="button"
+        class="modal-backdrop"
+        id="modal-backdrop"
+        aria-label="Tutup detail klip"
+      ></button>
+      <div class="modal-panel">
+        <button
+          type="button"
+          class="modal-close"
+          id="modal-close"
+          aria-label="Tutup"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+        <div class="modal-preview">
+          <img id="modal-image" src="/placeholder.svg" alt="" />
+          <span class="badge-virality"
+            ><svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path
+                d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
+              /></svg
+            ><span id="modal-virality"></span
+          ></span>
+          <button type="button" class="modal-play" aria-label="Putar klip">
+            <span class="play-circle"
+              ><svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                style="margin-left: 2px"
+              >
+                <polygon points="6 3 20 12 6 21 6 3" /></svg
+            ></span>
+          </button>
+        </div>
+        <div class="modal-body">
+          <p class="hint" id="modal-meta"></p>
+          <h2 class="modal-title" id="modal-title"></h2>
+          <div style="display: flex; flex-direction: column; gap: 0.5rem">
+            <h3 style="font-size: 0.875rem; font-weight: 700">Description</h3>
+            <div class="desc-box">
+              <p id="modal-desc"></p>
+              <p>sc: @klipklop</p>
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn-modal primary">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"
+                />
+                <path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7" />
+                <path d="M7 3v4a1 1 0 0 0 1 1h7" />
+              </svg>
+              Simpan ke Gallery
+            </button>
+            <button type="button" class="btn-modal secondary">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" x2="12" y1="15" y2="3" />
+              </svg>
+              Download
+            </button>
+            <button type="button" class="btn-modal secondary">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" x2="12" y1="3" y2="15" />
+              </svg>
+              Upload
+            </button>
+            <button type="button" class="btn-modal danger">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M3 6h18" />
+                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+              </svg>
+              Hapus
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      var clips = [
+        {
+          id: 1,
+          title: "Trauma Nyuntik Pasien: Pembuluh Darah Pecah!",
+          description:
+            "Tretan Muslim berbagi pengalaman horor saat masih jadi perawat, salah menyuntik pasien hingga pembuluh darah pecah.",
+          virality: 90,
+          duration: "112s",
+          date: "10 Jul 26, 00.34",
+          image: "images/clip-vertical-2.png",
+        },
+        {
+          id: 2,
+          title: "Dari Nebeng Kru sampai Kredit Mobil Sendiri",
+          description:
+            "Sintya cerita perjuangannya saat masih di FTV, dari harus berangkat jam 5 pagi, mobil kru penuh sesak.",
+          virality: 80,
+          duration: "111s",
+          date: "9 Jul 26, 23.38",
+          image: "images/clip-vertical-1.png",
+        },
+      ];
+
+      var flameSvg =
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>';
+      var clockSvg =
+        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+      var playSvg =
+        '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="margin-left:2px;"><polygon points="6 3 20 12 6 21 6 3"/></svg>';
+
+      var grid = document.getElementById("gallery-grid");
+      clips.forEach(function (clip) {
+        var article = document.createElement("article");
+        article.className = "clip-card";
+        article.innerHTML =
+          '<button type="button" class="clip-thumb" aria-label="Lihat detail klip: ' +
+          clip.title +
+          '">' +
+          '<img src="' +
+          clip.image +
+          '" alt="Thumbnail klip: ' +
+          clip.title +
+          '" />' +
+          '<span class="thumb-top">' +
+          '<span class="badge-virality">' +
+          flameSvg +
+          clip.virality +
+          "%</span>" +
+          '<span class="badge-duration">' +
+          clockSvg +
+          clip.duration +
+          "</span>" +
+          "</span>" +
+          '<span class="clip-hover">' +
+          '<span class="play-circle">' +
+          playSvg +
+          "</span>" +
+          '<span class="hover-label">Lihat Detail</span>' +
+          "</span>" +
+          "</button>" +
+          '<div class="clip-info">' +
+          '<h2 class="clip-title">' +
+          clip.title +
+          "</h2>" +
+          '<p class="clip-meta">' +
+          clip.duration +
+          " \u2022 " +
+          clip.date +
+          "</p>" +
+          "</div>";
+        article
+          .querySelector(".clip-thumb")
+          .addEventListener("click", function () {
+            openModal(clip);
+          });
+        grid.appendChild(article);
+      });
+
+      var modal = document.getElementById("clip-modal");
+      function openModal(clip) {
+        document.getElementById("modal-image").src = clip.image;
+        document.getElementById("modal-image").alt =
+          "Pratinjau klip " + clip.title;
+        document.getElementById("modal-virality").textContent =
+          clip.virality + "%";
+        document.getElementById("modal-meta").textContent =
+          "Durasi: " + clip.duration + " \u2022 Diunduh: " + clip.date;
+        document.getElementById("modal-title").textContent = clip.title;
+        document.getElementById("modal-desc").textContent = clip.description;
+        modal.classList.add("open");
+        document.body.style.overflow = "hidden";
+      }
+      function closeModal() {
+        modal.classList.remove("open");
+        document.body.style.overflow = "";
+      }
+      document
+        .getElementById("modal-close")
+        .addEventListener("click", closeModal);
+      document
+        .getElementById("modal-backdrop")
+        .addEventListener("click", closeModal);
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") closeModal();
+      });
+    </script>
+  </body>
+</html>

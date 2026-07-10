@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="id" class="bg">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Preview Editor — KlipKlop</title>
+<meta name="description" content="Atur watermark, credit text, hook title, subtitle, dan latar video dengan pratinjau live." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --background: #131417;
+    --foreground: #ebecef;
+    --card: #1c1d22;
+    --secondary: #24262c;
+    --muted-foreground: #8f929c;
+    --primary: #f2a33c;
+    --primary-foreground: #2b1e08;
+    --border: rgba(255, 255, 255, 0.08);
+    --input: rgba(255, 255, 255, 0.1);
+    --font-sans: 'Inter', system-ui, sans-serif;
+    --font-display: 'Space Grotesk', system-ui, sans-serif;
+    --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', monospace;
+    color-scheme: dark;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; border-color: var(--border); }
+  html.bg, body { background: var(--background); color: var(--foreground); }
+  body { font-family: var(--font-sans); line-height: 1.5; min-height: 100dvh; }
+  button { font-family: inherit; cursor: pointer; color: inherit; background: none; border: none; }
+  input { font-family: inherit; color: var(--foreground); }
+  a { color: inherit; text-decoration: none; }
+  img { display: block; }
+
+  .site-nav { position: sticky; top: 0; z-index: 40; border-bottom: 1px solid var(--border); background: rgba(19, 20, 23, 0.8); backdrop-filter: blur(12px); }
+  .nav-inner { margin: 0 auto; display: flex; height: 4rem; max-width: 80rem; align-items: center; justify-content: space-between; padding: 0 1.5rem; }
+  .logo { display: flex; align-items: center; gap: 0.625rem; }
+  .logo-mark { display: flex; width: 2rem; height: 2rem; align-items: center; justify-content: center; border-radius: 0.5rem; background: var(--primary); color: var(--primary-foreground); }
+  .logo-text { font-family: var(--font-display); font-size: 1.125rem; font-weight: 700; letter-spacing: -0.025em; }
+  .nav-links { display: none; align-items: center; gap: 0.25rem; }
+  .nav-links a { border-radius: 9999px; padding: 0.5rem 1rem; font-size: 0.875rem; color: var(--muted-foreground); transition: background 0.15s, color 0.15s; }
+  .nav-links a:hover { background: var(--secondary); color: var(--foreground); }
+  .nav-links a.active { background: rgba(242, 163, 60, 0.15); font-weight: 500; color: var(--primary); }
+  .nav-actions { display: flex; align-items: center; gap: 0.5rem; }
+  .icon-btn { display: flex; width: 2.25rem; height: 2.25rem; align-items: center; justify-content: center; border-radius: 9999px; border: 1px solid var(--border); color: var(--muted-foreground); transition: background 0.15s, color 0.15s; }
+  .icon-btn:hover { background: var(--secondary); color: var(--foreground); }
+  .nav-mobile { display: flex; align-items: center; gap: 0.25rem; overflow-x: auto; border-top: 1px solid var(--border); padding: 0.5rem 1rem; }
+  .nav-mobile a { white-space: nowrap; border-radius: 9999px; padding: 0.375rem 0.875rem; font-size: 0.875rem; color: var(--muted-foreground); }
+  .nav-mobile a.active { background: rgba(242, 163, 60, 0.15); font-weight: 500; color: var(--primary); }
+  @media (min-width: 768px) { .nav-links { display: flex; } .nav-mobile { display: none; } }
+
+  .page { margin: 0 auto; display: flex; max-width: 80rem; flex-direction: column; gap: 2rem; padding: 2.5rem 1.5rem; }
+  .page-head { display: flex; flex-direction: column; gap: 0.5rem; }
+  .eyebrow { font-size: 0.875rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.1em; color: var(--primary); }
+  .page-title { font-family: var(--font-display); font-size: 2rem; font-weight: 700; letter-spacing: -0.025em; }
+  @media (min-width: 768px) { .page-title { font-size: 2.25rem; } }
+  .page-sub { color: var(--muted-foreground); }
+
+  .workspace { display: grid; gap: 1.5rem; }
+  @media (min-width: 1024px) { .workspace { grid-template-columns: minmax(0, 380px) 1fr; } }
+
+  /* Preview panel */
+  .preview-panel { display: flex; flex-direction: column; gap: 1rem; border: 1px solid var(--border); border-radius: 1rem; background: rgba(28, 29, 34, 0.5); padding: 1.5rem; }
+  @media (min-width: 1024px) { .preview-panel { position: sticky; top: 6rem; align-self: start; } }
+  .preview-head { display: flex; align-items: center; justify-content: space-between; }
+  .preview-head h2 { font-family: var(--font-display); font-size: 1rem; font-weight: 700; }
+  .ratio-badge { border: 1px solid var(--border); border-radius: 9999px; background: var(--secondary); padding: 0.25rem 0.75rem; font-size: 0.75rem; color: var(--muted-foreground); }
+  .canvas { position: relative; margin: 0 auto; aspect-ratio: 9 / 16; width: 100%; max-width: 300px; overflow: hidden; border: 1px solid var(--border); border-radius: 1rem; background: var(--background); }
+  .canvas-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .canvas-video-wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+  .canvas-video { position: relative; aspect-ratio: 16 / 9; width: 100%; overflow: hidden; }
+  .canvas-video img { width: 100%; height: 100%; object-fit: cover; }
+  .overlay-hook { position: absolute; left: 1rem; right: 1rem; top: 2rem; text-align: center; font-family: var(--font-display); font-size: 1.125rem; font-weight: 700; text-transform: uppercase; line-height: 1.375; color: #ffffff; text-shadow: 0 2px 8px rgba(0,0,0,0.8); }
+  .overlay-subtitle { position: absolute; left: 1.5rem; right: 1.5rem; bottom: 4rem; border-radius: 0.5rem; background: rgba(19, 20, 23, 0.7); padding: 0.5rem 0.75rem; text-align: center; font-size: 0.875rem; font-weight: 700; color: var(--primary); }
+  .overlay-watermark { position: absolute; right: 0.75rem; top: 0.75rem; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,0.4); border-radius: 0.375rem; background: rgba(255,255,255,0.1); padding: 0.25rem 0.5rem; transform-origin: top right; }
+  .overlay-watermark span { font-size: 10px; font-weight: 700; color: #ffffff; }
+  .overlay-credit { position: absolute; left: 1rem; right: 1rem; bottom: 1rem; text-align: center; font-family: var(--font-mono); }
+  .btn-primary { display: flex; height: 3rem; align-items: center; justify-content: center; gap: 0.5rem; border-radius: 0.75rem; background: var(--primary); font-family: var(--font-display); font-size: 0.875rem; font-weight: 700; color: var(--primary-foreground); transition: opacity 0.15s; }
+  .btn-primary:hover { opacity: 0.9; }
+
+  /* Control cards */
+  .controls { display: flex; flex-direction: column; gap: 1.25rem; }
+  .controls-grid { display: grid; gap: 1.25rem; }
+  @media (min-width: 1280px) { .controls-grid { grid-template-columns: repeat(2, 1fr); } }
+  .editor-card { display: flex; flex-direction: column; gap: 1rem; border: 1px solid var(--border); border-radius: 1rem; background: var(--card); padding: 1.25rem; }
+  .editor-card-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 1rem; }
+  .editor-card-title { display: flex; align-items: center; gap: 0.75rem; }
+  .card-icon { display: flex; width: 2.25rem; height: 2.25rem; align-items: center; justify-content: center; border-radius: 0.5rem; background: rgba(242, 163, 60, 0.15); color: var(--primary); }
+  .editor-card-title h2 { font-family: var(--font-display); font-size: 1rem; font-weight: 700; }
+  .editor-card-body { display: flex; flex-direction: column; gap: 1rem; transition: opacity 0.15s; }
+  .editor-card-body.disabled { pointer-events: none; opacity: 0.4; }
+
+  /* Toggle */
+  .toggle { position: relative; height: 1.5rem; width: 2.75rem; flex-shrink: 0; border-radius: 9999px; background: var(--secondary); transition: background 0.15s; }
+  .toggle[aria-checked="true"] { background: var(--primary); }
+  .toggle-knob { position: absolute; left: 0; top: 0.125rem; width: 1.25rem; height: 1.25rem; border-radius: 9999px; background: var(--foreground); transform: translateX(2px); transition: transform 0.15s; }
+  .toggle[aria-checked="true"] .toggle-knob { transform: translateX(22px); }
+
+  /* Slider */
+  .slider-field { display: flex; flex: 1; flex-direction: column; gap: 0.5rem; }
+  .slider-head { display: flex; align-items: center; justify-content: space-between; font-size: 0.75rem; }
+  .slider-head .name { font-weight: 500; }
+  .slider-head .val { color: var(--muted-foreground); }
+  input[type="range"] { height: 0.375rem; width: 100%; cursor: pointer; appearance: none; border-radius: 9999px; background: var(--secondary); accent-color: var(--primary); }
+  input[type="range"]::-webkit-slider-thumb { appearance: none; width: 1rem; height: 1rem; border-radius: 9999px; background: var(--primary); }
+  input[type="range"]::-moz-range-thumb { width: 1rem; height: 1rem; border: none; border-radius: 9999px; background: var(--primary); }
+
+  .upload-btn { display: flex; height: 3rem; align-items: center; justify-content: center; gap: 0.5rem; border: 1px dashed var(--border); border-radius: 0.75rem; background: rgba(36, 38, 44, 0.5); font-size: 0.875rem; font-weight: 500; color: var(--muted-foreground); transition: border-color 0.15s, color 0.15s; }
+  .upload-btn:hover { border-color: rgba(242, 163, 60, 0.4); color: var(--primary); }
+  .input { height: 2.75rem; width: 100%; border-radius: 0.75rem; border: 1px solid var(--input); background: var(--secondary); padding: 0 1rem; font-size: 0.875rem; }
+  .input:focus { outline: 2px solid var(--primary); outline-offset: 0; }
+  .input.mono { font-family: var(--font-mono); }
+  .color-row { display: flex; align-items: center; gap: 0.75rem; }
+  .color-swatch { position: relative; display: flex; width: 2.75rem; height: 2.75rem; flex-shrink: 0; cursor: pointer; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--input); border-radius: 0.75rem; }
+  .color-swatch input { position: absolute; inset: 0; cursor: pointer; opacity: 0; }
+  .slider-row { display: flex; gap: 1rem; }
+  .slider-row-3 { display: flex; flex-direction: column; gap: 1rem; }
+  @media (min-width: 640px) { .slider-row-3 { flex-direction: row; gap: 1.5rem; } }
+  .hint-xs { font-size: 0.75rem; line-height: 1.6; color: var(--muted-foreground); }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+</style>
+</head>
+<body>
+<header class="site-nav">
+  <div class="nav-inner">
+    <a href="index.html" class="logo">
+      <span class="logo-mark">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/></svg>
+      </span>
+      <span class="logo-text">KlipKlop</span>
+    </a>
+    <nav class="nav-links" aria-label="Navigasi utama">
+      <a href="index.html">Dashboard</a>
+      <a href="galeri.html">Galeri</a>
+      <a href="konsol.html">Konsol</a>
+      <a href="preview-editor.html" class="active" aria-current="page">Preview Editor</a>
+    </nav>
+    <div class="nav-actions">
+      <a href="pengaturan.html" class="icon-btn" aria-label="Pengaturan">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+      </a>
+      <button type="button" class="icon-btn" style="background: var(--secondary);" aria-label="Akun">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      </button>
+    </div>
+  </div>
+  <nav class="nav-mobile" aria-label="Navigasi mobile">
+    <a href="index.html">Dashboard</a>
+    <a href="galeri.html">Galeri</a>
+    <a href="konsol.html">Konsol</a>
+    <a href="preview-editor.html" class="active" aria-current="page">Preview Editor</a>
+  </nav>
+</header>
+
+<main class="page">
+  <div class="page-head">
+    <p class="eyebrow">Preview Editor</p>
+    <h1 class="page-title">Editor Klip</h1>
+    <p class="page-sub">Atur watermark, teks, dan latar video — semua perubahan langsung terlihat di pratinjau.</p>
+  </div>
+
+  <div class="workspace">
+    <!-- Pratinjau live -->
+    <section class="preview-panel" aria-label="Pratinjau klip">
+      <div class="preview-head">
+        <h2>Pratinjau Live</h2>
+        <span class="ratio-badge">9:16</span>
+      </div>
+
+      <div class="canvas">
+        <img class="canvas-bg" id="bg-layer" src="images/clip-vertical-3.png" alt="" aria-hidden="true" />
+        <div class="canvas-video-wrap">
+          <div class="canvas-video" id="video-layer">
+            <img src="images/clip-vertical-3.png" alt="Pratinjau klip yang sedang diedit" />
+          </div>
+        </div>
+        <p class="overlay-hook" id="hook-layer">Momen Clutch Paling Gila!</p>
+        <p class="overlay-subtitle" id="subtitle-layer">ini dia momen yang ditunggu-tunggu</p>
+        <div class="overlay-watermark" id="watermark-layer"><span>LOGO</span></div>
+        <p class="overlay-credit" id="credit-layer">sc : @klipklop</p>
+      </div>
+
+      <button type="button" class="btn-primary">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+        Ekspor Klip
+      </button>
+    </section>
+
+    <!-- Kartu kontrol -->
+    <div class="controls">
+      <div class="controls-grid">
+        <!-- Watermark Logo -->
+        <section class="editor-card">
+          <div class="editor-card-head">
+            <div class="editor-card-title">
+              <span class="card-icon">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+              </span>
+              <h2>Watermark Logo</h2>
+            </div>
+            <button type="button" class="toggle" role="switch" aria-checked="true" aria-label="Aktifkan Watermark Logo" data-target="watermark"><span class="toggle-knob"></span></button>
+          </div>
+          <div class="editor-card-body" id="body-watermark">
+            <button type="button" class="upload-btn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+              Upload Image
+            </button>
+            <div class="slider-field">
+              <div class="slider-head"><span class="name">Opacity</span><span class="val" id="val-wm-opacity">49%</span></div>
+              <input type="range" id="wm-opacity" min="0" max="100" value="49" aria-label="Opacity watermark" />
+            </div>
+            <div class="slider-field">
+              <div class="slider-head"><span class="name">Scale</span><span class="val" id="val-wm-scale">53%</span></div>
+              <input type="range" id="wm-scale" min="10" max="100" value="53" aria-label="Scale watermark" />
+            </div>
+          </div>
+        </section>
+
+        <!-- Credit Text -->
+        <section class="editor-card">
+          <div class="editor-card-head">
+            <div class="editor-card-title">
+              <span class="card-icon">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/></svg>
+              </span>
+              <h2>Credit Text</h2>
+            </div>
+            <button type="button" class="toggle" role="switch" aria-checked="true" aria-label="Aktifkan Credit Text" data-target="credit"><span class="toggle-knob"></span></button>
+          </div>
+          <div class="editor-card-body" id="body-credit">
+            <input class="input mono" type="text" id="credit-text" value="sc : {channel}" aria-label="Teks kredit" />
+            <div class="color-row">
+              <label class="color-swatch" id="credit-swatch" style="background-color: #FFFFFF;">
+                <span class="sr-only">Pilih warna teks kredit</span>
+                <input type="color" id="credit-color" value="#FFFFFF" />
+              </label>
+              <input class="input mono" type="text" id="credit-hex" value="#FFFFFF" aria-label="Kode warna hex" />
+            </div>
+            <div class="slider-row">
+              <div class="slider-field">
+                <div class="slider-head"><span class="name">Size</span><span class="val" id="val-credit-size">45%</span></div>
+                <input type="range" id="credit-size" min="10" max="100" value="45" aria-label="Ukuran teks kredit" />
+              </div>
+              <div class="slider-field">
+                <div class="slider-head"><span class="name">Opacity</span><span class="val" id="val-credit-opacity">55%</span></div>
+                <input type="range" id="credit-opacity" min="0" max="100" value="55" aria-label="Opacity teks kredit" />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Hook Title -->
+        <section class="editor-card">
+          <div class="editor-card-head">
+            <div class="editor-card-title">
+              <span class="card-icon">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
+              </span>
+              <h2>Hook Title</h2>
+            </div>
+            <button type="button" class="toggle" role="switch" aria-checked="true" aria-label="Aktifkan Hook Title" data-target="hook"><span class="toggle-knob"></span></button>
+          </div>
+          <div class="editor-card-body" id="body-hook">
+            <p class="hint-xs">Geser hook title di preview untuk mengubah posisi.</p>
+          </div>
+        </section>
+
+        <!-- Subtitle -->
+        <section class="editor-card">
+          <div class="editor-card-head">
+            <div class="editor-card-title">
+              <span class="card-icon">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="3" y1="6" y2="6"/><line x1="15" x2="3" y1="12" y2="12"/><line x1="17" x2="3" y1="18" y2="18"/></svg>
+              </span>
+              <h2>Subtitle</h2>
+            </div>
+            <button type="button" class="toggle" role="switch" aria-checked="true" aria-label="Aktifkan Subtitle" data-target="subtitle"><span class="toggle-knob"></span></button>
+          </div>
+          <div class="editor-card-body" id="body-subtitle">
+            <p class="hint-xs">Geser subtitle di preview untuk mengubah posisi.</p>
+          </div>
+        </section>
+      </div>
+
+      <!-- Latar Video -->
+      <section class="editor-card">
+        <div class="editor-card-head">
+          <div class="editor-card-title">
+            <span class="card-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/></svg>
+            </span>
+            <h2>Latar Video</h2>
+          </div>
+          <button type="button" class="toggle" role="switch" aria-checked="true" aria-label="Aktifkan Latar Video" data-target="bg"><span class="toggle-knob"></span></button>
+        </div>
+        <div class="editor-card-body" id="body-bg">
+          <div class="slider-row-3">
+            <div class="slider-field">
+              <div class="slider-head"><span class="name">Video Scale</span><span class="val" id="val-video-scale">150%</span></div>
+              <input type="range" id="video-scale" min="100" max="200" value="150" aria-label="Skala video" />
+            </div>
+            <div class="slider-field">
+              <div class="slider-head"><span class="name">Bg Zoom</span><span class="val" id="val-bg-zoom">108%</span></div>
+              <input type="range" id="bg-zoom" min="100" max="200" value="108" aria-label="Zoom latar" />
+            </div>
+            <div class="slider-field">
+              <div class="slider-head"><span class="name">Blur Strength</span><span class="val" id="val-blur">3</span></div>
+              <input type="range" id="blur-strength" min="0" max="10" value="3" aria-label="Kekuatan blur" />
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<script>
+  // ---------- State ----------
+  var state = {
+    watermark: true, wmOpacity: 49, wmScale: 53,
+    credit: true, creditText: 'sc : {channel}', creditColor: '#FFFFFF', creditSize: 45, creditOpacity: 55,
+    hook: true, subtitle: true,
+    bg: true, videoScale: 150, bgZoom: 108, blur: 3
+  };
+
+  // ---------- Elemen pratinjau ----------
+  var bgLayer = document.getElementById('bg-layer');
+  var videoLayer = document.getElementById('video-layer');
+  var hookLayer = document.getElementById('hook-layer');
+  var subtitleLayer = document.getElementById('subtitle-layer');
+  var watermarkLayer = document.getElementById('watermark-layer');
+  var creditLayer = document.getElementById('credit-layer');
+
+  function render() {
+    // Latar
+    bgLayer.style.display = state.bg ? 'block' : 'none';
+    bgLayer.style.transform = 'scale(' + state.bgZoom / 100 + ')';
+    bgLayer.style.filter = 'blur(' + state.blur * 4 + 'px)';
+    videoLayer.style.transform = 'scale(' + state.videoScale / 150 + ')';
+    // Hook & subtitle
+    hookLayer.style.display = state.hook ? 'block' : 'none';
+    subtitleLayer.style.display = state.subtitle ? 'block' : 'none';
+    // Watermark
+    watermarkLayer.style.display = state.watermark ? 'flex' : 'none';
+    watermarkLayer.style.opacity = state.wmOpacity / 100;
+    watermarkLayer.style.transform = 'scale(' + (0.6 + state.wmScale / 100) + ')';
+    // Credit
+    creditLayer.style.display = state.credit ? 'block' : 'none';
+    creditLayer.textContent = state.creditText.replace('{channel}', '@klipklop');
+    creditLayer.style.color = state.creditColor;
+    creditLayer.style.opacity = state.creditOpacity / 100;
+    creditLayer.style.fontSize = (8 + (state.creditSize / 100) * 8) + 'px';
+  }
+
+  // ---------- Toggle ----------
+  document.querySelectorAll('.toggle').forEach(function (toggle) {
+    toggle.addEventListener('click', function () {
+      var key = toggle.dataset.target;
+      var next = toggle.getAttribute('aria-checked') !== 'true';
+      toggle.setAttribute('aria-checked', String(next));
+      state[key] = next;
+      var body = document.getElementById('body-' + key);
+      if (body) body.classList.toggle('disabled', !next);
+      render();
+    });
+  });
+
+  // ---------- Slider helper ----------
+  function bindSlider(id, key, valId, suffix) {
+    var el = document.getElementById(id);
+    var val = document.getElementById(valId);
+    el.addEventListener('input', function () {
+      state[key] = Number(el.value);
+      val.textContent = el.value + (suffix === undefined ? '%' : suffix);
+      render();
+    });
+  }
+  bindSlider('wm-opacity', 'wmOpacity', 'val-wm-opacity');
+  bindSlider('wm-scale', 'wmScale', 'val-wm-scale');
+  bindSlider('credit-size', 'creditSize', 'val-credit-size');
+  bindSlider('credit-opacity', 'creditOpacity', 'val-credit-opacity');
+  bindSlider('video-scale', 'videoScale', 'val-video-scale');
+  bindSlider('bg-zoom', 'bgZoom', 'val-bg-zoom');
+  bindSlider('blur-strength', 'blur', 'val-blur', '');
+
+  // ---------- Credit text & warna ----------
+  document.getElementById('credit-text').addEventListener('input', function (e) {
+    state.creditText = e.target.value;
+    render();
+  });
+  var colorInput = document.getElementById('credit-color');
+  var hexInput = document.getElementById('credit-hex');
+  var swatch = document.getElementById('credit-swatch');
+  colorInput.addEventListener('input', function (e) {
+    state.creditColor = e.target.value;
+    hexInput.value = e.target.value.toUpperCase();
+    swatch.style.backgroundColor = e.target.value;
+    render();
+  });
+  hexInput.addEventListener('input', function (e) {
+    var v = e.target.value;
+    if (/^#[0-9A-Fa-f]{6}$/.test(v)) {
+      state.creditColor = v;
+      colorInput.value = v;
+      swatch.style.backgroundColor = v;
+      render();
+    }
+  });
+
+  render();
+</script>
+</body>
+</html>

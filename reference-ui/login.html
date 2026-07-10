@@ -1,0 +1,1022 @@
+<!doctype html>
+<html lang="id" class="bg">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Masuk — KlipKlop</title>
+    <meta
+      name="description"
+      content="Masuk atau daftar KlipKlop untuk mulai mengubah video panjang menjadi klip viral vertikal dengan AI."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --background: #121212;
+        --foreground: #f5f2eb;
+        --card: #1c1a17;
+        --card-translucent: rgba(28, 26, 23, 0.5);
+        --secondary: #26231f;
+        --muted-foreground: #a39e93;
+        --primary: #f59e0b;
+        --primary-foreground: #121212;
+        --border: #2e2a24;
+        --radius-xl: 0.75rem;
+        --radius-2xl: 1rem;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html.bg {
+        background: var(--background);
+      }
+      body {
+        background: var(--background);
+        color: var(--foreground);
+        font-family: "Inter", sans-serif;
+        line-height: 1.5;
+        min-height: 100svh;
+      }
+      .font-display {
+        font-family: "Space Grotesk", sans-serif;
+      }
+
+      .layout {
+        display: flex;
+        flex-direction: column;
+        min-height: 100svh;
+      }
+      @media (min-width: 1024px) {
+        .layout {
+          flex-direction: row;
+        }
+      }
+
+      /* ===== Hero ===== */
+      .hero {
+        position: relative;
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 3rem;
+        overflow: hidden;
+        border-bottom: 1px solid var(--border);
+        background: var(--card-translucent);
+        padding: 2rem;
+      }
+      @media (min-width: 1024px) {
+        .hero {
+          border-bottom: none;
+          border-right: 1px solid var(--border);
+          padding: 3.5rem;
+        }
+      }
+      .glow-1,
+      .glow-2 {
+        position: absolute;
+        border-radius: 9999px;
+        pointer-events: none;
+      }
+      .glow-1 {
+        top: -8rem;
+        right: -8rem;
+        width: 24rem;
+        height: 24rem;
+        background: rgba(245, 158, 11, 0.15);
+        filter: blur(48px);
+      }
+      .glow-2 {
+        bottom: -10rem;
+        left: -6rem;
+        width: 20rem;
+        height: 20rem;
+        background: rgba(245, 158, 11, 0.1);
+        filter: blur(48px);
+      }
+      .dot-grid {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.15;
+        background-image: radial-gradient(
+          circle,
+          var(--muted-foreground) 1px,
+          transparent 1px
+        );
+        background-size: 28px 28px;
+      }
+
+      .hero-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        width: fit-content;
+        border-radius: 9999px;
+        border: 1px solid rgba(245, 158, 11, 0.4);
+        background: rgba(245, 158, 11, 0.1);
+        padding: 0.375rem 1rem;
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: var(--primary);
+      }
+
+      /* Floating clip cards */
+      .clips-stage {
+        position: relative;
+        height: 16rem;
+        width: 100%;
+        max-width: 28rem;
+        user-select: none;
+      }
+      @media (min-width: 1024px) {
+        .clips-stage {
+          height: 18rem;
+        }
+      }
+      .clip-float {
+        position: absolute;
+        width: 8rem;
+        transition: transform 0.3s ease;
+      }
+      @media (min-width: 1024px) {
+        .clip-float {
+          width: 9rem;
+        }
+      }
+      .clip-float:hover {
+        transform: translateY(-0.5rem) rotate(0deg) !important;
+      }
+      .clip-float-1 {
+        left: 0;
+        top: 2rem;
+        z-index: 10;
+        transform: rotate(-6deg);
+      }
+      .clip-float-2 {
+        left: 30%;
+        top: 0;
+        z-index: 20;
+        transform: rotate(3deg);
+      }
+      .clip-float-3 {
+        left: 60%;
+        top: 3rem;
+        z-index: 10;
+        transform: rotate(12deg);
+      }
+      .clip-float .thumb {
+        position: relative;
+        aspect-ratio: 9 / 16;
+        overflow: hidden;
+        border-radius: var(--radius-xl);
+        border: 1px solid var(--border);
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+      }
+      .clip-float img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .clip-float .score {
+        position: absolute;
+        left: 0.375rem;
+        top: 0.375rem;
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        border-radius: 9999px;
+        background: var(--primary);
+        padding: 0.125rem 0.5rem;
+        font-size: 0.625rem;
+        font-weight: 700;
+        color: var(--primary-foreground);
+      }
+      .clip-float .duration {
+        position: absolute;
+        right: 0.375rem;
+        bottom: 0.375rem;
+        border-radius: 9999px;
+        background: rgba(18, 18, 18, 0.8);
+        padding: 0.125rem 0.5rem;
+        font-size: 0.625rem;
+        font-weight: 500;
+        backdrop-filter: blur(4px);
+      }
+      .clip-float .play {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .clip-float .play span {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+        border-radius: 9999px;
+        background: rgba(18, 18, 18, 0.6);
+        color: var(--foreground);
+        backdrop-filter: blur(4px);
+      }
+
+      /* Stats */
+      .stats {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        max-width: 28rem;
+        border-top: 1px solid var(--border);
+        padding-top: 1.5rem;
+        margin: 0;
+      }
+      .stat {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+      .stat dd {
+        font-family: "Space Grotesk", sans-serif;
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--primary);
+        margin: 0;
+      }
+      .stat dt {
+        font-size: 0.75rem;
+        color: var(--muted-foreground);
+      }
+
+      /* ===== Animations ===== */
+      @keyframes float-bob {
+        0%,
+        100% {
+          transform: translateY(0);
+        }
+        50% {
+          transform: translateY(-10px);
+        }
+      }
+      @keyframes fade-in-up {
+        from {
+          opacity: 0;
+          transform: translateY(16px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      @keyframes glow-pulse {
+        0%,
+        100% {
+          opacity: 0.7;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1.08);
+        }
+      }
+
+      .glow-1 {
+        animation: glow-pulse 6s ease-in-out infinite;
+      }
+      .glow-2 {
+        animation: glow-pulse 6s ease-in-out infinite 3s;
+      }
+
+      .hero-badge {
+        animation: fade-in-up 0.7s ease-out both;
+      }
+      .hero-title {
+        animation: fade-in-up 0.7s ease-out 0.1s both;
+      }
+      .clips-stage {
+        animation: fade-in-up 0.7s ease-out 0.25s both;
+      }
+      .stats {
+        animation: fade-in-up 0.7s ease-out 0.4s both;
+      }
+      .auth-card {
+        animation: fade-in-up 0.7s ease-out 0.2s both;
+      }
+
+      .clip-float .thumb {
+        animation: float-bob 5s ease-in-out infinite;
+      }
+      .clip-float-2 .thumb {
+        animation-delay: 0.8s;
+      }
+      .clip-float-3 .thumb {
+        animation-delay: 1.6s;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .glow-1,
+        .glow-2,
+        .hero-badge,
+        .hero-title,
+        .clips-stage,
+        .stats,
+        .auth-card,
+        .clip-float .thumb {
+          animation: none;
+        }
+      }
+
+      .brand {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 0.625rem;
+        text-decoration: none;
+        color: var(--foreground);
+        width: fit-content;
+      }
+      .brand-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 2.25rem;
+        height: 2.25rem;
+        border-radius: var(--radius-xl);
+        background: var(--primary);
+        color: var(--primary-foreground);
+      }
+      .brand-name {
+        font-family: "Space Grotesk", sans-serif;
+        font-size: 1.25rem;
+        font-weight: 700;
+      }
+
+      .hero-content {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+      }
+      .hero-title {
+        font-family: "Space Grotesk", sans-serif;
+        font-size: 2.25rem;
+        font-weight: 700;
+        line-height: 1.15;
+        text-wrap: balance;
+      }
+      @media (min-width: 1024px) {
+        .hero-title {
+          font-size: 3rem;
+        }
+      }
+      .hero-title .accent {
+        color: var(--primary);
+        font-style: italic;
+      }
+      .hero-desc {
+        max-width: 28rem;
+        font-size: 1rem;
+        line-height: 1.6;
+        color: var(--muted-foreground);
+        text-wrap: pretty;
+      }
+      .highlights {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 0.875rem;
+      }
+      .highlights li {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        font-size: 0.875rem;
+      }
+      .hl-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        width: 2rem;
+        height: 2rem;
+        border-radius: 0.5rem;
+        border: 1px solid rgba(245, 158, 11, 0.3);
+        background: rgba(245, 158, 11, 0.1);
+        color: var(--primary);
+      }
+      .hero-footer {
+        position: relative;
+        font-size: 0.75rem;
+        color: var(--muted-foreground);
+      }
+
+      /* ===== Auth section ===== */
+      .auth-section {
+        display: flex;
+        flex: 1;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+      }
+      @media (min-width: 1024px) {
+        .auth-section {
+          padding: 3.5rem;
+        }
+      }
+
+      .auth-card {
+        display: flex;
+        width: 100%;
+        max-width: 28rem;
+        flex-direction: column;
+        gap: 1.5rem;
+        border-radius: var(--radius-2xl);
+        border: 1px solid var(--border);
+        background: var(--card);
+        padding: 2rem;
+      }
+      .auth-head {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .auth-title {
+        font-family: "Space Grotesk", sans-serif;
+        font-size: 1.5rem;
+        font-weight: 700;
+      }
+      .auth-sub {
+        font-size: 0.875rem;
+        line-height: 1.6;
+        color: var(--muted-foreground);
+      }
+
+      .tabs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.25rem;
+        border-radius: var(--radius-xl);
+        border: 1px solid var(--border);
+        background: var(--secondary);
+        padding: 0.25rem;
+      }
+      .tab {
+        height: 2.5rem;
+        border: none;
+        border-radius: 0.5rem;
+        background: transparent;
+        color: var(--muted-foreground);
+        font-family: "Inter", sans-serif;
+        font-size: 0.875rem;
+        font-weight: 700;
+        text-transform: capitalize;
+        cursor: pointer;
+        transition: color 0.15s ease;
+      }
+      .tab:hover {
+        color: var(--foreground);
+      }
+      .tab[aria-selected="true"] {
+        background: var(--primary);
+        color: var(--primary-foreground);
+      }
+
+      .auth-form {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .field label {
+        font-size: 0.875rem;
+        font-weight: 500;
+      }
+      .field input {
+        height: 2.75rem;
+        width: 100%;
+        border-radius: var(--radius-xl);
+        border: 1px solid var(--border);
+        background: var(--secondary);
+        padding: 0 1rem;
+        font-family: "Inter", sans-serif;
+        font-size: 0.875rem;
+        color: var(--foreground);
+      }
+      .field input::placeholder {
+        color: var(--muted-foreground);
+      }
+      .field input:focus {
+        outline: 2px solid var(--primary);
+        outline-offset: 0;
+        border-color: transparent;
+      }
+
+      .password-wrap {
+        position: relative;
+      }
+      .password-wrap input {
+        padding-right: 2.75rem;
+      }
+      .toggle-password {
+        position: absolute;
+        right: 0.75rem;
+        top: 50%;
+        transform: translateY(-50%);
+        display: flex;
+        border: none;
+        background: transparent;
+        color: var(--muted-foreground);
+        cursor: pointer;
+        transition: color 0.15s ease;
+        padding: 0.25rem;
+      }
+      .toggle-password:hover {
+        color: var(--foreground);
+      }
+
+      .forgot-row {
+        display: flex;
+        justify-content: flex-end;
+      }
+      .forgot {
+        border: none;
+        background: transparent;
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: var(--primary);
+        cursor: pointer;
+        transition: opacity 0.15s ease;
+        padding: 0;
+        font-family: "Inter", sans-serif;
+      }
+      .forgot:hover {
+        opacity: 0.8;
+      }
+
+      .submit-btn {
+        margin-top: 0.5rem;
+        display: flex;
+        height: 3rem;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        border: none;
+        border-radius: var(--radius-xl);
+        background: var(--primary);
+        color: var(--primary-foreground);
+        font-family: "Space Grotesk", sans-serif;
+        font-size: 1rem;
+        font-weight: 700;
+        cursor: pointer;
+        transition: opacity 0.15s ease;
+      }
+      .submit-btn:hover {
+        opacity: 0.9;
+      }
+
+      .terms {
+        text-align: center;
+        font-size: 0.75rem;
+        line-height: 1.6;
+        color: var(--muted-foreground);
+      }
+      .terms a {
+        color: var(--foreground);
+        font-weight: 500;
+        text-decoration: none;
+      }
+      .terms a:hover {
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="layout">
+      <!-- Left: hero -->
+      <section class="hero" aria-label="Tentang KlipKlop">
+        <div class="glow-1" aria-hidden="true"></div>
+        <div class="glow-2" aria-hidden="true"></div>
+        <div class="dot-grid" aria-hidden="true"></div>
+
+        <a href="index.html" class="brand">
+          <span class="brand-icon">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <circle cx="6" cy="6" r="3" />
+              <path d="M8.12 8.12 12 12" />
+              <path d="M20 4 8.12 15.88" />
+              <circle cx="6" cy="18" r="3" />
+              <path d="M14.8 14.8 20 20" />
+            </svg>
+          </span>
+          <span class="brand-name">KlipKlop</span>
+        </a>
+
+        <div class="hero-content">
+          <span class="hero-badge">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path
+                d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"
+              />
+            </svg>
+            AI Klip Generator
+          </span>
+          <h2 class="hero-title">
+            Upload videomu, biar KlipKlop cari momen
+            <span class="accent">terbaiknya.</span>
+          </h2>
+
+          <div class="clips-stage" aria-hidden="true">
+            <div class="clip-float clip-float-1">
+              <div class="thumb">
+                <img src="images/clip-vertical-1.png" alt="" />
+                <span class="score">
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path
+                      d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
+                    />
+                  </svg>
+                  90%
+                </span>
+                <span class="duration">112s</span>
+                <span class="play"
+                  ><span
+                    ><svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <polygon points="6 3 20 12 6 21 6 3" /></svg></span
+                ></span>
+              </div>
+            </div>
+            <div class="clip-float clip-float-2">
+              <div class="thumb">
+                <img src="images/clip-vertical-2.png" alt="" />
+                <span class="score">
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path
+                      d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
+                    />
+                  </svg>
+                  84%
+                </span>
+                <span class="duration">96s</span>
+                <span class="play"
+                  ><span
+                    ><svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <polygon points="6 3 20 12 6 21 6 3" /></svg></span
+                ></span>
+              </div>
+            </div>
+            <div class="clip-float clip-float-3">
+              <div class="thumb">
+                <img src="images/clip-vertical-3.png" alt="" />
+                <span class="score">
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path
+                      d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
+                    />
+                  </svg>
+                  88%
+                </span>
+                <span class="duration">78s</span>
+                <span class="play"
+                  ><span
+                    ><svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <polygon points="6 3 20 12 6 21 6 3" /></svg></span
+                ></span>
+              </div>
+            </div>
+          </div>
+
+          <dl class="stats">
+            <div class="stat">
+              <dd>12K+</dd>
+              <dt>Klip dihasilkan</dt>
+            </div>
+            <div class="stat">
+              <dd>92%</dd>
+              <dt>Skor viral tertinggi</dt>
+            </div>
+            <div class="stat">
+              <dd>3 mnt</dd>
+              <dt>Rata-rata proses</dt>
+            </div>
+          </dl>
+        </div>
+
+        <p class="hero-footer">KlipKlop Web</p>
+      </section>
+
+      <!-- Right: auth form -->
+      <section class="auth-section" aria-label="Formulir masuk dan daftar">
+        <div class="auth-card">
+          <div class="auth-head">
+            <h1 class="auth-title font-display" id="auth-title">Masuk</h1>
+            <p class="auth-sub" id="auth-sub">
+              Lanjutkan ke dashboard KlipKlop.
+            </p>
+          </div>
+
+          <div class="tabs" role="tablist" aria-label="Pilih mode autentikasi">
+            <button
+              type="button"
+              class="tab"
+              role="tab"
+              aria-selected="true"
+              data-mode="masuk"
+            >
+              Masuk
+            </button>
+            <button
+              type="button"
+              class="tab"
+              role="tab"
+              aria-selected="false"
+              data-mode="daftar"
+            >
+              Daftar
+            </button>
+          </div>
+
+          <form class="auth-form" id="auth-form">
+            <div class="field hidden" id="field-nama">
+              <label for="auth-name">Nama</label>
+              <input
+                id="auth-name"
+                type="text"
+                placeholder="Nama kamu"
+                autocomplete="name"
+              />
+            </div>
+
+            <div class="field">
+              <label for="auth-email">Email</label>
+              <input
+                id="auth-email"
+                type="email"
+                placeholder="nama@email.com"
+                autocomplete="email"
+              />
+            </div>
+
+            <div class="field">
+              <label for="auth-password">Password</label>
+              <div class="password-wrap">
+                <input
+                  id="auth-password"
+                  type="password"
+                  placeholder="Minimal 6 karakter"
+                  autocomplete="current-password"
+                />
+                <button
+                  type="button"
+                  class="toggle-password"
+                  id="toggle-password"
+                  aria-label="Tampilkan password"
+                >
+                  <svg
+                    id="icon-eye"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path
+                      d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"
+                    />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                  <svg
+                    id="icon-eye-off"
+                    class="hidden"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path
+                      d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"
+                    />
+                    <path d="M14.084 14.158a3 3 0 0 1-4.242-4.242" />
+                    <path
+                      d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"
+                    />
+                    <path d="m2 2 20 20" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="forgot-row" id="forgot-row">
+              <button type="button" class="forgot">Lupa password?</button>
+            </div>
+
+            <button type="submit" class="submit-btn" id="submit-btn">
+              <svg
+                id="icon-login"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="m10 17 5-5-5-5" />
+                <path d="M15 12H3" />
+                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+              </svg>
+              <svg
+                id="icon-userplus"
+                class="hidden"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M2 21a8 8 0 0 1 13.292-6" />
+                <circle cx="10" cy="8" r="5" />
+                <line x1="19" x2="19" y1="16" y2="22" />
+                <line x1="16" x2="22" y1="19" y2="19" />
+              </svg>
+              <span id="submit-label">Masuk</span>
+            </button>
+          </form>
+
+          <p class="terms">
+            Dengan melanjutkan, kamu menyetujui
+            <a href="#">Syarat &amp; Ketentuan</a> KlipKlop.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      (function () {
+        var mode = "masuk";
+        var tabs = document.querySelectorAll(".tab");
+        var authTitle = document.getElementById("auth-title");
+        var authSub = document.getElementById("auth-sub");
+        var fieldNama = document.getElementById("field-nama");
+        var forgotRow = document.getElementById("forgot-row");
+        var submitLabel = document.getElementById("submit-label");
+        var iconLogin = document.getElementById("icon-login");
+        var iconUserplus = document.getElementById("icon-userplus");
+        var passwordInput = document.getElementById("auth-password");
+
+        function setMode(next) {
+          mode = next;
+          tabs.forEach(function (tab) {
+            tab.setAttribute(
+              "aria-selected",
+              String(tab.dataset.mode === mode),
+            );
+          });
+          var isMasuk = mode === "masuk";
+          authTitle.textContent = isMasuk ? "Masuk" : "Buat Akun";
+          authSub.textContent = isMasuk
+            ? "Lanjutkan ke dashboard KlipKlop."
+            : "Gratis. Mulai bikin klip viral dalam hitungan menit.";
+          fieldNama.classList.toggle("hidden", isMasuk);
+          forgotRow.classList.toggle("hidden", !isMasuk);
+          submitLabel.textContent = isMasuk ? "Masuk" : "Daftar Sekarang";
+          iconLogin.classList.toggle("hidden", !isMasuk);
+          iconUserplus.classList.toggle("hidden", isMasuk);
+          passwordInput.setAttribute(
+            "autocomplete",
+            isMasuk ? "current-password" : "new-password",
+          );
+        }
+
+        tabs.forEach(function (tab) {
+          tab.addEventListener("click", function () {
+            setMode(tab.dataset.mode);
+          });
+        });
+
+        // Password visibility toggle
+        var toggleBtn = document.getElementById("toggle-password");
+        var iconEye = document.getElementById("icon-eye");
+        var iconEyeOff = document.getElementById("icon-eye-off");
+        toggleBtn.addEventListener("click", function () {
+          var isHidden = passwordInput.type === "password";
+          passwordInput.type = isHidden ? "text" : "password";
+          iconEye.classList.toggle("hidden", isHidden);
+          iconEyeOff.classList.toggle("hidden", !isHidden);
+          toggleBtn.setAttribute(
+            "aria-label",
+            isHidden ? "Sembunyikan password" : "Tampilkan password",
+          );
+        });
+
+        // Prevent default submit
+        document
+          .getElementById("auth-form")
+          .addEventListener("submit", function (e) {
+            e.preventDefault();
+          });
+      })();
+    </script>
+  </body>
+</html>
