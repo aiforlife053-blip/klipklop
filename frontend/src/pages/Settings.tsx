@@ -10,6 +10,7 @@ export default function Settings() {
   const [isSaving, setIsSaving] = useState(false);
   const [clearingProvider, setClearingProvider] = useState<ProviderName | null>(null);
   const [saveMessage, setSaveMessage] = useState('');
+  const [saveError, setSaveError] = useState(false);
   const [youtubeConnected, setYoutubeConnected] = useState(false);
   const [geminiCheckState, setGeminiCheckState] = useState<ApiCheckState>('idle');
   const [geminiCheckMessage, setGeminiCheckMessage] = useState('');
@@ -17,7 +18,7 @@ export default function Settings() {
   const [groqCheckMessage, setGroqCheckMessage] = useState('');
 
   useEffect(() => {
-    api('/api/social/youtube/oauth-status').then((res: any) => {
+    api('/api/social/status').then((res: any) => {
       setYoutubeConnected(res.connected);
     }).catch(() => {});
   }, []);
@@ -34,7 +35,8 @@ export default function Settings() {
     }));
   };
 
-  const showSaveMessage = (message: string) => {
+  const showSaveMessage = (message: string, isError = false) => {
+    setSaveError(isError);
     setSaveMessage(message);
     setTimeout(() => setSaveMessage(''), 3000);
   };
@@ -74,7 +76,7 @@ export default function Settings() {
       applySavedSettings(res.settings);
       showSaveMessage('Konfigurasi berhasil disimpan.');
     } catch {
-      showSaveMessage('Gagal menyimpan konfigurasi.');
+      showSaveMessage('Gagal menyimpan konfigurasi.', true);
     } finally {
       setIsSaving(false);
     }
@@ -144,269 +146,172 @@ export default function Settings() {
         showSaveMessage('Groq API key berhasil dihapus.');
       }
     } catch {
-      showSaveMessage('Gagal menghapus API key.');
+      showSaveMessage('Gagal menghapus API key.', true);
     } finally {
       setClearingProvider(null);
     }
   };
 
   return (
-    <div className="p-6 space-y-7 bg-muted flex-1 h-[calc(100vh-53px)] overflow-auto" style={{ backgroundImage: 'radial-gradient(rgba(0, 0, 0, 0.05) 1.5px, transparent 1.5px)', backgroundSize: '20px 20px', backgroundPosition: '10px 10px' }}>
-      <section className="bg-transparent w-full max-w-4xl mx-auto pb-12 animate-in fade-in duration-300">
-        <div className="border-b border-gray-100 pb-5 mb-6">
-          <h2 className="text-[22px] font-bold text-slate-900 tracking-tight">Konfigurasi Pengaturan</h2>
-          <p className="text-[14px] text-slate-500 mt-1">Kelola API key, model pemrosesan, dan pengaturan subtitle untuk KlipKlop.</p>
-        </div>
-        
-        <div className="grid grid-cols-1 gap-4 max-w-4xl mx-auto">
-          <div className="bg-white rounded-2xl border border-border p-6 shadow-sm space-y-5">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                <h3 className="font-bold text-slate-900 text-[15px]">Highlight Finder — Gemini</h3>
-              </div>
-              {settings.api_key_saved && (
-                <span className="shrink-0 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100">API key tersimpan</span>
-              )}
+    <main className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 py-10 min-h-[calc(100vh-53px)]">
+      <div className="flex flex-col gap-2">
+        <p className="text-sm font-medium uppercase tracking-widest text-primary">Pengaturan</p>
+        <h1 className="font-display text-3xl font-bold tracking-tight md:text-4xl">Konfigurasi Pengaturan</h1>
+        <p className="leading-relaxed text-muted">Kelola API key, model pemrosesan, dan pengaturan subtitle untuk KlipKlop.</p>
+      </div>
+
+      <form className="flex flex-col gap-6" onSubmit={(e) => { e.preventDefault(); handleSaveSettings(); }}>
+        {/* Core Engine - Gemini */}
+        <section className="flex flex-col gap-5 rounded-2xl border border-line bg-card p-6">
+          <div className="flex items-center gap-3 justify-between">
+            <div className="flex items-center gap-3">
+              <span className="flex size-9 items-center justify-center rounded-lg bg-primary/15 text-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>
+              </span>
+              <h2 className="font-display text-lg font-bold">Highlight Finder (Gemini)</h2>
             </div>
-            
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="gemini-base-url" className="block text-[13px] font-bold text-slate-700 mb-1.5">Base URL</label>
-                <input
-                  id="gemini-base-url"
-                  type="url"
-                  placeholder="https://generativelanguage.googleapis.com/v1beta/openai"
-                  value={settings.base_url}
-                  onChange={(e) => setSettings({ ...settings, base_url: e.target.value })}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-[13px] text-slate-900 bg-slate-50/50 transition-all placeholder:text-slate-500"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="gemini-api-key" className="block text-[13px] font-bold text-slate-700 mb-1.5">Gemini API Key</label>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    id="gemini-api-key"
-                    type="password"
-                    autoComplete="new-password"
-                    placeholder={settings.api_key_saved ? 'Kosongkan untuk mempertahankan key tersimpan' : 'Masukkan Gemini API key'}
-                    value={settings.api_key}
-                    onChange={(e) => setSettings({ ...settings, api_key: e.target.value })}
-                    aria-describedby={geminiCheckMessage ? 'gemini-check-result' : undefined}
-                    className="min-w-0 flex-1 px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-[13px] text-slate-900 bg-slate-50/50 transition-all font-mono placeholder:text-slate-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleCheckGemini}
-                    disabled={geminiCheckState === 'checking'}
-                    className="px-4 py-2.5 rounded-xl border border-primary/30 bg-primary/10 text-primary text-[13px] font-bold hover:bg-primary/15 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
-                  >
-                    {geminiCheckState === 'checking' ? 'Memeriksa...' : 'Check Gemini'}
-                  </button>
-                </div>
-                {geminiCheckMessage && (
-                  <p id="gemini-check-result" role={geminiCheckState === 'error' ? 'alert' : 'status'} className={`mt-2 text-[12px] font-medium ${geminiCheckState === 'ok' ? 'text-emerald-600' : 'text-red-600'}`}>
-                    {geminiCheckMessage}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label htmlFor="gemini-model" className="block text-[13px] font-bold text-slate-700 mb-1.5">Model</label>
-                <input
-                  id="gemini-model"
-                  type="text"
-                  placeholder="gemini-2.5-flash"
-                  value={settings.model}
-                  onChange={(e) => setSettings({ ...settings, model: e.target.value })}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-[13px] text-slate-900 bg-slate-50/50 transition-all placeholder:text-slate-500"
-                />
-              </div>
-
-              <div className="flex justify-end pt-1">
-                <button
-                  type="button"
-                  onClick={() => handleClearProvider('highlight_finder')}
-                  disabled={!settings.api_key_saved || clearingProvider !== null}
-                  className="px-4 py-2.5 border border-red-200 text-red-600 text-[13px] font-bold rounded-xl hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                >
-                  {clearingProvider === 'highlight_finder' ? 'Menghapus...' : 'Hapus Gemini API Key'}
-                </button>
-              </div>
-            </div>
+            {settings.api_key_saved && (
+              <span className="shrink-0 text-[11px] font-bold text-emerald-500 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">Tersimpan</span>
+            )}
           </div>
-
-          <div className="bg-white rounded-2xl border border-border p-6 shadow-sm space-y-5">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3v3m0 12v3M5.64 5.64l2.12 2.12m8.48 8.48 2.12 2.12M3 12h3m12 0h3M5.64 18.36l2.12-2.12m8.48-8.48 2.12-2.12"></path><circle cx="12" cy="12" r="3" strokeWidth="2"></circle></svg>
-                <h3 className="font-bold text-slate-900 text-[15px]">Caption Maker — Groq</h3>
-              </div>
-              {settings.caption_key_saved && (
-                <span className="shrink-0 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100">API key tersimpan</span>
-              )}
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="groq-base-url" className="block text-[13px] font-bold text-slate-700 mb-1.5">Base URL</label>
-                <input
-                  id="groq-base-url"
-                  type="url"
-                  placeholder="https://api.groq.com/openai/v1"
-                  value={settings.caption_base_url}
-                  onChange={(e) => setSettings({ ...settings, caption_base_url: e.target.value })}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-[13px] text-slate-900 bg-slate-50/50 transition-all placeholder:text-slate-500"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="groq-api-key" className="block text-[13px] font-bold text-slate-700 mb-1.5">Groq API Key</label>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    id="groq-api-key"
-                    type="password"
-                    autoComplete="new-password"
-                    placeholder={settings.caption_key_saved ? 'Kosongkan untuk mempertahankan key tersimpan' : 'Masukkan Groq API key'}
-                    value={settings.caption_api_key}
-                    onChange={(e) => setSettings({ ...settings, caption_api_key: e.target.value })}
-                    aria-describedby={groqCheckMessage ? 'groq-check-result' : undefined}
-                    className="min-w-0 flex-1 px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-[13px] text-slate-900 bg-slate-50/50 transition-all font-mono placeholder:text-slate-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleCheckGroq}
-                    disabled={groqCheckState === 'checking'}
-                    className="px-4 py-2.5 rounded-xl border border-primary/30 bg-primary/10 text-primary text-[13px] font-bold hover:bg-primary/15 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
-                  >
-                    {groqCheckState === 'checking' ? 'Memeriksa...' : 'Check Groq'}
-                  </button>
-                </div>
-                {groqCheckMessage && (
-                  <p id="groq-check-result" role={groqCheckState === 'error' ? 'alert' : 'status'} className={`mt-2 text-[12px] font-medium ${groqCheckState === 'ok' ? 'text-emerald-600' : 'text-red-600'}`}>
-                    {groqCheckMessage}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label htmlFor="groq-model" className="block text-[13px] font-bold text-slate-700 mb-1.5">Transcription Model</label>
-                <input
-                  id="groq-model"
-                  type="text"
-                  placeholder="whisper-large-v3-turbo"
-                  value={settings.caption_model}
-                  onChange={(e) => setSettings({ ...settings, caption_model: e.target.value })}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-[13px] text-slate-900 bg-slate-50/50 transition-all placeholder:text-slate-500"
-                />
-              </div>
-
-              <div className="flex justify-end pt-1">
-                <button
-                  type="button"
-                  onClick={() => handleClearProvider('caption_maker')}
-                  disabled={!settings.caption_key_saved || clearingProvider !== null}
-                  className="px-4 py-2.5 border border-red-200 text-red-600 text-[13px] font-bold rounded-xl hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                >
-                  {clearingProvider === 'caption_maker' ? 'Menghapus...' : 'Hapus Groq API Key'}
-                </button>
-              </div>
-            </div>
+          <div className="flex flex-col gap-2">
+            <label htmlFor="gemini-base-url" className="text-sm font-medium">Base URL</label>
+            <input id="gemini-base-url" type="url" placeholder="https://generativelanguage.googleapis.com/v1beta/openai"
+              value={settings.base_url} onChange={(e) => { setGeminiCheckState('idle'); setGeminiCheckMessage(''); setSettings({ ...settings, base_url: e.target.value }); }}
+              className="h-11 w-full rounded-xl border border-field bg-secondary px-4 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary" />
           </div>
-
-          {/* Storage Config */}
-          <div className="bg-white rounded-2xl border border-border p-6 shadow-sm">
-            <div className="flex items-center gap-2 mb-4">
-              <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
-              <h3 className="font-bold text-slate-900 text-[15px]">Penyimpanan</h3>
+          <div className="flex flex-col gap-2">
+            <label htmlFor="gemini-api-key" className="text-sm font-medium">API Key</label>
+            <div className="flex gap-3">
+              <input id="gemini-api-key" type="password" autoComplete="new-password"
+                placeholder={settings.api_key_saved ? 'Kosongkan untuk mempertahankan key tersimpan' : 'Gemini API key'}
+                 value={settings.api_key} onChange={(e) => { setGeminiCheckState('idle'); setGeminiCheckMessage(''); setSettings({ ...settings, api_key: e.target.value }); }}
+                className="h-11 min-w-0 flex-1 rounded-xl border border-field bg-secondary px-4 font-mono text-sm text-foreground placeholder:font-sans placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary" />
+              <button type="button" onClick={handleCheckGemini} disabled={geminiCheckState === 'checking'}
+                className="h-11 shrink-0 rounded-xl border border-primary/40 bg-primary/15 px-5 text-sm font-medium text-primary transition-colors hover:bg-primary/25 disabled:opacity-50">
+                {geminiCheckState === 'checking' ? 'Memeriksa...' : 'Check API'}
+              </button>
             </div>
-            
-            <div>
-              <div className="flex justify-between items-center mb-1.5">
-                <label className="block text-[13px] font-bold text-slate-700">Folder Output</label>
-                <span className="text-[11px] text-slate-400 font-medium bg-slate-100 px-2 py-0.5 rounded-md">Opsional</span>
-              </div>
-              <input 
-                type="text" 
-                placeholder="Contoh: /Downloads/KlipKlop-Output" 
-                value={settings.output_dir}
-                onChange={(e) => setSettings({ ...settings, output_dir: e.target.value })}
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-[13px] text-slate-900 bg-slate-50/50 transition-all placeholder:text-slate-400" 
-              />
-            </div>
+            {geminiCheckMessage && (
+              <p className={`text-xs font-medium mt-1 ${geminiCheckState === 'ok' ? 'text-emerald-500' : 'text-destructive'}`}>
+                {geminiCheckMessage}
+              </p>
+            )}
           </div>
-
-          {/* Social Auth */}
-          <div className="bg-white rounded-2xl border border-border p-6 shadow-sm space-y-5">
-            <div className="flex items-center gap-2 mb-2">
-              <svg className="w-5 h-5 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
-              <h3 className="font-bold text-slate-900 text-[15px]">Koneksi Sosial Media</h3>
-            </div>
-            
-            <p className="text-[13px] text-slate-500 mb-4">Hubungkan akun sosial media untuk mempublikasikan klip langsung dari dashboard.</p>
-            
-            <div className="space-y-3">
-              {/* YouTube */}
-              <div className="flex items-center justify-between p-4 border border-slate-100 rounded-xl bg-slate-50/50">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-red-100 text-red-600 flex items-center justify-center rounded-full">
-                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.547 12 3.547 12 3.547s-7.505 0-9.377.503A3.014 3.014 0 0 0 .501 6.186C0 8.07 0 12 0 12s0 3.93.501 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-                  </div>
-                  <div>
-                    <p className="text-[13px] font-bold text-slate-900">YouTube</p>
-                    <p className="text-[11px] text-slate-500">{youtubeConnected ? 'Tersambung (Siap untuk auto-upload)' : 'Belum tersambung'}</p>
-                  </div>
-                </div>
-                {youtubeConnected ? (
-                  <button onClick={handleDisconnectYoutube} className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-lg text-[12px] transition">
-                    Putuskan
-                  </button>
-                ) : (
-                  <button onClick={handleConnectYoutube} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-[12px] transition">
-                    Sambungkan
-                  </button>
-                )}
-              </div>
-
-              {/* TikTok */}
-              <div className="flex items-center justify-between p-4 border border-slate-100 rounded-xl bg-slate-50/50 opacity-60">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-black text-white flex items-center justify-center rounded-full">
-                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 448 512"><path d="M448,209.91a210.06,210.06,0,0,1-122.77-39.25V349.38A162.55,162.55,0,1,1,185,188.31V278.2a74.62,74.62,0,1,0,52.23,71.18V0l88,0a121.18,121.18,0,0,0,1.86,22.17h0A122.18,122.18,0,0,0,381,102.39a121.43,121.43,0,0,0,67,20.14Z"/></svg>
-                  </div>
-                  <div>
-                    <p className="text-[13px] font-bold text-slate-900">TikTok</p>
-                    <p className="text-[11px] text-slate-500">Coming soon (Segera Hadir)</p>
-                  </div>
-                </div>
-                <button disabled className="px-4 py-2 bg-slate-200 text-slate-400 font-bold rounded-lg text-[12px] cursor-not-allowed">
-                  Sambungkan
-                </button>
-              </div>
-            </div>
+          <div className="flex flex-col gap-2">
+            <label htmlFor="gemini-model" className="text-sm font-medium">Model LLM</label>
+            <input id="gemini-model" type="text" placeholder="gemini-2.5-flash"
+              value={settings.model} onChange={(e) => { setGeminiCheckState('idle'); setGeminiCheckMessage(''); setSettings({ ...settings, model: e.target.value }); }}
+              className="h-11 w-full rounded-xl border border-field bg-secondary px-4 font-mono text-sm text-foreground placeholder:font-sans placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary" />
           </div>
-        </div>
-
-        <div className="border-t border-slate-200 pt-6 mt-8 flex flex-col md:flex-row items-center justify-between gap-4">
-          <div role="status" aria-live="polite" className="text-[13px] font-medium text-emerald-600 bg-emerald-50 px-4 py-2 rounded-lg border border-emerald-100 animate-in fade-in data-[state=hidden]:animate-out data-[state=hidden]:fade-out transition-all" data-state={saveMessage ? 'visible' : 'hidden'}>
-            {saveMessage}
+          <div className="flex justify-end pt-2">
+            <button type="button" onClick={() => handleClearProvider('highlight_finder')} disabled={!settings.api_key_saved || clearingProvider !== null}
+              className="text-xs font-medium text-destructive transition-colors hover:text-destructive/80 disabled:opacity-50">
+              {clearingProvider === 'highlight_finder' ? 'Menghapus...' : 'Hapus API Key'}
+            </button>
           </div>
-          <button
-            onClick={handleSaveSettings}
-            disabled={isSaving || clearingProvider !== null}
-            type="button"
-            className="w-full md:w-auto px-6 py-2.5 bg-orange-600 text-white text-[13px] font-bold rounded-xl hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-300 transition-all shadow-sm shadow-orange-600/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            {isSaving ? (
-              <>
-                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                Menyimpan...
-              </>
-            ) : 'Simpan Pengaturan'}
+        </section>
+
+        {/* Core Engine - Groq */}
+        <section className="flex flex-col gap-5 rounded-2xl border border-line bg-card p-6">
+          <div className="flex items-center gap-3 justify-between">
+            <div className="flex items-center gap-3">
+              <span className="flex size-9 items-center justify-center rounded-lg bg-primary/15 text-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v3m0 12v3M5.64 5.64l2.12 2.12m8.48 8.48 2.12 2.12M3 12h3m12 0h3M5.64 18.36l2.12-2.12m8.48-8.48 2.12-2.12"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              </span>
+              <h2 className="font-display text-lg font-bold">Caption Maker (Groq)</h2>
+            </div>
+            {settings.caption_key_saved && (
+              <span className="shrink-0 text-[11px] font-bold text-emerald-500 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">Tersimpan</span>
+            )}
+          </div>
+          <div className="flex flex-col gap-2">
+            <label htmlFor="groq-base-url" className="text-sm font-medium">Base URL</label>
+            <input id="groq-base-url" type="url" placeholder="https://api.groq.com/openai/v1"
+              value={settings.caption_base_url} onChange={(e) => { setGroqCheckState('idle'); setGroqCheckMessage(''); setSettings({ ...settings, caption_base_url: e.target.value }); }}
+              className="h-11 w-full rounded-xl border border-field bg-secondary px-4 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary" />
+          </div>
+          <div className="flex flex-col gap-2">
+            <label htmlFor="groq-api-key" className="text-sm font-medium">API Key</label>
+            <div className="flex gap-3">
+              <input id="groq-api-key" type="password" autoComplete="new-password"
+                placeholder={settings.caption_key_saved ? 'Kosongkan untuk mempertahankan key tersimpan' : 'Groq API key'}
+                 value={settings.caption_api_key} onChange={(e) => { setGroqCheckState('idle'); setGroqCheckMessage(''); setSettings({ ...settings, caption_api_key: e.target.value }); }}
+                className="h-11 min-w-0 flex-1 rounded-xl border border-field bg-secondary px-4 font-mono text-sm text-foreground placeholder:font-sans placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary" />
+              <button type="button" onClick={handleCheckGroq} disabled={groqCheckState === 'checking'}
+                className="h-11 shrink-0 rounded-xl border border-primary/40 bg-primary/15 px-5 text-sm font-medium text-primary transition-colors hover:bg-primary/25 disabled:opacity-50">
+                {groqCheckState === 'checking' ? 'Memeriksa...' : 'Check API'}
+              </button>
+            </div>
+            {groqCheckMessage && (
+              <p className={`text-xs font-medium mt-1 ${groqCheckState === 'ok' ? 'text-emerald-500' : 'text-destructive'}`}>
+                {groqCheckMessage}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-col gap-2">
+            <label htmlFor="groq-model" className="text-sm font-medium">Transcription Model</label>
+            <input id="groq-model" type="text" placeholder="whisper-large-v3-turbo"
+              value={settings.caption_model} onChange={(e) => { setGroqCheckState('idle'); setGroqCheckMessage(''); setSettings({ ...settings, caption_model: e.target.value }); }}
+              className="h-11 w-full rounded-xl border border-field bg-secondary px-4 font-mono text-sm text-foreground placeholder:font-sans placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary" />
+          </div>
+          <div className="flex justify-end pt-2">
+            <button type="button" onClick={() => handleClearProvider('caption_maker')} disabled={!settings.caption_key_saved || clearingProvider !== null}
+              className="text-xs font-medium text-destructive transition-colors hover:text-destructive/80 disabled:opacity-50">
+              {clearingProvider === 'caption_maker' ? 'Menghapus...' : 'Hapus API Key'}
+            </button>
+          </div>
+        </section>
+
+        {/* Penyimpanan */}
+        <section className="flex flex-col gap-5 rounded-2xl border border-line bg-card p-6">
+          <div className="flex items-center gap-3">
+            <span className="flex size-9 items-center justify-center rounded-lg bg-primary/15 text-primary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>
+            </span>
+            <h2 className="font-display text-lg font-bold">Penyimpanan</h2>
+          </div>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <label htmlFor="output-folder" className="text-sm font-medium">Folder Output</label>
+              <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs text-muted">Opsional</span>
+            </div>
+            <input id="output-folder" type="text" placeholder="Contoh: /Downloads/KlipKlop-Output"
+              value={settings.output_dir} onChange={(e) => setSettings({ ...settings, output_dir: e.target.value })}
+              className="h-11 w-full rounded-xl border border-field bg-secondary px-4 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary" />
+          </div>
+        </section>
+
+        {/* Koneksi Sosial Media */}
+        <section className="flex flex-col gap-5 rounded-2xl border border-line bg-card p-6">
+          <div className="flex items-center gap-3">
+            <span className="flex size-9 items-center justify-center rounded-lg bg-primary/15 text-primary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/></svg>
+            </span>
+            <h2 className="font-display text-lg font-bold">Koneksi Sosial Media</h2>
+          </div>
+          <p className="text-sm leading-relaxed text-muted">Hubungkan akun sosial media untuk mempublikasikan klip langsung dari dashboard.</p>
+          <div className="flex flex-wrap gap-3">
+            {youtubeConnected ? (
+              <button type="button" onClick={handleDisconnectYoutube} className="rounded-xl border border-destructive/40 bg-destructive/10 px-5 py-2.5 text-sm font-medium text-destructive transition-colors hover:bg-destructive/20">Putuskan YouTube</button>
+            ) : (
+              <button type="button" onClick={handleConnectYoutube} className="rounded-xl border border-line bg-secondary px-5 py-2.5 text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary">Hubungkan YouTube</button>
+            )}
+            <button type="button" disabled className="rounded-xl border border-line bg-secondary px-5 py-2.5 text-sm font-medium text-muted/50 cursor-not-allowed">Hubungkan TikTok (Segera)</button>
+            <button type="button" disabled className="rounded-xl border border-line bg-secondary px-5 py-2.5 text-sm font-medium text-muted/50 cursor-not-allowed">Hubungkan Instagram (Segera)</button>
+          </div>
+        </section>
+
+        <div className="flex items-center gap-4 mt-2">
+          <button type="submit" disabled={isSaving || clearingProvider !== null} className="flex h-12 items-center justify-center gap-2 rounded-xl bg-primary px-8 font-display text-base font-bold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/></svg>
+            {isSaving ? 'Menyimpan...' : 'Simpan Pengaturan'}
           </button>
+          {saveMessage && (
+             <span role={saveError ? 'alert' : 'status'} className={`text-sm font-medium ${saveError ? 'text-destructive' : 'text-emerald-500'}`}>{saveMessage}</span>
+           )}
         </div>
-      </section>
-    </div>
+      </form>
+    </main>
   );
 }

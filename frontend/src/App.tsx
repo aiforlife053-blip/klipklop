@@ -1,11 +1,15 @@
+import { lazy, Suspense } from 'react';
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import DashboardLayout from './components/layout/DashboardLayout';
 import Dashboard from './pages/Dashboard';
-import Gallery from './pages/Gallery';
-import Console from './pages/Console';
-import Settings from './pages/Settings';
-import Preview from './pages/Preview';
+
+const Gallery = lazy(() => import('./pages/Gallery'));
+const Console = lazy(() => import('./pages/Console'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Preview = lazy(() => import('./pages/Preview'));
+
+const deferred = (page: React.ReactNode) => <Suspense fallback={<div className="p-8 text-sm text-muted" role="status">Memuat halaman...</div>}>{page}</Suspense>;
 
 const router = createBrowserRouter([
   { path: '/login', element: <Login /> },
@@ -13,10 +17,10 @@ const router = createBrowserRouter([
     element: <DashboardLayout />,
     children: [
       { path: '/', element: <Dashboard /> },
-      { path: '/gallery', element: <Gallery /> },
-      { path: '/console', element: <Console /> },
-      { path: '/settings', element: <Settings /> },
-      { path: '/preview', element: <Preview /> },
+      { path: '/gallery', element: deferred(<Gallery />) },
+      { path: '/console', element: deferred(<Console />) },
+      { path: '/settings', element: deferred(<Settings />) },
+      { path: '/preview', element: deferred(<Preview />) },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },

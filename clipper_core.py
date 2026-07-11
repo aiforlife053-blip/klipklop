@@ -61,7 +61,6 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         credit_watermark_settings: dict = None,
         hook_style_settings: dict = None,
         face_tracking_mode: str = "center",
-        mediapipe_settings: dict = None,
         ai_providers: dict = None,
         subtitle_language: str = "id",
         video_quality: str = "720",
@@ -78,17 +77,17 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
             hf_config = self.ai_providers.get("highlight_finder", {})
             self.highlight_client = OpenAI(
                 api_key=hf_config.get("api_key", ""),
-                base_url=hf_config.get("base_url", "https://api.openai.com/v1"),
+                base_url=hf_config.get("base_url", "https://generativelanguage.googleapis.com/v1beta/openai"),
                 timeout=float(hf_config.get("timeout", 180.0) or 180.0),
             )
             self.model = hf_config.get("model", model)
             cm_config = self.ai_providers.get("caption_maker", {})
             self.caption_client = OpenAI(
                 api_key=cm_config.get("api_key"),
-                base_url=cm_config.get("base_url", "https://api.openai.com/v1"),
+                base_url=cm_config.get("base_url", "https://api.groq.com/openai/v1"),
                 timeout=600.0,
             ) if cm_config.get("api_key") else None
-            self.whisper_model = cm_config.get("model", "whisper-1")
+            self.whisper_model = cm_config.get("model", "whisper-large-v3-turbo")
             tts_config = self.ai_providers.get("hook_maker", {})
             self.tts_client = None
             self.tts_api_key = ""
@@ -117,12 +116,6 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         self.video_info = {}
         self.channel_name = ""
         self.face_tracking_mode = face_tracking_mode
-        self.mediapipe_settings = mediapipe_settings or {
-            "lip_activity_threshold": 0.15,
-            "switch_threshold": 0.3,
-            "min_shot_duration": 90,
-            "center_weight": 0.3,
-        }
         self.subtitle_language = subtitle_language or "id"
         self.video_quality = str(video_quality or "720")
         self.landscape_blur = bool(landscape_blur)
@@ -154,8 +147,6 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         self.is_cancelled = cancel_check or (lambda: False)
         self.gpu_enabled = False
         self.gpu_encoder_args = []
-        self.mp_face_mesh = None
-        self.mp_drawing = None
         self.temp_dir = self.output_dir / "_temp"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.cache_dir = Path(os.environ.get("KLIPKLOP_CACHE_DIR") or self.output_dir.parent / "cache")

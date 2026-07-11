@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { api } from '@/lib/api';
-import { ConfirmModal } from '@/components/ui/ConfirmModal';
 
 export default function Dashboard() {
   const { status: globalStatus, settings } = useOutletContext<any>();
@@ -10,9 +9,7 @@ export default function Dashboard() {
   const [videoQuality, setVideoQuality] = useState('720');
   const [numClips, setNumClips] = useState(1);
   const [landscapeBlur, setLandscapeBlur] = useState(true);
-  const [showJsonModal, setShowJsonModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState<any>(null);
-  const [showInstructionModal, setShowInstructionModal] = useState(false);
   const [instruction, setInstruction] = useState('');
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   const [deleteConfirm, setDeleteConfirm] = useState<any>(null);
@@ -51,13 +48,12 @@ export default function Dashboard() {
   };
   const [toastMessage, setToastMessage] = useState('');
 
-  // Kata gaul random
   const loadingPhrases = [
-    "Sabar, biarkan AI memasak 🔥",
-    "Mencari momen paling FYP 🚀",
-    "Bikin klip yang bikin fyp meledak 💥",
-    "Meracik visual biar makin estetik 🎨",
-    "Tunggu bentar, lagi ngopi subtitle ☕",
+    'Sabar, biarkan AI memasak 🔥',
+    'Mencari momen paling FYP 🚀',
+    'Bikin klip yang bikin fyp meledak 💥',
+    'Meracik visual biar makin estetik 🎨',
+    'Tunggu bentar, lagi ngopi subtitle ☕',
   ];
   const [loadingPhraseIdx, setLoadingPhraseIdx] = useState(0);
 
@@ -71,8 +67,7 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [isProcessing, globalStatus?.status]);
 
-  // Real state
-  const [jobStatus, setJobStatus] = useState<any>(null);
+  const [, setJobStatus] = useState<any>(null);
   const [clips, setClips] = useState<any[]>([]);
   const [error, setError] = useState('');
   const [videoMeta, setVideoMeta] = useState<{title?: string, author_name?: string, thumbnail_url?: string} | null>(() => {
@@ -84,7 +79,6 @@ export default function Dashboard() {
   });
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Helper: Extract YouTube ID
   const getYoutubeId = (url: string) => {
     const match = url.match(/^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/);
     return (match && match[2].length === 11) ? match[2] : null;
@@ -98,15 +92,14 @@ export default function Dashboard() {
       const cachedVideoId = sessionStorage.getItem('klipklop.videoId');
       if (cachedVideoId && cachedVideoId !== vidId) setVideoMeta(null);
       fetch(`/api/meta?url=${encodeURIComponent('https://www.youtube.com/watch?v=' + vidId)}`)
-        .then(res => res.ok ? res.json() : null)
+        .then(r => r.json())
         .then(data => {
-          if (data && data.title) {
+          if (!data.error) {
             setVideoMeta(data);
             sessionStorage.setItem('klipklop.videoMeta', JSON.stringify(data));
             sessionStorage.setItem('klipklop.videoId', vidId);
           }
-        })
-        .catch(() => {});
+        }).catch(e => console.error(e));
     } else {
       setVideoMeta(null);
       sessionStorage.removeItem('klipklop.videoMeta');
@@ -114,31 +107,22 @@ export default function Dashboard() {
     }
   }, [youtubeUrl]);
 
-
-  // Derive current status string
-  const currentStatus = jobStatus?.status || globalStatus?.status || 'idle';
-  const currentProgress = jobStatus?.progress ?? 0;
+  const fetchOutputs = useCallback(async () => {
+    try {
+      const data = await api('/api/outputs');
+      const outputClips = (data?.groups || []).flatMap((group: any) =>
+        (group.clips || group.files || []).map((clip: any) => ({ ...clip, groupPath: group.path }))
+      );
+      setClips(outputClips);
+    } catch (e) {
+      console.error('Fetch outputs failed', e);
+    }
+  }, []);
 
   const stopPolling = useCallback(() => {
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
       pollingRef.current = null;
-    }
-  }, []);
-
-  const fetchOutputs = useCallback(async () => {
-    try {
-      const data = await api('/api/outputs');
-      const allClips: any[] = [];
-      (data.groups || []).forEach((group: any) => {
-        if (group.saved) return;
-        (group.clips || group.files || []).forEach((clip: any) => {
-          allClips.push({ ...clip, groupPath: group.path, saved: group.saved });
-        });
-      });
-      setClips(allClips);
-    } catch (e) {
-      console.error('Failed to fetch outputs', e);
     }
   }, []);
 
@@ -163,7 +147,6 @@ export default function Dashboard() {
     }, 1500);
   }, [stopPolling, fetchOutputs]);
 
-  // On mount: check current status and fetch any existing outputs
   useEffect(() => {
     const init = async () => {
       try {
@@ -184,14 +167,12 @@ export default function Dashboard() {
     return () => stopPolling();
   }, [fetchOutputs, startPolling, stopPolling]);
 
-
-
-  const handleProcessClip = async () => {
+  const handleProcessClip = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!youtubeUrl.trim()) {
       alert('Masukkan URL YouTube terlebih dahulu.');
       return;
     }
-    setError('');
     setError('');
     setClips([]);
     setIsProcessing(true);
@@ -212,9 +193,7 @@ export default function Dashboard() {
     }
   };
 
-  const handleStop = () => {
-    setStopConfirm(true);
-  };
+  const handleStop = () => setStopConfirm(true);
 
   const confirmStop = async () => {
     setStopConfirm(false);
@@ -230,24 +209,17 @@ export default function Dashboard() {
 
   const handleSave = async (clip: any) => {
     setIsSaving(true);
-    console.log('[Dashboard] Menyimpan klip ke galeri:', clip);
     try {
       await api('/api/save', {
         method: 'POST',
         body: JSON.stringify({ path: clip.groupPath, clips: [clip.path] }),
       });
-      console.log('[Dashboard] Berhasil menyimpan klip:', clip.path);
-
-      // Delay sedikit agar user merasa ini berproses (tidak terlalu instan/patah)
       await new Promise(r => setTimeout(r, 600));
-
       setToastMessage('Klip berhasil disimpan ke Galeri! 🎉');
       setTimeout(() => setToastMessage(''), 3000);
-
       setShowDetailModal(null);
       setClips(prev => prev.filter(c => c.path !== clip.path));
     } catch (e: any) {
-      console.error('[Dashboard] Gagal menyimpan klip:', e);
       alert('Gagal menyimpan: ' + (e.message || ''));
     } finally {
       setIsSaving(false);
@@ -298,442 +270,296 @@ export default function Dashboard() {
     }
   };
 
-  // Helper: format duration display
   const fmtDuration = (clip: any) => {
     if (clip.duration) return clip.duration;
     if (clip.duration_seconds != null) return `${Math.round(clip.duration_seconds)}s`;
-    return '';
+    return "";
   };
 
-  // Helper: format score display
   const fmtScore = (clip: any) => {
     if (clip.score) return clip.score;
     if (clip.virality_score != null) return `${Math.min(100, Math.round(clip.virality_score * 10))}%`;
-    return '';
+    return "";
   };
 
-  // Helper: get thumbnail img src
   const fmtImg = (clip: any) => {
-    return clip.img || '';
+    return clip.img || "";
   };
+
+  const [showDirections, setShowDirections] = useState(false);
 
   return (
-    <div className="flex flex-row flex-1 items-stretch h-[calc(100vh-53px)] overflow-hidden">
-      <section className="relative order-2 w-[65%] flex-none bg-muted border-l border-border p-6 h-full overflow-y-auto" style={{ backgroundImage: 'radial-gradient(rgba(0, 0, 0, 0.05) 1.5px, transparent 1.5px)', backgroundSize: '20px 20px', backgroundPosition: '10px 10px' }}>
-        <button
-          type="button"
-          onClick={() => setShowJsonModal(true)}
-          className="absolute top-4 right-4 border border-border px-3.5 py-2 rounded-xl text-[12px] font-semibold text-slate-700 hover:bg-white bg-white/50 backdrop-blur-sm transition shadow-sm z-10"
-        >
-          JSON Payload
-        </button>
-
-        <div className="w-full max-w-5xl mx-auto flex flex-col min-h-[calc(100vh-140px)] pb-4">
-          <div className="text-center mb-6">
-            <h3 className="text-[18px] font-bold text-slate-900 tracking-tight">Hasil Generasi Klip</h3>
-            <p className="text-[12px] text-slate-500 mt-0.5">
-              {currentStatus === 'idle' && clips.length === 0 && 'Masukkan URL YouTube lalu klik Proses Klip.'}
-              {currentStatus === 'error' && `Error: ${error}`}
-              {currentStatus === 'idle' && clips.length > 0 && 'Klip siap. Simpan atau hapus sebelum proses baru.'}
-            </p>
-          </div>
-
-          {/* Loading state — thumbnail kiri, progress kanan */}
-          {(currentStatus === 'running' || currentStatus === 'stopping' || (currentStatus === 'complete' && clips.length > 0) || (currentStatus === 'idle' && clips.length > 0)) && (() => {
-            const isComplete = currentStatus === 'complete' || (currentStatus === 'idle' && clips.length > 0);
-            const displayProgress = isComplete ? 1 : currentProgress;
-            return (
-              <div className="w-full bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-4">
-                <div className="flex items-stretch gap-0 min-h-[160px]">
-                  {/* Thumbnail */}
-                  <div className="relative w-[200px] shrink-0 bg-slate-900">
-                    {getYoutubeId(youtubeUrl) ? (
-                      <img
-                        src={videoMeta?.thumbnail_url || `https://i.ytimg.com/vi/${getYoutubeId(youtubeUrl)}/maxresdefault.jpg`}
-                        alt="Thumbnail"
-                        className="w-full h-full object-cover opacity-90"
-                      />
-                    ) : (
-                      <div className="w-full h-full min-h-[80px] flex items-center justify-center">
-                        <svg className="w-8 h-8 text-slate-600 opacity-30" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                      </div>
-                    )}
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                      <div className="w-8 h-8 rounded-full bg-red-600/90 flex items-center justify-center shadow-lg">
-                        <svg className="w-3.5 h-3.5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Info + progress */}
-                  <div className="flex-1 p-5 flex flex-col justify-between min-w-0">
-                    <div className="min-w-0">
-                      <h4 className="font-bold text-[15px] leading-snug line-clamp-2 text-slate-900">{videoMeta?.title || 'YouTube Video'}</h4>
-                      <p className="text-[12px] text-slate-500 mt-1 line-clamp-1">{videoMeta?.author_name || 'YouTube Channel'}</p>
-                    </div>
-
-                    {/* Progress bar */}
-                    <div className="mt-6 pt-2 border-t border-slate-100">
-                      <div className="flex items-center justify-between mb-2">
-                        <p className={`text-[13px] font-bold truncate mr-2 ${
-                          isComplete
-                            ? 'text-emerald-600'
-                            : currentStatus === 'stopping'
-                            ? 'text-slate-800'
-                            : 'bg-gradient-to-r from-slate-800 via-orange-500 to-slate-800 bg-[length:200%_auto] animate-[shimmer_2s_linear_infinite] bg-clip-text text-transparent'
-                        }`}>
-                          {isComplete ? `🎉 ${clips.length} klip berhasil dibuat!` : currentStatus === 'stopping' ? '⏹ Menghentikan...' : loadingPhrases[loadingPhraseIdx]}
-                        </p>
-                        <span className="text-[14px] font-black text-slate-700 tabular-nums shrink-0">
-                          {Math.round(displayProgress * 100)}<span className="text-orange-500">%</span>
-                        </span>
-                      </div>
-                      <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all duration-500 ${isComplete ? 'bg-emerald-500' : 'bg-orange-500'}`}
-                          style={{ width: `${Math.round(displayProgress * 100)}%` }}
-                        />
-                      </div>
+    <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 py-10">
+      <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+        <form onSubmit={handleProcessClip} className="flex flex-col justify-center gap-6 rounded-2xl border border-dashed border-line bg-card p-8 lg:p-10">
+         
+            <h1 className="font-display text-3xl font-bold leading-tight tracking-tight md:text-[2.75rem] md:leading-[1.15]">
+             Satu video panjang, disulap jadi puluhan klip viral.
+           </h1>
+           <p className="max-w-xl text-[0.9375rem] leading-relaxed text-muted">Tempel link YouTube. AI mencari hook, memotong klip, dan menambahkan caption.</p>
 
 
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Clips grid — muncul di bawah loading saat proses & setelah selesai */}
-          {clips.length > 0 && (
-            <div className={`grid gap-4 mt-2 ${
-              clips.length === 1 ? 'grid-cols-1 max-w-[260px] mx-auto' :
-              clips.length === 2 ? 'grid-cols-2 max-w-[540px] mx-auto' :
-              clips.length === 3 ? 'grid-cols-3 max-w-[800px] mx-auto' :
-              clips.length === 4 ? 'grid-cols-2 md:grid-cols-4 max-w-[1060px] mx-auto' :
-              'grid-cols-2 md:grid-cols-3 lg:grid-cols-5'
-            }`}>
-              {clips.map((clip, idx) => {
-                const clipId = clip.path;
-                const img = fmtImg(clip);
-                const duration = fmtDuration(clip);
-                const score = fmtScore(clip);
-                return (
-                  <div key={clipId || idx} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-col group hover:shadow-md transition relative">
-                    <div className="relative w-full aspect-square bg-slate-900 rounded-xl overflow-hidden shadow-inner group">
-                      {img ? (
-                        <img src={img} alt="Thumbnail" className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition-transform duration-500" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-slate-600">
-                          <svg className="w-10 h-10 opacity-30" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                        </div>
-                      )}
-                      {duration && (
-                        <div className="absolute top-1.5 right-1.5 bg-black/50 px-1.5 py-0.5 rounded text-[9px] font-medium text-white/90 border border-white/10">{duration}</div>
-                      )}
-                      {score && (
-                        <div className="absolute top-1.5 left-1.5 bg-orange-500/90 backdrop-blur text-white px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm flex items-center gap-1 border border-orange-400/50">
-                          <span className="text-[12px] leading-none">🔥</span> {score}
-                        </div>
-                      )}
-                      {uploadProgress[clipId] === 100 && (
-                        <div className="absolute bottom-1.5 left-1.5 bg-emerald-500/90 backdrop-blur text-white px-2 py-0.5 rounded text-[10px] font-bold shadow-sm flex items-center gap-1 border border-emerald-400/50 z-10">
-                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
-                          Uploaded
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="mt-3 text-left flex-1 flex flex-col">
-                      <h4 className="font-bold text-[13px] leading-snug line-clamp-2 text-slate-900">{clip.title || clip.name}</h4>
-                      {clip.description && (
-                        <p className="text-[11px] text-slate-500 line-clamp-2 mt-1.5">{clip.description}</p>
-                      )}
-                    </div>
-
-                    <button
-                      onClick={() => setShowDetailModal(clip)}
-                      className="w-full mt-3 py-2 border border-slate-200 rounded-lg text-[12px] font-semibold text-slate-700 hover:bg-slate-50 transition"
-                    >
-                      Lihat detail
-                    </button>
-
-                    {uploadProgress[clipId] !== undefined && uploadProgress[clipId] < 100 && (
-                      <div className="absolute bottom-0 left-0 w-full h-1.5 bg-slate-100 rounded-b-2xl overflow-hidden">
-                        <div
-                          className="h-full bg-blue-500 transition-all duration-200"
-                          style={{ width: `${uploadProgress[clipId]}%` }}
-                        />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Empty state */}
-          {clips.length === 0 && (currentStatus === 'idle' || currentStatus === 'complete') && (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-3 -mt-10">
-              <svg className="w-20 h-20 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/></svg>
-              <p className="text-[16px] font-bold text-slate-500">Belum ada klip</p>
-              <p className="text-[13px] text-slate-400 text-center max-w-sm leading-relaxed">Masukkan URL YouTube di sebelah kiri lalu klik <strong className="font-bold">Proses Klip</strong> untuk mulai membuat video vertikal.</p>
-            </div>
-          )}
-
-          {/* Footer bantuan */}
-          <div className="mt-auto pt-8 pb-2 text-center text-[12px] font-medium text-slate-400">
-            Butuh bantuan? Silakan kirim ke <a href="mailto:bfrotok@klipklop.id" className="text-slate-500 font-semibold hover:underline">bfrotok@klipklop.id</a>
-          </div>
-        </div>
-      </section>
-
-      {/* Left Panel: Settings & Creation Form */}
-      <aside className="order-1 w-[35%] shrink-0 bg-white border-r border-border p-5 h-full overflow-auto flex flex-col gap-5">
-        <div className="space-y-5">
-          <div className="space-y-4">
-            <div>
-              <label className="block text-[12px] font-semibold text-black mb-1">Link YouTube</label>
-              <input
-                type="text"
-                placeholder="https://www.youtube.com/watch?v=..."
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="relative flex-1">
+              <svg className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/></svg>
+              <input type="url" placeholder="https://youtube.com/watch?v=..." aria-label="Link YouTube"
                 value={youtubeUrl}
                 onChange={(e) => setYoutubeUrl(e.target.value)}
-                disabled={isProcessing}
-                className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[13px] text-gray-700 bg-white disabled:opacity-50"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">Durasi optimal: 5 - 120 menit.</p>
+                className="h-12 w-full rounded-xl border border-field bg-secondary pl-10 pr-4 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary" />
             </div>
+            <button type="submit" disabled={isProcessing} className="flex h-12 items-center justify-center gap-2 rounded-xl bg-primary px-6 font-display text-base font-bold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
+              {isProcessing ? 'Memproses...' : 'Proses Klip'}
+              {!isProcessing && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>}
+            </button>
+          </div>
 
-            <div>
-              <label className="block text-[12px] font-semibold text-black mb-1.5">Kualitas Video</label>
-              <select
-                value={videoQuality}
-                onChange={(e) => setVideoQuality(e.target.value)}
-                disabled={isProcessing}
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 disabled:opacity-50"
-              >
+          {error && <p className="text-sm font-medium text-destructive">{error}</p>}
+
+          <div className="flex flex-wrap items-center gap-3 text-xs text-muted">
+            <div className="relative">
+              <label className="sr-only" htmlFor="quality">Kualitas Video</label>
+              <select id="quality" value={videoQuality} onChange={(e) => setVideoQuality(e.target.value)} className="h-9 appearance-none rounded-full border border-field bg-secondary pl-3.5 pr-8 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary">
                 <option value="480">480p</option>
                 <option value="720">720p</option>
-                <option value="1080">1080p (FHD)</option>
-                <option value="1440">1440p (2K)</option>
-                <option value="2160">2160p (4K)</option>
+                <option value="1080">1080p</option>
               </select>
+              <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
             </div>
-
-            <div>
-              <label className="block text-[12px] font-semibold text-black mb-1.5">Jumlah Klip</label>
-              <select
-                value={numClips}
-                onChange={(e) => setNumClips(Number(e.target.value))}
-                disabled={isProcessing}
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[13px] text-gray-700 bg-white disabled:opacity-50"
-              >
-                <option value={1}>1</option>
-                <option value={3}>3</option>
-                <option value={5}>5</option>
+            <div className="relative">
+              <label className="sr-only" htmlFor="clip-count">Jumlah Klip</label>
+              <select id="clip-count" value={numClips} onChange={(e) => setNumClips(Number(e.target.value))} className="h-9 appearance-none rounded-full border border-field bg-secondary pl-3.5 pr-8 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary">
+                <option value={1}>1 klip</option>
+                <option value={3}>3 klip</option>
+                <option value={5}>5 klip</option>
               </select>
-              <p className="text-[11px] text-gray-400 mt-1">Berapa klip viral yang ingin dihasilkan dari video ini.</p>
+              <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
             </div>
-
-            {/*<div>
-              <label className="block text-[12px] font-semibold text-black mb-1.5">Background</label>
-              <div className="border border-gray-200 rounded-xl p-2.5 flex items-center justify-between bg-white">
-                <div>
-                  <span className="text-[13px] font-semibold text-gray-800 block">Blur Bergerak</span>
-                  <span className="text-[10px] text-gray-400 block">Video horizontal di tengah 9:16</span>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" className="sr-only peer" checked={landscapeBlur} onChange={() => setLandscapeBlur(!landscapeBlur)} disabled={isProcessing} />
-                  <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
-                </label>
-              </div>
-            </div>*/}
-          </div>
-
-          <div className="flex items-center">
-            <button
-              type="button"
-              onClick={() => setShowInstructionModal(true)}
-              className="text-[12px] text-primary font-semibold hover:text-orange-700 flex items-center space-x-1.5 transition"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-              </svg>
-              <span>Tambah Arahan (Opsional)</span>
+            <button type="button" onClick={() => setShowDirections(!showDirections)} className="inline-flex items-center gap-1.5 self-center text-xs font-medium text-primary transition-opacity hover:opacity-80">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"/></svg>
+              Tambah Arahan
             </button>
-          </div>
-        </div>
-
-        <div className="pt-4 border-t border-gray-200/60 mt-auto">
-          {error && (
-            <div className="mb-3 text-[12px] text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
-              {error}
+            <div className="ml-auto flex items-center gap-2">
+              <span className={`size-2 rounded-full ${isProcessing ? 'bg-primary animate-pulse' : 'bg-muted/40'}`} aria-hidden="true"></span>
+              <span>Status: {isProcessing ? 'Memproses...' : 'Idle'}</span>
             </div>
+          </div>
+          {showDirections && (
+            <textarea rows={3} placeholder="Contoh: fokus pada momen lucu, sertakan hook di 3 detik pertama..."
+              value={instruction} onChange={e => setInstruction(e.target.value)}
+              className="w-full rounded-xl border border-field bg-secondary px-4 py-3 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary"></textarea>
           )}
-          <div className="flex gap-2 mb-3">
-            <button
-              className="flex-1 bg-primary hover:bg-orange-700 text-white font-semibold py-2.5 rounded-xl text-[14px] transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              onClick={handleProcessClip}
-              disabled={isProcessing}
-            >
-              {isProcessing ? (
-                <span className="flex items-center justify-center gap-2">
-                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                  Memproses...
+        </form>
+
+        <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-line bg-card text-left">
+          <div className="relative min-h-[240px] flex-1 overflow-hidden bg-secondary">
+            {videoMeta?.thumbnail_url ? (
+              <>
+                <img src={videoMeta.thumbnail_url} alt="Thumbnail" className="absolute inset-0 size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]" />
+                <span className="absolute inset-0 z-[2] flex items-center justify-center" aria-hidden="true">
+                  <span className="flex size-14 items-center justify-center rounded-full bg-foreground/90 text-background backdrop-blur transition-transform duration-200 group-hover:scale-110">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" className="ml-0.5"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+                  </span>
                 </span>
-              ) : 'Proses Klip'}
-            </button>
-            {isProcessing && (
-              <button
-                className="flex-none bg-red-500 hover:bg-red-600 text-white p-2.5 rounded-xl transition shadow-sm flex items-center justify-center group"
-                title="Berhenti"
-                onClick={handleStop}
-              >
-                <svg className="w-5 h-5 group-hover:scale-110 transition-transform" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
-              </button>
+              </>
+            ) : (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-muted/30 pb-8">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect width="15" height="14" x="1" y="5" rx="2" ry="2"/></svg>
+              </div>
             )}
+            <div className="absolute inset-0 bg-gradient-to-t from-card to-transparent" style={{ background: 'linear-gradient(to top, #1c1d22, transparent 55%)' }} aria-hidden="true"></div>
           </div>
-          <div className="text-[12px] text-gray-500 mt-2">
-            Status: {currentStatus === 'running' ? `Berjalan (${Math.round(currentProgress * 100)}%)` : currentStatus === 'complete' ? 'Selesai' : currentStatus === 'error' ? 'Error' : currentStatus === 'stopping' ? 'Menghentikan...' : 'Idle'}
+          <div className="relative z-[2] -mt-10 flex flex-col gap-1.5 p-5">
+            
+            <p className="font-display text-xl font-bold tracking-tight line-clamp-1">{videoMeta?.title || 'Belum ada riwayat'}</p>
+            <div className="flex flex-wrap items-center gap-1.5 text-[0.8125rem] text-muted">
+              <span>{clips.length} klip dihasilkan</span>
+            </div>
           </div>
         </div>
-      </aside>
+      </div>
 
-      {/* JSON Payload Modal */}
-      {showJsonModal && createPortal(
-        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4" onClick={() => setShowJsonModal(false)}>
-          <div className="bg-white rounded-xl w-full max-w-2xl overflow-hidden shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-gray-100 p-4">
-              <h2 className="text-[16px] font-bold text-slate-900">API Payload Configuration</h2>
-              <button onClick={() => setShowJsonModal(false)} className="w-8 h-8 flex items-center justify-center rounded-full border border-slate-200 text-slate-400 hover:text-slate-900 hover:bg-slate-50 transition-colors">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-              </button>
+      {isProcessing && (
+        <section className="flex flex-col gap-6 rounded-2xl border border-line bg-card p-6" aria-label="Proses AI sedang berjalan">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex flex-col gap-1">
+              <h2 className="font-display text-[1.0625rem] font-bold">AI sedang memproses "{videoMeta?.title || youtubeUrl}"</h2>
+              <p className="text-[0.8125rem] text-muted">{loadingPhrases[loadingPhraseIdx]}</p>
             </div>
-            <div className="p-4 bg-slate-900 overflow-auto max-h-[60vh] text-left">
-              <pre className="text-[12px] text-emerald-400 font-mono whitespace-pre-wrap">
-                {JSON.stringify(buildStartPayload(), null, 2)}
-              </pre>
-            </div>
+            <span className="inline-flex items-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-4 py-1.5 text-xs font-bold text-primary">
+              <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+              Memproses
+            </span>
+            <button onClick={handleStop} className="rounded-full border border-destructive/40 bg-destructive/10 px-4 py-1.5 text-xs font-bold text-destructive">Batal</button>
           </div>
-        </div>,
-        document.body
+          <div className="grid gap-4 min-[900px]:grid-cols-4 min-[900px]:gap-0">
+             <div className="relative flex items-start gap-3 min-[900px]:pr-6 min-[900px]:after:absolute min-[900px]:after:right-4 min-[900px]:after:top-5 min-[900px]:after:h-px min-[900px]:after:w-[calc(100%-4.25rem)] min-[900px]:after:bg-primary min-[900px]:after:content-['']">
+                <span className="flex size-10 flex-none items-center justify-center rounded-xl border border-primary bg-primary text-primary-foreground" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                </span>
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <p className="text-sm font-bold">Transkripsi</p>
+                  <p className="truncate text-xs text-muted">Audio diproses</p>
+                </div>
+              </div>
+              <div className="relative flex items-start gap-3 min-[900px]:pr-6 min-[900px]:after:absolute min-[900px]:after:right-4 min-[900px]:after:top-5 min-[900px]:after:h-px min-[900px]:after:w-[calc(100%-4.25rem)] min-[900px]:after:bg-line min-[900px]:after:content-['']">
+                <span className="flex size-10 flex-none items-center justify-center rounded-xl border border-primary bg-primary text-primary-foreground" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                </span>
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <p className="text-sm font-bold">Mencari Hook</p>
+                  <p className="truncate text-xs text-muted">Momen viral terdeteksi</p>
+                </div>
+              </div>
+              <div className="relative flex items-start gap-3 min-[900px]:pr-6 min-[900px]:after:absolute min-[900px]:after:right-4 min-[900px]:after:top-5 min-[900px]:after:h-px min-[900px]:after:w-[calc(100%-4.25rem)] min-[900px]:after:bg-line min-[900px]:after:content-['']">
+                <span className="flex size-10 flex-none items-center justify-center rounded-xl border border-primary bg-primary/20 text-primary animate-pulse" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/></svg>
+                </span>
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <p className="text-sm font-bold">Memotong Klip</p>
+                  <p className="truncate text-xs text-muted">reframing ke 9:16</p>
+                </div>
+              </div>
+              <div className="relative flex items-start gap-3">
+                <span className="flex size-10 flex-none items-center justify-center rounded-xl border border-line bg-secondary text-muted" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="14" x="3" y="5" rx="2" ry="2"/><path d="M7 15h4M15 15h2M7 11h2M13 11h4"/></svg>
+                </span>
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <p className="text-sm font-bold text-muted">Caption</p>
+                  <p className="truncate text-xs text-muted">Menambahkan gaya teks</p>
+                </div>
+              </div>
+          </div>
+        </section>
       )}
 
-      {/* Detail Modal */}
-      {showDetailModal && createPortal(
-        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4" onClick={() => setShowDetailModal(null)}>
-          <div className="bg-white rounded-2xl flex max-w-4xl w-full p-4 gap-6 relative shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <button onClick={() => setShowDetailModal(null)} className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full border border-slate-200 text-slate-400 hover:text-slate-900 hover:bg-slate-50 transition-colors z-10">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-            </button>
-
-            {/* Left: Video */}
-            <div className="w-[300px] shrink-0 bg-black rounded-xl overflow-hidden aspect-[9/16] relative shadow-inner">
-              <video
-                key={showDetailModal.path}
-                className="w-full h-full object-contain"
-                controls
-                preload="metadata"
-                poster={fmtImg(showDetailModal) || undefined}
-                src={`/api/stream?path=${encodeURIComponent(showDetailModal.path)}`}
-              />
+      {/* Hasil Generasi Klip Section */}
+      <div className="grid gap-6 xl:grid-cols-[1fr_320px]">
+        <section className="flex flex-col gap-6 rounded-2xl border border-line bg-card/50 p-6" aria-label="Hasil generasi klip">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="flex flex-col gap-1">
+                <h2 className="font-display text-xl font-bold tracking-tight">Hasil Generasi Klip</h2>
+                <p className="text-sm text-muted">{clips.length} klip berhasil dihasilkan dari video Anda. Klik klip untuk melihat detail.</p>
+              </div>
             </div>
 
-            {/* Right: Details */}
-            <div className="flex-1 flex flex-col py-2 pr-4">
-              <p className="text-[12px] text-slate-500 mb-1 flex items-center gap-2">
-                <span>Durasi: {fmtDuration(showDetailModal)}</span>
-                <span>&bull;</span>
-                <span>Diunduh: {showDetailModal.modified ? new Date(showDetailModal.modified).toLocaleString('id-ID', {day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute:'2-digit'}) : '-'}</span>
-              </p>
-              <h2 className="text-[20px] font-bold text-slate-900 leading-tight">{showDetailModal.title || showDetailModal.name}</h2>
-              {uploadProgress[showDetailModal.path] === 100 && (
-                <a href="#" className="inline-flex items-center gap-1.5 text-[13px] text-emerald-500 hover:text-emerald-600 font-bold mt-2 hover:underline">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
-                  Tonton di YouTube
-                </a>
-              )}
-
-              <p className="text-[12px] font-bold text-slate-700 mt-6 mb-2">Description</p>
-              <div className="border border-slate-200 rounded-xl p-4 text-[13px] text-slate-600 bg-slate-50 min-h-[120px] leading-relaxed">
-                {showDetailModal.description}
-                <br/><br/>
-                sc: @klipklop
+            {clips.length === 0 ? (
+              <div className="flex flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-line bg-secondary/50 p-12 text-center text-muted">
+                <svg className="mb-4 text-muted/50" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><circle cx="12" cy="13" r="3"/><line x1="12" x2="12" y1="13" y2="15"/></svg>
+                <p className="text-sm font-medium">Belum ada klip yang dihasilkan.</p>
+                <p className="mt-1 text-xs text-muted/70">Masukkan link YouTube untuk mulai memproses.</p>
               </div>
+            ) : (
+              <div className="grid flex-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+                {clips.map((clip, idx) => (
+                <button key={clip.path || idx} type="button" onClick={() => setShowDetailModal(clip)} className="group flex flex-col overflow-hidden rounded-2xl border border-line bg-card text-left transition-colors hover:border-primary/50">
+                  <div className="relative aspect-[9/16] overflow-hidden">
+                     {fmtImg(clip) ? <img src={fmtImg(clip)} alt="Thumbnail klip" loading="lazy" className="absolute inset-0 size-full object-cover" /> : <span className="absolute inset-0 bg-secondary" aria-hidden="true" />}
+                    <span className="absolute left-2.5 top-2.5 z-[2] flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-xs font-bold text-primary-foreground">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
+                      {fmtScore(clip)}
+                    </span>
+                    <span className="absolute right-2.5 top-2.5 z-[2] rounded-full bg-background/80 px-2.5 py-1 text-xs font-medium backdrop-blur">{fmtDuration(clip)}</span>
+                    <span className="absolute inset-0 z-[3] flex flex-col items-center justify-center gap-2.5 bg-background/60 opacity-0 transition-opacity group-hover:opacity-100">
+                      <span className="flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="ml-0.5"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+                      </span>
+                      <span className="rounded-full bg-primary px-3.5 py-1 text-xs font-bold text-primary-foreground">Lihat Detail</span>
+                    </span>
+                    {uploadProgress[clip.path] === 100 && (
+                      <span className="absolute bottom-2.5 left-2.5 z-[2] rounded-full bg-emerald-500/90 px-2.5 py-1 text-[10px] font-bold text-white backdrop-blur">Uploaded</span>
+                    )}
+                  </div>
+                  <div className="flex flex-1 flex-col gap-1.5 p-3.5">
+                    <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-primary">Klip {idx + 1} dari {clips.length}</span>
+                    <h3 className="line-clamp-2 font-display text-sm font-bold leading-snug">{clip.title || clip.name}</h3>
+                    <p className="mt-auto text-xs text-muted">Durasi: {fmtDuration(clip)}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+            )}
+            
+            {toastMessage && <p className="text-sm font-medium text-emerald-500">{toastMessage}</p>}
 
-              <div className="mt-auto flex flex-wrap items-center gap-2 pt-6">
-                <button
-                  onClick={() => handleSave(showDetailModal)}
-                  disabled={isSaving}
-                  className="bg-[#ea580c] hover:bg-[#c2410c] text-white font-semibold py-2.5 px-4 rounded-xl text-[13px] transition shadow-sm border border-[#ea580c] flex items-center gap-2 disabled:opacity-70 disabled:cursor-wait"
-                >
-                  {isSaving && (
-                    <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                    </svg>
-                  )}
+            <p className="border-t border-line pt-4 text-center text-xs text-muted">Butuh bantuan? Silakan kirim ke <a href="mailto:bfrotok@klipklop.id" className="font-medium text-primary hover:underline">bfrotok@klipklop.id</a></p>
+          </section>
+
+          <aside className={`flex flex-col gap-5 rounded-2xl border border-line bg-card p-6 xl:sticky xl:top-24 ${clips.length === 0 ? 'h-full' : 'h-fit'}`} aria-label="Analisis viralitas">
+            <div className="flex items-center gap-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f2a33c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
+              <h2 className="text-xs font-bold uppercase tracking-[0.15em] text-muted">Virality Wave</h2>
+            </div>
+            {clips.length === 0 ? (
+              <div className="flex flex-1 flex-col items-center justify-center gap-3 py-8 text-center text-muted">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted/50"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
+                <p className="text-sm font-medium">Belum ada data</p>
+                <p className="text-xs text-muted/70">Selesaikan proses untuk melihat analisis.</p>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-baseline justify-between">
+                  <p className="font-display text-5xl font-bold text-foreground">84%</p>
+                  <span className="rounded-full bg-primary/15 px-3 py-1 text-[0.6875rem] font-bold tracking-wider text-primary">EXCELLENT</span>
+                </div>
+                <div className="flex h-24 items-end gap-1.5" role="img" aria-label="Grafik gelombang viralitas dengan skor rata-rata 84 persen">
+                  {[28, 42, 35, 88, 96, 52, 46, 78, 40, 90, 58, 72, 34, 26].map((h, i) => (
+                    <span key={i} className={`flex-1 rounded-full ${h >= 70 ? 'bg-primary' : 'bg-secondary'}`} style={{ height: `${h}%` }}></span>
+                  ))}
+                </div>
+                <p className="text-sm leading-relaxed text-muted">Peak engagement terdeteksi di <strong className="font-medium text-foreground">00:45</strong> karena kontras adegan tinggi dan pattern interrupt.</p>
+                <div className="flex flex-col gap-2.5 border-t border-line pt-4">
+                  <div className="flex items-center justify-between text-sm"><span className="text-muted">Skor tertinggi</span><span className="font-bold text-primary">92%</span></div>
+                  <div className="flex items-center justify-between text-sm"><span className="text-muted">Rata-rata skor</span><span className="font-bold">84%</span></div>
+                  <div className="flex items-center justify-between text-sm"><span className="text-muted">Total durasi</span><span className="font-bold">464s</span></div>
+                </div>
+                <div className="flex items-start gap-2.5 rounded-xl border border-primary/30 bg-primary/10 p-3.5 text-primary">
+                  <svg className="mt-0.5 flex-none" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+                  <p className="text-xs leading-relaxed">Klip 1 punya potensi viral tertinggi. Unggah antara pukul <strong>18.00&ndash;21.00</strong> untuk jangkauan maksimal.</p>
+                </div>
+              </>
+            )}
+          </aside>
+        </div>
+      {/* Modals */}
+      {showDetailModal && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Detail klip">
+          <button type="button" onClick={() => setShowDetailModal(null)} className="absolute inset-0 bg-background/80" aria-label="Tutup detail klip"></button>
+          <div className="relative z-10 grid max-h-[90dvh] w-full max-w-3xl gap-6 overflow-y-auto rounded-2xl border border-line bg-card p-6 sm:grid-cols-[260px_1fr]">
+            <button type="button" onClick={() => setShowDetailModal(null)} className="absolute right-4 top-4 z-10 flex size-9 items-center justify-center rounded-full border border-line bg-secondary text-muted transition-colors hover:text-foreground" aria-label="Tutup">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+             <div className="relative mx-auto aspect-[9/16] w-full max-w-[260px] overflow-hidden rounded-xl border border-line bg-black">
+               <video className="size-full object-contain" controls preload="metadata" poster={fmtImg(showDetailModal) || undefined} src={`/api/stream?path=${encodeURIComponent(showDetailModal.path)}`} />
+               <span className="pointer-events-none absolute left-2.5 top-2.5 flex items-center gap-1.5 rounded-full bg-primary px-2.5 py-1 text-xs font-bold text-primary-foreground">
+                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
+                 <span>{fmtScore(showDetailModal)}</span>
+               </span>
+             </div>
+            <div className="flex flex-col gap-4">
+              <p className="text-sm text-muted">Durasi: {fmtDuration(showDetailModal)}</p>
+              <h2 className="pr-10 font-display text-2xl font-bold leading-snug">{showDetailModal.title || showDetailModal.name}</h2>
+              <div className="flex flex-col gap-2">
+                <h3 className="text-sm font-bold">Description</h3>
+                <div className="flex flex-col gap-3 rounded-xl border border-line bg-secondary p-4 text-sm leading-relaxed text-muted">
+                  <p>{showDetailModal.description}</p>
+                </div>
+              </div>
+              <div className="mt-auto flex flex-wrap gap-2.5 pt-2">
+                <button type="button" onClick={() => handleSave(showDetailModal)} disabled={isSaving} className="flex h-10 items-center gap-2 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/></svg>
                   {isSaving ? 'Menyimpan...' : 'Simpan ke Gallery'}
                 </button>
-                <a
-                  href={`/api/download?path=${encodeURIComponent(showDetailModal.path)}`}
-                  download
-                  className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold py-2.5 px-4 rounded-xl text-[13px] transition shadow-sm"
-                >Download</a>
-                <button
-                  onClick={() => handleUpload(showDetailModal)}
-                  disabled={uploadProgress[showDetailModal.path] !== undefined}
-                  className={`font-semibold py-2.5 px-4 rounded-xl text-[13px] transition shadow-sm border ${
-                    uploadProgress[showDetailModal.path] !== undefined
-                      ? 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed'
-                      : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
-                  }`}
-                >
-                  {uploadProgress[showDetailModal.path] !== undefined
-                    ? (uploadProgress[showDetailModal.path] === 100 ? 'Uploaded' : `Uploading...`)
-                    : 'Upload'}
+                <button type="button" onClick={() => window.open(`/api/download?path=${encodeURIComponent(showDetailModal.path)}`, '_blank')} className="flex h-10 items-center gap-2 rounded-xl border border-line bg-secondary px-4 text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                  Download
                 </button>
-                <button
-                  onClick={() => setDeleteConfirm(showDetailModal)}
-                  className="bg-white border border-slate-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 text-slate-700 font-semibold py-2.5 px-4 rounded-xl text-[13px] transition shadow-sm"
-                >Hapus</button>
-              </div>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
-
-      {/* Instruction Modal */}
-      {showInstructionModal && createPortal(
-        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4" onClick={() => setShowInstructionModal(false)}>
-          <div className="bg-white rounded-xl w-full max-w-lg overflow-hidden shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-gray-100 p-4">
-              <h2 className="text-[16px] font-bold text-slate-900">Tambah Arahan Khusus</h2>
-              <button onClick={() => setShowInstructionModal(false)} className="w-8 h-8 flex items-center justify-center rounded-full border border-slate-200 text-slate-400 hover:text-slate-900 hover:bg-slate-50 transition-colors">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-              </button>
-            </div>
-            <div className="p-5">
-              <p className="text-[12px] text-slate-500 mb-3">Tambahkan arahan atau konteks spesifik untuk AI saat memotong video ini (opsional).</p>
-              <textarea
-                className="w-full h-32 px-3.5 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-[13px] text-gray-700 bg-slate-50 resize-none"
-                placeholder="Misalnya: Fokus pada bagian saat host membahas tentang investasi saham..."
-                value={instruction}
-                onChange={(e) => setInstruction(e.target.value)}
-              ></textarea>
-              <div className="flex justify-end gap-2 mt-5">
-                <button
-                  onClick={() => setShowInstructionModal(false)}
-                  className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl text-[12px] transition shadow-sm"
-                >
-                  Batal
+                <button type="button" onClick={() => handleUpload(showDetailModal)} className="flex h-10 items-center gap-2 rounded-xl border border-line bg-secondary px-4 text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+                  Upload YouTube
                 </button>
-                <button
-                  onClick={() => setShowInstructionModal(false)}
-                  className="px-4 py-2 bg-primary hover:bg-orange-700 text-white font-semibold rounded-xl text-[12px] transition shadow-sm"
-                >
-                  Simpan Arahan
+                <button type="button" onClick={() => setDeleteConfirm(showDetailModal)} className="flex h-10 items-center gap-2 rounded-xl border border-destructive/40 bg-destructive/10 px-4 text-sm font-medium text-destructive transition-opacity hover:opacity-80">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                  Hapus
                 </button>
               </div>
             </div>
@@ -742,36 +568,33 @@ export default function Dashboard() {
         document.body
       )}
 
-      {/* Toast Notification */}
-      {toastMessage && createPortal(
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] animate-in slide-in-from-bottom-5 fade-in duration-300">
-          <div className="bg-slate-900 text-white px-5 py-3 rounded-full shadow-2xl shadow-slate-900/20 text-[13px] font-medium flex items-center gap-3">
-            <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-            {toastMessage}
+      {stopConfirm && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-background/80" onClick={() => setStopConfirm(false)}>
+          <div className="bg-card rounded-2xl w-full max-w-sm overflow-hidden border border-line p-6 flex flex-col gap-4 text-center" onClick={e => e.stopPropagation()}>
+             <h3 className="font-display font-bold text-lg">Yakin hentikan proses?</h3>
+             <p className="text-sm text-muted">Video yang sudah diproses sejauh ini mungkin hilang.</p>
+             <div className="flex gap-3 justify-center mt-2">
+               <button onClick={() => setStopConfirm(false)} className="px-5 py-2 rounded-xl font-medium border border-line text-foreground hover:bg-secondary">Batal</button>
+               <button onClick={confirmStop} className="px-5 py-2 rounded-xl font-medium bg-destructive text-destructive-foreground">Ya, Hentikan</button>
+             </div>
           </div>
         </div>,
         document.body
       )}
 
-      {/* Delete Group Modal */}
-      <ConfirmModal
-        isOpen={!!deleteConfirm}
-        title="Hapus Klip?"
-        message="Video klip ini akan dihapus secara permanen dari penyimpanan lokal."
-        onConfirm={confirmDeleteClip}
-        onCancel={() => setDeleteConfirm(null)}
-        confirmText="Ya, Hapus"
-      />
-
-      {/* Stop Process Modal */}
-      <ConfirmModal
-        isOpen={stopConfirm}
-        title="Batalkan Proses?"
-        message="Apakah kamu yakin ingin menghentikan proses pembuatan klip ini secara paksa?"
-        onConfirm={confirmStop}
-        onCancel={() => setStopConfirm(false)}
-        confirmText="Ya, Batalkan"
-      />
-    </div>
+      {deleteConfirm && createPortal(
+        <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 bg-background/80" onClick={() => setDeleteConfirm(null)}>
+          <div className="bg-card rounded-2xl w-full max-w-sm overflow-hidden border border-line p-6 flex flex-col gap-4 text-center" onClick={e => e.stopPropagation()}>
+             <h3 className="font-display font-bold text-lg">Hapus Klip ini?</h3>
+             <p className="text-sm text-muted">Klip yang dihapus tidak bisa dikembalikan lagi.</p>
+             <div className="flex gap-3 justify-center mt-2">
+               <button onClick={() => setDeleteConfirm(null)} className="px-5 py-2 rounded-xl font-medium border border-line text-foreground hover:bg-secondary">Batal</button>
+               <button onClick={confirmDeleteClip} className="px-5 py-2 rounded-xl font-medium bg-destructive text-destructive-foreground">Hapus</button>
+             </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </main>
   );
 }

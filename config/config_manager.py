@@ -3,6 +3,8 @@ Configuration manager for YT Short Clipper
 """
 
 import json
+import os
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -29,13 +31,14 @@ class ConfigManager:
             if "api_key" in config and "ai_providers" not in config:
                 config = self._migrate_to_multi_provider(config)
                 dirty = True
-            # Fill missing providers
             if "ai_providers" in config:
                 default_providers = self._get_default_ai_providers()
                 for provider_name, provider_data in default_providers.items():
-                    if provider_name not in config["ai_providers"]:
-                        config["ai_providers"][provider_name] = provider_data
-                        dirty = True
+                    provider = config["ai_providers"].setdefault(provider_name, {})
+                    for key, value in provider_data.items():
+                        if key not in provider:
+                            provider[key] = value
+                            dirty = True
             if "system_prompt" not in config:
                 from clipper_core import AutoClipperCore
                 config["system_prompt"] = AutoClipperCore.get_default_prompt()
@@ -50,12 +53,6 @@ class ConfigManager:
                 "subtitle_style": {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360},
                 "subtitle": {"enabled": False, "color": "#00BFFF", "text_color": "#FFFFFF", "size": 0.04, "position_x": 0.5, "position_y": 0.85, "text_transform": "uppercase", "bg_color": "#000000", "bg_opacity": 0.0, "font_family": "Plus Jakarta Sans", "font_weight": 800, "outline_color": "#000000", "outline_thickness": 1.0},
                 "subtitle_position": "auto",
-                "mediapipe_settings": {
-                    "lip_activity_threshold": 0.15,
-                    "switch_threshold": 0.3,
-                    "min_shot_duration": 90,
-                    "center_weight": 0.3
-                },
                 "repliz": {"access_key": "", "secret_key": ""},
                 "gpu_acceleration": {"enabled": False},
                 "watermark": {
@@ -96,17 +93,21 @@ class ConfigManager:
                 subtitle.update({"font_family": "Plus Jakarta Sans", "font_weight": 800, "text_color": "#FFFFFF", "color": "#00BFFF", "outline_color": "#000000", "outline_thickness": 1.0})
                 config["_text_style_controls_migrated"] = True
                 dirty = True
+            for obsolete_key in ("subtitle_engine", "local_whisper", "mediapipe_settings"):
+                if obsolete_key in config:
+                    config.pop(obsolete_key)
+                    dirty = True
+            if config.get("face_tracking_mode") == "mediapipe":
+                config["face_tracking_mode"] = "center"
+                dirty = True
+            caption_maker = config.get("ai_providers", {}).get("caption_maker", {})
+            if (caption_maker.get("api_key") == "" and
+                caption_maker.get("base_url") == "https://api.openai.com/v1" and
+                caption_maker.get("model") == "whisper-1"):
+                caption_maker["base_url"] = "https://api.groq.com/openai/v1"
+                caption_maker["model"] = "whisper-large-v3-turbo"
+                dirty = True
             if dirty:
-                # Remove obsolete fields
-                config.pop("subtitle_engine", None)
-                config.pop("local_whisper", None)
-                # Migrate old OpenAI default to Groq if empty key
-                caption_maker = config.get("ai_providers", {}).get("caption_maker", {})
-                if (caption_maker.get("api_key") == "" and
-                    caption_maker.get("base_url") == "https://api.openai.com/v1" and
-                    caption_maker.get("model") == "whisper-1"):
-                    caption_maker["base_url"] = "https://api.groq.com/openai/v1"
-                    caption_maker["model"] = "whisper-large-v3-turbo"
                 self.save_config(config)
             return config
         
@@ -140,12 +141,6 @@ class ConfigManager:
             "subtitle_style": {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360},
             "subtitle": {"enabled": False, "color": "#00BFFF", "text_color": "#FFFFFF", "size": 0.04, "position_x": 0.5, "position_y": 0.85, "text_transform": "uppercase", "bg_color": "#000000", "bg_opacity": 0.0, "font_family": "Plus Jakarta Sans", "font_weight": 800, "outline_color": "#000000", "outline_thickness": 1.0},
             "subtitle_position": "auto",
-            "mediapipe_settings": {
-                "lip_activity_threshold": 0.15,
-                "switch_threshold": 0.3,
-                "min_shot_duration": 90,
-                "center_weight": 0.3
-            },
             "repliz": {
                 "access_key": "",
                 "secret_key": ""
@@ -218,9 +213,18 @@ class ConfigManager:
         self.save_config(self.config)
     
     def save_config(self, config):
-        """Save configuration dict to file"""
-        with open(self.config_file, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
+        """Save configuration dict atomically."""
+        self.config_file.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(prefix=f".{self.config_file.name}.", suffix=".tmp", dir=self.config_file.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_name, self.config_file)
+        finally:
+            if os.path.exists(temp_name):
+                os.unlink(temp_name)
     
     def get(self, key, default=None):
         """Get configuration value"""

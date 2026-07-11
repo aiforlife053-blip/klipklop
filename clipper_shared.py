@@ -84,15 +84,15 @@ def slice_timed_transcript(transcript: TimedTranscript, start: float, end: float
         raise ValueError("end must be greater than start")
 
     def sliced(items, text_key):
-        return [
-            {
-                text_key: item[text_key],
-                "start": round(max(item["start"], start) - start, 3),
-                "end": round(min(item["end"], end) - start, 3),
-            }
-            for item in items
-            if item["end"] > start and item["start"] < end
-        ]
+        result = []
+        for item in items:
+            if item["end"] <= start or item["start"] >= end:
+                continue
+            item_start = round(max(item["start"], start) - start, 3)
+            item_end = round(min(item["end"], end) - start, 3)
+            if item_end > item_start:
+                result.append({text_key: item[text_key], "start": item_start, "end": item_end})
+        return result
 
     return {
         "duration": round(end - start, 3),

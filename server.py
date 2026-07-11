@@ -37,7 +37,7 @@ def _supabase_config():
     cfg = MANAGER._config().config
     url = os.environ.get("SUPABASE_URL") or str(cfg.get("supabase_url") or "")
     anon_key = os.environ.get("SUPABASE_ANON_KEY") or str(cfg.get("supabase_anon_key") or "")
-    secret = os.environ.get("KLIPKLOP_SECRET") or anon_key or "CHANGE_ME_SESSION_SECRET"
+    secret = os.environ.get("KLIPKLOP_SECRET") or ""
     return url.rstrip("/"), anon_key, secret
 
 
@@ -641,6 +641,10 @@ def main():
             f"Set SECURITY_MODE=public environment variable to allow non-localhost binding.\n"
             f"Current mode: {security_mode}"
         )
+    if security_mode == "public":
+        session_secret = os.environ.get("KLIPKLOP_SECRET", "")
+        if len(session_secret.encode("utf-8")) < 32:
+            raise SystemExit("SECURITY ERROR: KLIPKLOP_SECRET must contain at least 32 bytes in public mode")
 
     url = f"http://{host}:{port}"
     server = ThreadingHTTPServer((host, port), WebKlipHandler)

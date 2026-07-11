@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '@/lib/api';
-import { ConfirmModal } from '@/components/ui/ConfirmModal';
 
 export default function Gallery() {
   const [showDetailModal, setShowDetailModal] = useState<any>(null);
@@ -101,149 +100,109 @@ export default function Gallery() {
   const fmtImg = (clip: any) => clip.img || '';
 
   return (
-    <div className="p-6 space-y-7 bg-muted flex-1 h-[calc(100vh-53px)] overflow-auto" style={{ backgroundImage: 'radial-gradient(rgba(0, 0, 0, 0.05) 1.5px, transparent 1.5px)', backgroundSize: '20px 20px', backgroundPosition: '10px 10px' }}>
-      <section className="bg-transparent min-h-[460px] flex flex-col gap-6 w-full max-w-6xl mx-auto">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-[24px] font-bold text-slate-900 tracking-tight">Koleksi Klip</h2>
-              <div 
-                className="w-5 h-5 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center text-[12px] font-bold cursor-help border border-slate-200"
-                title="Maks galeri 10 video"
-              >
-                i
-              </div>
-            </div>
-            <p className="text-[13px] text-slate-500 mt-1">Semua klip viral yang pernah Anda proses tersimpan di sini.</p>
-          </div>
+    <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 py-10">
+      <div className="flex flex-col gap-2">
+        <p className="text-sm font-medium uppercase tracking-widest text-primary">Galeri</p>
+        <h1 className="font-display text-3xl font-bold tracking-tight md:text-4xl">Koleksi Klip</h1>
+        <p className="text-muted">Semua klip viral yang pernah Anda proses tersimpan di sini.</p>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-24 text-muted">
+          <svg className="w-6 h-6 animate-spin mr-3 text-primary" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+          <span className="text-sm font-medium">Memuat galeri...</span>
         </div>
-
-        {isLoading ? (
-          <div className="flex items-center justify-center py-24 text-slate-400">
-            <svg className="w-6 h-6 animate-spin mr-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-            <span className="text-[14px] font-medium">Memuat galeri...</span>
-          </div>
-        ) : clips.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-slate-400 gap-3">
-            <svg className="w-16 h-16 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
-            <p className="text-[14px] font-medium">Galeri masih kosong</p>
-            <p className="text-[12px]">Proses klip di Dashboard, lalu klik "Simpan ke Gallery"</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {clips.map((clip) => {
-              const img = fmtImg(clip);
-              const duration = fmtDuration(clip);
-              const score = fmtScore(clip);
-              return (
-                <div key={clip.path} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-col group hover:shadow-md transition">
-                  <div className="relative w-full aspect-square bg-slate-900 rounded-xl overflow-hidden shadow-inner group">
-                    {img ? (
-                      <img src={img} alt={clip.title} className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition-transform duration-500" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-slate-600">
-                        <svg className="w-10 h-10 opacity-30" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                      </div>
-                    )}
-                    {duration && (
-                      <div className="absolute top-1.5 right-1.5 bg-black/50 px-1.5 py-0.5 rounded text-[9px] font-medium text-white/90 border border-white/10">{duration}</div>
-                    )}
-                    {score && (
-                      <div className="absolute top-1.5 left-1.5 bg-orange-500/90 backdrop-blur text-white px-1.5 py-0.5 rounded text-[10px] font-bold shadow-sm flex items-center gap-1 border border-orange-400/50">
-                        <span className="text-[12px] leading-none">🔥</span> {score}
-                      </div>
-                    )}
-                    {clip.isUploaded && (
-                      <div className="absolute bottom-1.5 left-1.5 bg-emerald-500/90 backdrop-blur text-white px-2 py-0.5 rounded text-[10px] font-bold shadow-sm flex items-center gap-1 border border-emerald-400/50 z-10">
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
-                        Uploaded
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div className="mt-3 text-left flex-1 flex flex-col">
-                    <h4 className="font-bold text-[13px] leading-snug line-clamp-2 text-slate-900">{clip.title || clip.name}</h4>
-                    <p className="text-[11px] text-slate-500 line-clamp-2 mt-1.5">{clip.description}</p>
-                    <p className="text-[10px] text-slate-400 mt-2">
-                      Durasi: {duration} &bull; {clip.modified ? new Date(clip.modified).toLocaleString('id-ID', {day: 'numeric', month: 'short', year: '2-digit', hour: '2-digit', minute:'2-digit'}) : '-'}
-                    </p>
-                  </div>
-                  <button 
-                    onClick={() => setShowDetailModal(clip)}
-                    className="w-full mt-3 py-2 border border-slate-200 rounded-lg text-[12px] font-semibold text-slate-700 hover:bg-slate-50 transition"
-                  >
-                    Lihat detail
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      {/* Detail Modal */}
-      {showDetailModal && createPortal(
-        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4" onClick={() => setShowDetailModal(null)}>
-          <div className="bg-white rounded-2xl flex max-w-4xl w-full p-4 gap-6 relative shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <button onClick={() => setShowDetailModal(null)} className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full border border-slate-200 text-slate-400 hover:text-slate-900 hover:bg-slate-50 transition-colors z-10">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-            </button>
+      ) : clips.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-24 text-muted gap-3">
+          <svg className="w-16 h-16 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+          <p className="text-sm font-medium">Galeri masih kosong</p>
+          <p className="text-xs">Proses klip di Dashboard, lalu klik "Simpan ke Gallery"</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          {clips.map((clip) => {
+            const img = fmtImg(clip);
+            const duration = fmtDuration(clip);
+            const score = fmtScore(clip);
+            const date = clip.modified ? new Date(clip.modified).toLocaleString('id-ID', {day: 'numeric', month: 'short', year: '2-digit', hour: '2-digit', minute:'2-digit'}) : '-';
             
-            {/* Left: Video */}
-            <div className="w-[300px] shrink-0 bg-black rounded-xl overflow-hidden aspect-[9/16] relative shadow-inner">
+            return (
+              <article key={clip.path} className="group flex flex-col overflow-hidden rounded-2xl border border-line bg-card transition-colors hover:border-primary/40">
+                <button type="button" onClick={() => setShowDetailModal(clip)} className="relative aspect-[4/5] w-full overflow-hidden p-0 text-left" aria-label={`Lihat detail klip: ${clip.title}`}>
+                   {img ? <img src={img} alt={`Thumbnail klip: ${clip.title}`} loading="lazy" className="size-full object-cover transition-transform duration-300 group-hover:scale-105" /> : <span className="block size-full bg-secondary" aria-hidden="true" />}
+                  <span className="absolute inset-x-0 top-0 flex items-start justify-between p-3">
+                    <span className="flex items-center gap-1.5 rounded-full bg-primary px-2.5 py-1 text-xs font-bold text-primary-foreground">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
+                      {score}
+                    </span>
+                    <span className="flex items-center gap-1 rounded-full bg-background/70 px-2.5 py-1 text-xs font-medium backdrop-blur">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                      {duration}
+                    </span>
+                  </span>
+                  <span className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 bg-background/60 opacity-0 transition-opacity group-hover:opacity-100">
+                    <span className="flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="ml-0.5"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+                    </span>
+                    <span className="rounded-full bg-primary px-3.5 py-1 text-xs font-bold text-primary-foreground">Lihat Detail</span>
+                  </span>
+                  {clip.isUploaded && (
+                    <span className="absolute bottom-2.5 left-2.5 z-[2] rounded-full bg-emerald-500/90 px-2.5 py-1 text-[10px] font-bold text-white backdrop-blur">Uploaded</span>
+                  )}
+                </button>
+                <div className="flex flex-1 flex-col gap-1.5 p-3.5">
+                  <h2 className="line-clamp-2 font-display text-sm font-bold leading-snug">{clip.title || clip.name}</h2>
+                  <p className="mt-auto text-xs text-muted">{duration} &bull; {date}</p>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Modal detail klip */}
+      {showDetailModal && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8" role="dialog" aria-modal="true" aria-label="Detail klip">
+          <button type="button" onClick={() => setShowDetailModal(null)} className="absolute inset-0 bg-background/80" aria-label="Tutup detail klip"></button>
+          <div className="relative z-10 grid max-h-[90dvh] w-full max-w-3xl gap-6 overflow-y-auto rounded-2xl border border-line bg-card p-6 shadow-2xl md:grid-cols-[280px_1fr] md:p-8">
+            <button type="button" onClick={() => setShowDetailModal(null)} className="absolute right-4 top-4 z-10 flex size-9 items-center justify-center rounded-full border border-line bg-secondary text-muted transition-colors hover:text-foreground" aria-label="Tutup">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+            <div className="relative mx-auto aspect-[9/16] w-full max-w-[280px] overflow-hidden rounded-xl border border-line bg-black">
               <video
-                key={showDetailModal.path}
-                className="w-full h-full object-contain"
+                className="size-full object-contain"
                 controls
                 preload="metadata"
                 poster={fmtImg(showDetailModal) || undefined}
                 src={`/api/stream?path=${encodeURIComponent(showDetailModal.path)}`}
               />
+              <span className="pointer-events-none absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-primary px-2.5 py-1 text-xs font-bold text-primary-foreground">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
+                <span>{fmtScore(showDetailModal)}</span>
+              </span>
             </div>
-            
-            {/* Right: Details */}
-            <div className="flex-1 flex flex-col py-2 pr-4">
-              <p className="text-[12px] text-slate-500 mb-1 flex items-center gap-2">
-                <span>Durasi: {fmtDuration(showDetailModal)}</span>
-                <span>&bull;</span>
-                <span>Diunduh: {showDetailModal.modified ? new Date(showDetailModal.modified).toLocaleString('id-ID', {day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute:'2-digit'}) : '-'}</span>
-              </p>
-              <h2 className="text-[20px] font-bold text-slate-900 leading-tight">{showDetailModal.title || showDetailModal.name}</h2>
-              {showDetailModal.isUploaded && (
-                <a href="#" className="inline-flex items-center gap-1.5 text-[13px] text-emerald-500 hover:text-emerald-600 font-bold mt-2 hover:underline">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
-                  Tonton di YouTube
-                </a>
-              )}
-              
-              <p className="text-[12px] font-bold text-slate-700 mt-6 mb-2">Description</p>
-              <div className="border border-slate-200 rounded-xl p-4 text-[13px] text-slate-600 bg-slate-50 min-h-[120px] leading-relaxed">
-                {showDetailModal.description}
-                <br/><br/>
-                sc: @klipklop
+            <div className="flex flex-col gap-5 md:pr-8">
+              <p className="text-sm text-muted">Durasi: {fmtDuration(showDetailModal)}</p>
+              <h2 className="font-display text-[1.75rem] font-bold leading-tight tracking-tight">{showDetailModal.title || showDetailModal.name}</h2>
+              <div className="flex flex-col gap-2">
+                <h3 className="text-sm font-bold">Description</h3>
+                <div className="flex flex-col gap-3 rounded-xl border border-line bg-secondary/50 p-4 text-sm leading-relaxed text-muted">
+                  <p>{showDetailModal.description}</p>
+                </div>
               </div>
-              
-              <div className="mt-auto flex flex-wrap items-center gap-2 pt-6">
-                <a 
-                  href={`/api/download?path=${encodeURIComponent(showDetailModal.path)}`}
-                  download
-                  className="bg-[#ea580c] hover:bg-[#c2410c] text-white font-semibold py-2.5 px-4 rounded-xl text-[13px] transition shadow-sm border border-[#ea580c]"
-                >Download</a>
-                <button 
-                  disabled={showDetailModal.isUploaded || uploadingId === showDetailModal.path}
-                  onClick={() => handleUpload(showDetailModal)}
-                  className={`font-semibold py-2.5 px-4 rounded-xl text-[13px] transition shadow-sm border ${
-                    showDetailModal.isUploaded || uploadingId === showDetailModal.path
-                      ? 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed'
-                      : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
-                  }`}
-                >
-                  {uploadingId === showDetailModal.path ? 'Uploading...' : showDetailModal.isUploaded ? 'Uploaded' : 'Upload'}
+              <div className="mt-auto flex flex-wrap gap-3 pt-4">
+                <button type="button" onClick={() => window.open(`/api/download?path=${encodeURIComponent(showDetailModal.path)}`, '_blank')} className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 text-sm font-bold text-primary-foreground transition-opacity hover:opacity-90">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                  Download
                 </button>
-                <button 
-                  onClick={() => handleDelete(showDetailModal)}
-                  className="bg-white border border-slate-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 text-slate-700 font-semibold py-2.5 px-4 rounded-xl text-[13px] transition shadow-sm"
-                >Hapus</button>
+                <button type="button" disabled={uploadingId === showDetailModal.path} onClick={() => handleUpload(showDetailModal)} className="flex h-11 items-center gap-2 rounded-xl border border-line bg-secondary px-5 text-sm font-medium transition-colors hover:bg-secondary/70 disabled:opacity-50">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+                  {uploadingId === showDetailModal.path ? 'Uploading...' : 'Upload YouTube'}
+                </button>
+                <button type="button" onClick={() => handleDelete(showDetailModal)} className="flex h-11 items-center gap-2 rounded-xl border border-destructive/40 bg-destructive/10 px-5 text-sm font-medium text-destructive transition-colors hover:bg-destructive/20">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                  Hapus
+                </button>
               </div>
             </div>
           </div>
@@ -251,13 +210,19 @@ export default function Gallery() {
         document.body
       )}
 
-      <ConfirmModal
-        isOpen={!!deleteConfirm}
-        title="Hapus klip ini dari galeri?"
-        message="Klip yang dihapus tidak dapat dikembalikan."
-        onConfirm={confirmDelete}
-        onCancel={() => setDeleteConfirm(null)}
-      />
-    </div>
+      {deleteConfirm && createPortal(
+        <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 bg-background/80" onClick={() => setDeleteConfirm(null)}>
+          <div className="bg-card rounded-2xl w-full max-w-sm overflow-hidden border border-line p-6 flex flex-col gap-4 text-center" onClick={e => e.stopPropagation()}>
+             <h3 className="font-display font-bold text-lg">Hapus Klip ini?</h3>
+             <p className="text-sm text-muted">Klip yang dihapus tidak bisa dikembalikan lagi.</p>
+             <div className="flex gap-3 justify-center mt-2">
+               <button onClick={() => setDeleteConfirm(null)} className="px-5 py-2 rounded-xl font-medium border border-line text-foreground hover:bg-secondary">Batal</button>
+               <button onClick={confirmDelete} className="px-5 py-2 rounded-xl font-medium bg-destructive text-destructive-foreground">Hapus</button>
+             </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </main>
   );
 }

@@ -51,7 +51,6 @@ class ClipperBase:
     blur_background_settings: dict
     subtitle_style: dict
     face_tracking_mode: str
-    mediapipe_settings: dict
     optimize_mode: str
     use_download_sections: bool
 
@@ -59,9 +58,6 @@ class ClipperBase:
     gpu_enabled: bool
     gpu_encoder_args: list
 
-    # --- MediaPipe ---
-    mp_face_mesh: Any
-    mp_drawing: Any
     # --- Callbacks ---
     log: Callable[..., None]
     set_progress: Callable[..., None]

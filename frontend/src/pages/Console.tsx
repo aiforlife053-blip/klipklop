@@ -48,55 +48,64 @@ export default function Console() {
   };
 
   return (
-    <div className="p-6 space-y-7 bg-muted flex-1 h-[calc(100vh-53px)] overflow-auto" style={{ backgroundImage: 'radial-gradient(rgba(0, 0, 0, 0.05) 1.5px, transparent 1.5px)', backgroundSize: '20px 20px', backgroundPosition: '10px 10px' }}>
-      <section className="bg-transparent min-h-[460px] flex flex-col gap-5 w-full">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-[20px] font-semibold text-black mb-0.5 tracking-tight">Konsol</h2>
-            <p className="text-[13px] text-gray-500">Log pemrosesan sistem.</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setIsPolling(p => !p)}
-              className={`rounded-xl border px-4 py-2 text-[13px] font-semibold transition ${isPolling ? 'border-orange-300 bg-orange-50 text-orange-600 hover:bg-orange-100' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'}`}
-            >
-              {isPolling ? '⏸ Live' : '▶ Paused'}
-            </button>
-            <button type="button" onClick={handleClear} className="rounded-xl border border-gray-200 px-4 py-2 text-[13px] font-semibold text-gray-700 hover:bg-gray-50 bg-white">
-              Clear
-            </button>
-          </div>
+    <main className="mx-auto flex max-w-5xl flex-col gap-8 px-6 py-10 w-full h-full min-h-[calc(100vh-53px)]">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-2">
+          <p className="text-sm font-medium uppercase tracking-widest text-primary">Konsol</p>
+          <h1 className="font-display text-3xl font-bold tracking-tight md:text-4xl">Log Pemrosesan</h1>
+          <p className="leading-relaxed text-muted">Pantau aktivitas pipeline KlipKlop secara real-time.</p>
         </div>
-        <div className="min-h-[360px] max-h-[70vh] overflow-auto rounded-2xl bg-[#0f172a] border border-gray-200 p-4 font-mono text-[12px] leading-relaxed">
-          {logs.length === 0 ? (
-            <p className="text-slate-500 italic">Console output akan muncul di sini saat proses berjalan...</p>
-          ) : (
-            logs.map((log, i) => {
-              // Color-code log lines by level
-              const isError = log.includes('[Error]') || log.includes('❌');
-              const isDone = log.includes('[Done]') || log.includes('✅') || log.includes('Complete');
-              const isTask = log.includes('[Task]');
-              let colorClass = 'text-slate-300';
-              if (isError) colorClass = 'text-red-400';
-              else if (isDone) colorClass = 'text-emerald-400';
-              else if (isTask) colorClass = 'text-yellow-300 font-bold';
-              return (
-                <div key={i} className={`${colorClass} whitespace-pre-wrap break-words`}>
-                  {log}
-                </div>
-              );
-            })
-          )}
-          <div ref={logsEndRef} />
+        <div className="flex items-center gap-2 mt-2">
+          <button
+            type="button"
+            onClick={() => setIsPolling(p => !p)}
+            className={`rounded-xl border px-4 py-2 text-sm font-bold transition-colors ${isPolling ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/20' : 'border-line bg-secondary text-muted hover:text-foreground'}`}
+          >
+            {isPolling ? 'Live Polling Aktif' : 'Polling Berhenti'}
+          </button>
+          <button type="button" onClick={handleClear} className="rounded-xl border border-line px-4 py-2 text-sm font-medium text-muted hover:bg-secondary hover:text-foreground transition-colors">
+            Clear
+          </button>
         </div>
-        {isPolling && (
-          <p className="text-[11px] text-gray-400 flex items-center gap-1.5">
-            <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            Memperbarui setiap 2 detik
-          </p>
-        )}
+      </div>
+
+      <section className="overflow-hidden flex flex-col h-[500px] flex-1 rounded-2xl border border-line bg-card" aria-label="Log konsol">
+        <div className="flex items-center gap-2 border-b border-line bg-secondary/50 px-5 py-3">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f2a33c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>
+          <span className="font-mono text-xs text-muted">klipklop — pipeline.log</span>
+        </div>
+        <div className="flex-1 overflow-auto p-5">
+          <ul className="flex list-none flex-col gap-1 font-mono text-sm">
+            {logs.length === 0 ? (
+              <li className="text-muted italic">Menunggu log pemrosesan...</li>
+            ) : (
+              logs.map((log, i) => {
+                const isError = log.includes('[Error]') || log.includes('❌') || log.toLowerCase().includes('error');
+                const isSuccess = log.includes('[Done]') || log.includes('✅') || log.includes('Complete');
+                
+                let level = 'info';
+                let levelClass = 'text-muted';
+                
+                if (isError) {
+                  level = 'error';
+                  levelClass = 'text-destructive font-bold';
+                } else if (isSuccess) {
+                  level = 'success';
+                  levelClass = 'text-primary font-bold';
+                }
+
+                return (
+                  <li key={i} className="flex flex-col sm:flex-row gap-2 sm:gap-4 rounded-lg px-2 py-1.5 hover:bg-secondary/50">
+                    <span className={`shrink-0 uppercase ${levelClass} min-w-[70px]`}>{level}</span>
+                    <span className="leading-relaxed text-foreground/90 break-words flex-1 whitespace-pre-wrap">{log}</span>
+                  </li>
+                );
+              })
+            )}
+            <div ref={logsEndRef} />
+          </ul>
+        </div>
       </section>
-    </div>
+    </main>
   );
 }

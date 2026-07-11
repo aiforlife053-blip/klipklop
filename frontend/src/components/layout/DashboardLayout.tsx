@@ -107,94 +107,104 @@ export default function DashboardLayout() {
   };
 
   return (
-    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground antialiased">
-      <header className="bg-white border-b border-border px-4 py-3 flex items-center justify-between sticky top-0 z-50">
-        <div className="flex items-center space-x-2 text-black font-extrabold text-[20px] tracking-tight">
-          <img src="/logo%20klipklop.png?v=3" className="h-10 w-10 rounded-md object-contain" alt="KlipKlop Logo" />
-          <span className="text-black leading-none">KlipKlop</span>
-        </div>
-        <nav className="flex items-center gap-1 text-[13px] font-semibold">
-          <Link 
-            to="/"
-            className={`px-3 py-2 rounded-xl transition ${activeTab === 'home' || activeTab === '' ? 'bg-primary/10 text-primary' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}
-          >
-            Dashboard
+    <div className="min-h-dvh flex flex-col bg-background font-sans text-foreground antialiased">
+      <header className="sticky top-0 z-40 border-b border-line bg-background/80 backdrop-blur-md">
+        <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-6">
+          <Link to="/" className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/></svg>
+            </span>
+            <span className="font-display text-lg font-bold tracking-tight">KlipKlop</span>
           </Link>
-          <Link 
-            to="/gallery"
-            className={`px-3 py-2 rounded-xl transition ${activeTab === 'gallery' ? 'bg-primary/10 text-primary' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}
-          >
-            Galeri
-          </Link>
-          <Link 
-            to="/console"
-            className={`px-3 py-2 rounded-xl transition ${activeTab === 'console' ? 'bg-primary/10 text-primary' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}
-          >
-            Konsol
-          </Link>
-         
-          <Link 
-            to="/preview"
-            className={`px-3 py-2 rounded-xl transition ${activeTab === 'preview' ? 'bg-primary/10 text-primary' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}
-          >
-            Preview Editor
-          </Link>
-          
-          {/* Profile Dropdown */}
-          <div className="relative ml-2">
-            <button 
-              onClick={() => setIsProfileOpen(!isProfileOpen)}
-              type="button" 
-              className="flex items-center justify-center w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 border border-slate-200 transition focus:outline-none"
+          <nav className="hidden items-center gap-1 md:flex" aria-label="Navigasi utama">
+            <Link 
+              to="/"
+              className={`rounded-full px-4 py-2 text-sm transition-colors ${activeTab === 'home' || activeTab === '' ? 'bg-primary/15 font-medium text-primary' : 'text-muted hover:bg-secondary hover:text-foreground'}`}
             >
-              <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
-            </button>
+              Dashboard
+            </Link>
+            <Link 
+              to="/gallery"
+              className={`rounded-full px-4 py-2 text-sm transition-colors ${activeTab === 'gallery' ? 'bg-primary/15 font-medium text-primary' : 'text-muted hover:bg-secondary hover:text-foreground'}`}
+            >
+              Galeri
+            </Link>
+            <Link 
+              to="/console"
+              className={`rounded-full px-4 py-2 text-sm transition-colors ${activeTab === 'console' ? 'bg-primary/15 font-medium text-primary' : 'text-muted hover:bg-secondary hover:text-foreground'}`}
+            >
+              Konsol
+            </Link>
+            <Link 
+              to="/preview"
+              className={`rounded-full px-4 py-2 text-sm transition-colors ${activeTab === 'preview' ? 'bg-primary/15 font-medium text-primary' : 'text-muted hover:bg-secondary hover:text-foreground'}`}
+            >
+              Preview Editor
+            </Link>
+          </nav>
+          <div className="flex items-center gap-2">
+            <Link to="/settings" className="flex h-9 w-9 items-center justify-center rounded-full border border-line text-muted transition-colors hover:bg-secondary hover:text-foreground" aria-label="Pengaturan">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            </Link>
             
-            {isProfileOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setIsProfileOpen(false)}></div>
-                <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-slate-100 py-1 z-50 animate-in slide-in-from-top-2 duration-200">
-                <Link 
-                  to="/settings"
-                  onClick={() => setIsProfileOpen(false)}
-                  className="flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-slate-700 hover:bg-slate-50 transition"
-                >
-                  <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                  Pengaturan
-                </Link>
-                <button 
-                  onClick={() => {
-                    setIsProfileOpen(false);
-                    setShowTicketModal(true);
-                  }}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-slate-700 hover:bg-slate-50 transition text-left"
-                >
-                  <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
-                  Ticket & Keluh Kesah
-                </button>
-                <div className="h-px bg-slate-100 my-1"></div>
-                <button 
-                  onClick={() => {
-                    setIsProfileOpen(false);
-                    handleLogout();
-                  }}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-red-600 hover:bg-red-50 transition text-left"
-                >
-                  <svg className="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
-                  Keluar
-                </button>
-              </div>
-              </>
-            )}
+            {/* Profile Dropdown */}
+            <div className="relative">
+              <button 
+                onClick={() => setIsProfileOpen(!isProfileOpen)}
+                type="button" 
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-secondary text-muted transition-colors hover:text-foreground" aria-label="Akun"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              </button>
+              
+              {isProfileOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setIsProfileOpen(false)}></div>
+                  <div className="absolute right-0 mt-2 w-48 bg-card rounded-xl shadow-lg border border-line py-1 z-50 animate-in slide-in-from-top-2 duration-200">
+                  <Link 
+                    to="/settings"
+                    onClick={() => setIsProfileOpen(false)}
+                    className="flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-foreground hover:bg-secondary transition"
+                  >
+                    <svg className="w-4 h-4 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    Pengaturan
+                  </Link>
+                  <button 
+                    onClick={() => {
+                      setIsProfileOpen(false);
+                      setShowTicketModal(true);
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-foreground hover:bg-secondary transition text-left"
+                  >
+                    <svg className="w-4 h-4 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
+                    Ticket & Keluh Kesah
+                  </button>
+                  <div className="h-px bg-line my-1"></div>
+                  <button 
+                    onClick={() => {
+                      setIsProfileOpen(false);
+                      handleLogout();
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-destructive hover:bg-destructive/10 transition text-left"
+                  >
+                    <svg className="w-4 h-4 text-destructive" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                    Keluar
+                  </button>
+                </div>
+                </>
+              )}
+            </div>
           </div>
+        </div>
+        <nav className="flex items-center gap-1 overflow-x-auto border-t border-line px-4 py-2 md:hidden" aria-label="Navigasi mobile">
+          <Link to="/" className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm ${activeTab === 'home' || activeTab === '' ? 'bg-primary/15 font-medium text-primary' : 'text-muted'}`}>Dashboard</Link>
+          <Link to="/gallery" className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm ${activeTab === 'gallery' ? 'bg-primary/15 font-medium text-primary' : 'text-muted'}`}>Galeri</Link>
+          <Link to="/console" className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm ${activeTab === 'console' ? 'bg-primary/15 font-medium text-primary' : 'text-muted'}`}>Konsol</Link>
+          <Link to="/preview" className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm ${activeTab === 'preview' ? 'bg-primary/15 font-medium text-primary' : 'text-muted'}`}>Preview Editor</Link>
         </nav>
       </header>
 
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <Outlet context={{ settings, setSettings, status }} />
-        </main>
-      </div>
+      <Outlet context={{ settings, setSettings, status }} />
 
       {/* Ticket / Keluh Kesah Modal */}
       {showTicketModal && createPortal(

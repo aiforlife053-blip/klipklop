@@ -231,13 +231,16 @@ class WebJobManager:
         api_key = str(payload.get("api_key", provider_payload.get("api_key", ""))).strip()
         model = str(payload.get("model", provider_payload.get("model", ""))).strip()
         cfg_mgr = self._config()
+        saved_provider = cfg_mgr.config.get("ai_providers", {}).get(provider_name, {})
         if not api_key:
             if provider_name == "highlight_finder":
-                api_key = cfg_mgr.config.get("ai_providers", {}).get("highlight_finder", {}).get("api_key", "")
-                if not api_key:
-                    api_key = cfg_mgr.config.get("api_key", "")
+                api_key = saved_provider.get("api_key") or cfg_mgr.config.get("api_key", "")
             elif provider_name == "caption_maker":
-                api_key = cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("api_key", "")
+                api_key = saved_provider.get("api_key", "")
+            else:
+                return {"status": "error", "message": "Provider tidak dikenal"}
+            if base_url.rstrip("/") != str(saved_provider.get("base_url", "")).rstrip("/") or model != str(saved_provider.get("model", "")):
+                return {"status": "error", "message": "Isi API key untuk menguji Base URL atau model baru"}
 
         if not base_url:
             return {"status": "error", "message": "Base URL kosong"}
@@ -294,7 +297,7 @@ class WebJobManager:
         caption_model = str(payload.get("caption_model", cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("model", GROQ_MODEL))).strip() or GROQ_MODEL
         hook_model = str(payload.get("hook_model", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("model", ""))).strip()
         hook_voice = str(payload.get("hook_voice", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("voice", "id-ID-ArdiNeural"))).strip() or "id-ID-ArdiNeural"
-        output_dir = str(payload.get("output_dir", cfg_mgr.config.get("output_dir", str(self.output_dir)))).strip() or str(self.output_dir)
+        output_dir = str(self.output_dir)
         subtitle_language = str(payload.get("subtitle_language", cfg_mgr.config.get("subtitle_language", "id")) or "id")[:10]
         video_quality = str(payload.get("video_quality", cfg_mgr.config.get("video_quality", "720")) or "720")
         landscape_blur = self._as_bool(payload.get("landscape_blur", cfg_mgr.config.get("landscape_blur", True)), True)
@@ -385,7 +388,7 @@ class WebJobManager:
         hook_current["api_key"] = ""
         cfg_mgr.config["base_url"] = base_url
         cfg_mgr.config["model"] = model
-        if clear_api_key:
+        if clear_api_key or clear_highlight_api_key:
             cfg_mgr.config["api_key"] = ""
         elif api_key:
             cfg_mgr.config["api_key"] = api_key
@@ -569,7 +572,6 @@ class WebJobManager:
                 credit_watermark_settings={**cfg.get("credit_watermark", {"enabled": True, "position_x": 0.06, "position_y": 0.23, "opacity": 0.55, "size": 0.032}), "enabled": source_credit and bool(cfg.get("credit_watermark", {"enabled": True}).get("enabled", True))},
                 hook_style_settings={**cfg.get("hook_style", {}), "blur_background": cfg.get("blur_background", {"enabled": True, "zoom": 1.08, "strength": 30})},
                 face_tracking_mode=cfg.get("face_tracking_mode", "center"),
-                mediapipe_settings=cfg.get("mediapipe_settings", {}),
                 ai_providers=ai_providers,
                 subtitle_language=subtitle_language,
                 video_quality=str(cfg.get("video_quality", "720")),
@@ -629,8 +631,7 @@ class WebJobManager:
         return ConfigManager(self.config_file, self.output_dir)
 
     def _output_root(self):
-        output_value = str(self._config().config.get("output_dir", str(self.output_dir))).strip() or str(self.output_dir)
-        return Path(output_value)
+        return self.output_dir
 
     def _set_message(self, message):
         self._message = str(message)

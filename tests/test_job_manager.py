@@ -119,6 +119,17 @@ def test_slice_timed_transcript_uses_half_open_boundaries():
     assert [item["word"] for item in slice_timed_transcript(source, 5.0, 7.0)["words"]] == ["inside"]
 
 
+def test_slice_timed_transcript_drops_items_collapsed_by_rounding():
+    source = {
+        "duration": 1.0,
+        "words": [{"word": "tiny", "start": 0.0001, "end": 0.0004}],
+        "segments": [{"text": "tiny", "start": 0.0001, "end": 0.0004}],
+    }
+    result = slice_timed_transcript(source, 0.0, 1.0)
+    assert result["words"] == []
+    assert result["segments"] == []
+
+
 def test_slice_timed_transcript_supports_overlapping_slices():
     source = {
         "duration": 10.0,
@@ -457,6 +468,49 @@ def test_clear_api_key_removes_saved_key(tmp_path):
     manager.save_settings({"clear_api_key": True})
     settings = manager.get_settings()
     assert settings["api_key_saved"] is False
+
+
+def test_provider_keys_can_be_cleared_independently(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    manager.save_settings({"api_key": "gemini-secret", "caption_api_key": "groq-secret"})
+    manager.save_settings({"clear_highlight_api_key": True})
+    settings = manager.get_settings()
+    assert settings["api_key_saved"] is False
+    assert settings["caption_key_saved"] is True
+    manager.save_settings({"clear_caption_api_key": True})
+    settings = manager.get_settings()
+    assert settings["caption_key_saved"] is False
+
+
+def test_custom_output_dir_is_not_accepted_as_download_root(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    manager.save_settings({"output_dir": str(outside)})
+    assert manager.get_settings()["output_dir"] == str(tmp_path / "output")
+    assert manager._output_root() == tmp_path / "output"
+
+
+def test_partial_caption_provider_gets_groq_defaults_and_removes_obsolete_config(tmp_path):
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps({
+        "api_key": "",
+        "ai_providers": {"caption_maker": {"api_key": "groq-secret"}},
+        "subtitle_engine": "local",
+        "local_whisper": {"model": "old"},
+        "mediapipe_settings": {"switch_threshold": 0.3},
+        "face_tracking_mode": "mediapipe",
+    }), encoding="utf-8")
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    cfg = manager._config().config
+    caption = cfg["ai_providers"]["caption_maker"]
+    assert caption["base_url"] == mod.GROQ_BASE_URL
+    assert caption["model"] == mod.GROQ_MODEL
+    assert caption["api_key"] == "groq-secret"
+    assert "subtitle_engine" not in cfg
+    assert "local_whisper" not in cfg
+    assert "mediapipe_settings" not in cfg
+    assert cfg["face_tracking_mode"] == "center"
 
 
 def test_text_style_settings_are_validated(tmp_path):
@@ -808,11 +862,12 @@ def test_blur_filter_matches_preview_geometry():
     harness.blur_background_settings = {"zoom": 1.08, "strength": 3, "scale": 1.5}
     filter_graph = harness._preview_blur_filter(720, 1280)
     assert "scale=1080:608:force_original_aspect_ratio=increase,crop=1080:608[fg]" in filter_graph
-    assert "gblur=sigma=6.353:steps=2" in filter_graph
+    assert "boxblur=" in filter_graph
+    assert "scale=320:569" in filter_graph
     assert "colorchannelmixer=rr=0.6:gg=0.6:bb=0.6" in filter_graph
     assert "overlay=(W-w)/2:(H-h)/2" in filter_graph
     harness.blur_background_settings["strength"] = 0
-    assert "gblur=" not in harness._preview_blur_filter(720, 1280)
+    assert "boxblur=" not in harness._preview_blur_filter(720, 1280)
 
 
 def test_high_resolution_caps_parallel_cpu_workers():
