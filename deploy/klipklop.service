@@ -1,0 +1,23 @@
+[Unit]
+Description=KlipKlop web application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=klipklop
+Group=klipklop
+WorkingDirectory=/opt/klipklop
+EnvironmentFile=/etc/klipklop/klipklop.env
+ExecStart=/opt/klipklop/.venv/bin/python server.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/klipklop/data
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

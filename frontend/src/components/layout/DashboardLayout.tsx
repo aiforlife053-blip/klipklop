@@ -74,7 +74,8 @@ export default function DashboardLayout() {
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/logout', { method: 'POST' });
+      await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
+      sessionStorage.clear();
       window.location.href = '/login';
     } catch (err) {
       console.error(err);

@@ -1,6 +1,4 @@
 import base64
-import hashlib
-import hmac
 import json
 import mimetypes
 import os
@@ -24,7 +22,7 @@ if sys.version_info < (3, 11) and os.name == "nt" and os.environ.get("KLIPKLOP_P
         raise SystemExit("Python 3.11+ required. Run: py -3.12 server.py")
 
 from job_manager import WebJobManager
-from social_auth import delete_youtube_token, is_youtube_connected, start_youtube_oauth, check_youtube_oauth_status
+from social_auth import delete_youtube_token, finish_youtube_oauth, is_youtube_connected, start_youtube_oauth, check_youtube_oauth_status
 from youtube_uploader import delete_youtube_video, list_existing_youtube_videos, upload_youtube_video
 
 
@@ -34,18 +32,27 @@ SESSION_TTL = 86400
 
 
 def _supabase_config():
-    cfg = MANAGER._config().config
-    url = os.environ.get("SUPABASE_URL") or str(cfg.get("supabase_url") or "")
-    anon_key = os.environ.get("SUPABASE_ANON_KEY") or str(cfg.get("supabase_anon_key") or "")
-    secret = os.environ.get("KLIPKLOP_SECRET") or ""
+    url = os.environ.get("SUPABASE_URL", "")
+    anon_key = os.environ.get("SUPABASE_ANON_KEY", "")
+    secret = os.environ.get("KLIPKLOP_SECRET") or os.environ.get("SESSION_SECRET") or ""
     return url.rstrip("/"), anon_key, secret
 
 
-def _sign_session(email, secret):
-    ts = str(int(__import__("time").time()))
-    body = f"{email}:{ts}"
-    sig = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
-    return base64.urlsafe_b64encode(f"{body}:{sig}".encode()).decode()
+_USER_MANAGERS = {}
+_USER_MANAGERS_LOCK = __import__("threading").Lock()
+_LOGIN_ATTEMPTS = {}
+_LOGIN_LOCK = __import__("threading").Lock()
+
+
+def _public_mode():
+    return os.environ.get("SECURITY_MODE", "local") == "public"
+
+
+def _allowed_origins():
+    configured = os.environ.get("ALLOWED_ORIGINS", "")
+    if configured:
+        return {item.strip().rstrip("/") for item in configured.split(",") if item.strip()}
+    return {"http://localhost:5173", "http://127.0.0.1:5173"} if not _public_mode() else set()
 
 
 class WebKlipHandler(BaseHTTPRequestHandler):
@@ -57,15 +64,18 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/static/") or parsed.path == "/logo%20klipklop.png":
             self._static(parsed.path)
             return
+        if parsed.path == "/api/youtube/callback":
+            self._youtube_callback(parsed.query)
+            return
         if not self._authenticated():
             self._redirect_login() if not parsed.path.startswith("/api/") else self._json({"status": "error", "message": "Unauthorized"}, 401)
             return
         if parsed.path == "/api/status":
-            self._json(MANAGER.status())
+            self._json(self._manager().status())
         elif parsed.path == "/api/settings":
-            self._json(MANAGER.get_settings())
+            self._json(self._manager().get_settings())
         elif parsed.path == "/api/outputs":
-            self._json(MANAGER.list_outputs())
+            self._json(self._manager().list_outputs())
         elif parsed.path == "/api/download":
             self._download(parsed.query)
         elif parsed.path == "/api/stream":
@@ -76,7 +86,7 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/social/status":
             self._json(is_youtube_connected(self._current_user()))
         elif parsed.path == "/api/activity":
-            self._json(MANAGER.list_activities())
+            self._json(self._manager().list_activities())
         elif parsed.path.startswith("/api/meta"):
             self._handle_api_meta()
         elif parsed.path.startswith("/api/"):
@@ -90,14 +100,17 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/login":
             self._login()
             return
-        if parsed.path == "/api/signup":
-            self._signup()
-            return
         if parsed.path == "/api/logout":
+            if not self._origin_allowed():
+                self._json({"status": "error", "message": "Invalid origin"}, 403)
+                return
             self._logout()
             return
         if not self._authenticated():
             self._json({"status": "error", "message": "Unauthorized"}, 401)
+            return
+        if not self._origin_allowed():
+            self._json({"status": "error", "message": "Invalid origin"}, 403)
             return
 
         # Different endpoints have different payload size limits
@@ -114,32 +127,32 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._json(err[0], err[1])
             return
         if parsed.path == "/api/settings":
-            self._json(MANAGER.save_settings(payload))
+            self._json(self._manager().save_settings(payload))
         elif parsed.path == "/api/check-api-key":
-            result = MANAGER.check_ai_provider(payload)
+            result = self._manager().check_ai_provider(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/cookies":
-            self._json(MANAGER.save_cookies(payload.get("content", payload.get("cookie_text", ""))))
+            self._json(self._manager().save_cookies(payload.get("content", payload.get("cookie_text", ""))))
         elif parsed.path == "/api/watermark/upload":
             self._upload_watermark(payload)
         elif parsed.path == "/api/start":
-            result = MANAGER.start(payload)
+            result = self._manager().start(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/stop":
-            self._json(MANAGER.stop())
+            self._json(self._manager().stop())
         elif parsed.path == "/api/delete":
-            result = MANAGER.delete_output(payload)
+            result = self._manager().delete_output(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/save":
-            result = MANAGER.save_output(payload)
+            result = self._manager().save_output(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path in {"/api/logs/clear", "/api/clear-logs", "/api/clear_logs"}:
-            self._json(MANAGER.clear_logs())
+            self._json(self._manager().clear_logs())
         elif parsed.path == "/api/activity":
-            result = MANAGER.log_activity(payload)
+            result = self._manager().log_activity(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/activity/clear":
-            self._json(MANAGER.clear_activities())
+            self._json(self._manager().clear_activities())
         elif parsed.path == "/api/social/youtube/connect":
             try:
                 result = start_youtube_oauth(self._current_user())
@@ -148,7 +161,7 @@ class WebKlipHandler(BaseHTTPRequestHandler):
                 self._json({"status": "error", "message": str(e)}, 400)
         elif parsed.path == "/api/social/youtube/oauth-status":
             try:
-                result = check_youtube_oauth_status()
+                result = check_youtube_oauth_status(self._current_user())
                 self._json(result)
             except Exception as e:
                 self._json({"status": "error", "message": str(e)}, 400)
@@ -165,7 +178,7 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/social/youtube/delete":
             try:
                 result = {"status": "ok", **delete_youtube_video(str(payload.get("video_id") or ""), self._current_user())}
-                MANAGER.log_activity({"action": "youtube_delete", "detail": result.get("video_id", "")})
+                self._manager().log_activity({"action": "youtube_delete", "detail": result.get("video_id", "")})
                 self._json(result)
             except Exception as e:
                 self._json({"status": "error", "message": str(e)}, 400)
@@ -178,12 +191,15 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         if not self._authenticated():
             self._json({"status": "error", "message": "Unauthorized"}, 401)
             return
+        if not self._origin_allowed():
+            self._json({"status": "error", "message": "Invalid origin"}, 403)
+            return
         if parsed.path == "/api/settings":
             payload, err = self._payload(max_size=65536)
             if err is not None:
                 self._json(err[0], err[1])
                 return
-            self._json(MANAGER.save_settings(payload))
+            self._json(self._manager().save_settings(payload))
         else:
             self._json({"status": "error", "message": "Not found"}, 404)
 
@@ -202,41 +218,72 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         if not raw or len(raw) > 400_000:
             self._json({"status": "error", "message": "Watermark maksimal 400KB"}, 400)
             return
-        folder = ROOT / "static" / "watermarks"
+        folder = self._manager().app_dir / "watermark"
         folder.mkdir(parents=True, exist_ok=True)
         target = folder / f"watermark{suffix}"
         target.write_bytes(raw)
-        self._json({"status": "ok", "path": str(target), "url": f"/static/watermarks/{target.name}"})
+        cfg_mgr = self._manager()._config()
+        cfg_mgr.config.setdefault("watermark", {})["image_path"] = str(target.resolve())
+        cfg_mgr.save()
+        self._json({"status": "ok", "path": str(target), "url": f"/api/download?path={quote(str(target))}"})
 
-    def _current_user(self):
-        raw = self.headers.get("Cookie", "")
-        token = ""
-        for part in raw.split(";"):
+    def _access_token(self):
+        for part in self.headers.get("Cookie", "").split(";"):
             name, _, value = part.strip().partition("=")
             if name == SESSION_COOKIE:
-                token = value
-                break
-        if not token:
+                return value
+        return ""
+
+    def _current_user(self):
+        cached = getattr(self, "_user_id", None)
+        if cached is not None:
+            return cached
+        token = self._access_token()
+        url, anon_key, _ = _supabase_config()
+        if not token or not url or not anon_key:
+            self._user_id = ""
             return ""
-        _, _, secret = _supabase_config()
+        request = Request(f"{url}/auth/v1/user", headers={"apikey": anon_key, "Authorization": f"Bearer {token}"})
         try:
-            body = base64.urlsafe_b64decode(token.encode()).decode()
-            email, ts, sig = body.rsplit(":", 2)
-            age = __import__("time").time() - int(ts)
+            with urlopen(request, timeout=10) as response:
+                user_id = str(__import__("uuid").UUID(str(json.loads(response.read().decode()).get("id"))))
         except Exception:
-            return ""
-        expected = hmac.new(secret.encode(), f"{email}:{ts}".encode(), hashlib.sha256).hexdigest()
-        return email if "@" in email and 0 <= age <= SESSION_TTL and hmac.compare_digest(sig, expected) else ""
+            user_id = ""
+        self._user_id = user_id
+        return user_id
+
+    def _manager(self):
+        user_id = self._current_user()
+        if not user_id:
+            raise PermissionError("Unauthorized")
+        with _USER_MANAGERS_LOCK:
+            return _USER_MANAGERS.setdefault(user_id, WebJobManager(ROOT / "data" / user_id, user_id=user_id))
+
+    def _origin_allowed(self):
+        origin = self.headers.get("Origin", "").rstrip("/")
+        return bool(origin and origin in _allowed_origins())
 
     def _authenticated(self):
         return bool(self._current_user())
 
     def _login(self):
+        if not self._origin_allowed():
+            self._json({"status": "error", "message": "Invalid origin"}, 403)
+            return
+        now = __import__("time").monotonic()
+        client = self.client_address[0]
+        with _LOGIN_LOCK:
+            attempts = [stamp for stamp in _LOGIN_ATTEMPTS.get(client, []) if now - stamp < 300]
+            if len(attempts) >= 10:
+                self._json({"status": "error", "message": "Too many login attempts"}, 429)
+                return
+            attempts.append(now)
+            _LOGIN_ATTEMPTS[client] = attempts
         payload, err = self._payload(max_size=4096)
         if err is not None:
             self._json(err[0], err[1])
             return
-        url, anon_key, secret = _supabase_config()
+        url, anon_key, _ = _supabase_config()
         if not url or "YOUR_" in url or not anon_key or "YOUR_" in anon_key:
             self._json({"status": "error", "message": "Supabase belum dikonfigurasi"}, 500)
             return
@@ -265,52 +312,14 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         except Exception:
             self._json({"status": "error", "message": "Supabase gagal dihubungi"}, 401)
             return
-        token = _sign_session(data.get("user", {}).get("email") or email, secret)
+        token = str(data.get("access_token") or "")
+        if not token:
+            self._json({"status": "error", "message": "Supabase did not return an access token"}, 401)
+            return
         self.send_response(200)
         self._add_security_headers()
-        self.send_header("Set-Cookie", f"{SESSION_COOKIE}={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_TTL}")
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.end_headers()
-        self.wfile.write(b'{"status":"ok"}')
-
-    def _signup(self):
-        payload, err = self._payload(max_size=4096)
-        if err is not None:
-            self._json(err[0], err[1])
-            return
-        url, anon_key, _ = _supabase_config()
-        if not url or "YOUR_" in url or not anon_key or "YOUR_" in anon_key:
-            self._json({"status": "error", "message": "Supabase belum dikonfigurasi"}, 500)
-            return
-        email = str(payload.get("email", "")).strip()
-        password = str(payload.get("password", ""))
-        if not email or not password:
-            self._json({"status": "error", "message": "Email dan password wajib diisi"}, 400)
-            return
-        req = Request(
-            f"{url}/auth/v1/signup",
-            data=json.dumps({"email": email, "password": password}).encode(),
-            headers={"apikey": anon_key, "Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urlopen(req, timeout=15) as res:
-                data = json.loads(res.read().decode())
-        except HTTPError as e:
-            try:
-                error_data = json.loads(e.read().decode())
-                message = error_data.get("msg") or error_data.get("message")
-            except Exception:
-                message = "Gagal daftar. Cek email/password atau pengaturan Supabase."
-            self._json({"status": "error", "message": message}, 400)
-            return
-        except Exception:
-            self._json({"status": "error", "message": "Gagal daftar. Cek koneksi atau pengaturan Supabase."}, 400)
-            return
-        token = _sign_session(data.get("user", {}).get("email") or email, _supabase_config()[2])
-        self.send_response(200)
-        self._add_security_headers()
-        self.send_header("Set-Cookie", f"{SESSION_COOKIE}={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_TTL}")
+        secure = "; Secure" if _public_mode() else ""
+        self.send_header("Set-Cookie", f"{SESSION_COOKIE}={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_TTL}{secure}")
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.end_headers()
         self.wfile.write(b'{"status":"ok"}')
@@ -318,7 +327,8 @@ class WebKlipHandler(BaseHTTPRequestHandler):
     def _logout(self):
         self.send_response(200)
         self._add_security_headers()
-        self.send_header("Set-Cookie", f"{SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0")
+        secure = "; Secure" if _public_mode() else ""
+        self.send_header("Set-Cookie", f"{SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0{secure}")
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.end_headers()
         self.wfile.write(b'{"status":"ok"}')
@@ -350,9 +360,17 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def _youtube_callback(self, query):
+        params = parse_qs(query)
+        try:
+            finish_youtube_oauth(params.get("state", [""])[0], params.get("code", [None])[0], params.get("error", [None])[0])
+            self._json({"status": "connected"})
+        except Exception as exc:
+            self._json({"status": "error", "message": str(exc)}, 400)
+
     def _upload_youtube(self, payload):
         target = Path(str(payload.get("path", ""))).resolve()
-        output_root = Path(MANAGER.get_settings()["output_dir"] or str(MANAGER.output_dir)).resolve()
+        output_root = Path(self._manager().get_settings()["output_dir"] or str(self._manager().output_dir)).resolve()
         if not target.exists() or output_root not in target.parents or target.suffix.lower() not in {".mp4", ".webm", ".mkv", ".mov", ".avi"}:
             self._json({"status": "error", "message": "File video tidak ditemukan"}, 400)
             return
@@ -361,7 +379,7 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         privacy = str(payload.get("privacy") or "private").strip()
         try:
             result = upload_youtube_video(target, title, description, privacy, self._current_user())
-            MANAGER.log_activity({"action": "youtube_upload", "detail": result.get("video_id", target.name)})
+            self._manager().log_activity({"action": "youtube_upload", "detail": result.get("video_id", target.name)})
             self._json({"status": "ok", **result})
         except Exception as e:
             self._json({"status": "error", "message": str(e)}, 400)
@@ -411,7 +429,7 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
-            "img-src 'self' data: blob:; "
+            "img-src 'self' data: blob: https://i.ytimg.com https://*.ytimg.com; "
             "media-src 'self' blob:; "
             "connect-src 'self'; "
             "frame-ancestors 'none'; "
@@ -488,7 +506,7 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._json({"status": "error", "message": "Missing path"}, 400)
             return
         target = Path(path).resolve()
-        output_root = Path(MANAGER.get_settings()["output_dir"] or str(MANAGER.output_dir)).resolve()
+        output_root = Path(self._manager().get_settings()["output_dir"] or str(self._manager().output_dir)).resolve()
         video_exts = {".mp4", ".webm", ".mkv", ".mov", ".avi"}
         img_exts = {".jpg", ".jpeg", ".png"}
         allowed = video_exts | img_exts
@@ -576,7 +594,7 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._json({"status": "error", "message": "Missing path"}, 400)
             return
         target = Path(path).resolve()
-        output_root = Path(MANAGER.get_settings()["output_dir"] or str(MANAGER.output_dir)).resolve()
+        output_root = Path(self._manager().get_settings()["output_dir"] or str(self._manager().output_dir)).resolve()
         allowed = {".mp4", ".webm", ".mkv", ".mov", ".avi", ".mp3", ".wav", ".json", ".srt", ".ass", ".txt", ".vtt", ".jpg", ".jpeg", ".png"}
         if not target.exists() or output_root not in target.parents or target.suffix.lower() not in allowed:
             self._json({"status": "error", "message": "File not found"}, 404)

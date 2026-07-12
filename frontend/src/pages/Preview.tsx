@@ -100,9 +100,12 @@ export default function Preview() {
   const handleSaveSettings = async () => {
     setSaveState('saving');
     try {
+      const { api_key: _apiKey, caption_api_key: _captionApiKey, ...previewSettings } = settings;
+      void _apiKey;
+      void _captionApiKey;
       await api('/api/settings', {
         method: 'POST',
-        body: JSON.stringify(settings),
+        body: JSON.stringify(previewSettings),
       });
       setSaveState('saved');
       setLastSaved(new Date());
@@ -205,6 +208,7 @@ export default function Preview() {
                   whiteSpace: 'pre-wrap',
                   lineHeight: '1.2',
                   WebkitTextStroke: `${(settings.hook_style.outline_thickness ?? 1.5) * 0.5}px ${settings.hook_style.outline_color || '#000000'}`,
+                  paintOrder: 'stroke fill',
                   textShadow: '0 2px 4px rgba(0,0,0,0.5)',
                   width: '90%',
                 }}
@@ -238,6 +242,7 @@ export default function Preview() {
                   fontFamily: `'${['Plus Jakarta Sans', 'Poppins'].includes(settings.subtitle?.font_family) ? settings.subtitle.font_family : 'Plus Jakarta Sans'}', sans-serif`,
                   textTransform: settings.subtitle?.text_transform || 'uppercase',
                   WebkitTextStroke: `${(settings.subtitle?.outline_thickness ?? 1) * 0.5}px ${settings.subtitle?.outline_color || '#000000'}`,
+                  paintOrder: 'stroke fill',
                   textShadow: '0 1px 2px rgba(0,0,0,0.5)',
                 }}>
                   CONTOH <span style={{ color: settings.subtitle?.color || '#00BFFF' }}>SUBTITLE KLIP</span> VIDEO

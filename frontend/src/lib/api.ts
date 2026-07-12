@@ -1,5 +1,6 @@
 export async function api(path: string, options: RequestInit = {}) {
   const res = await fetch(path, {
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', ...options.headers },
     ...options
   });

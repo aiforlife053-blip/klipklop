@@ -5,10 +5,8 @@ import { Link } from 'react-router-dom';
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
@@ -25,12 +23,11 @@ export default function Login() {
     setError('');
 
     try {
-      await api(mode === 'login' ? '/api/login' : '/api/signup', {
+      await api('/api/login', {
         method: 'POST',
-        // Note: keeping name in payload if signup, though backend might not use it yet
-        body: JSON.stringify(mode === 'signup' ? { email, password, name } : { email, password })
+        body: JSON.stringify({ email, password })
       });
-      sessionStorage.setItem('klipklop_toast', mode === 'login' ? 'Berhasil login' : 'Berhasil daftar');
+      sessionStorage.setItem('klipklop_toast', 'Berhasil login');
       window.location.href = '/';
     } catch (err: any) {
       setError(err.message || 'Gagal');
@@ -82,51 +79,14 @@ export default function Login() {
         </section>
 
         {/* Right: auth form */}
-        <section className="flex flex-1 items-center justify-center p-8 lg:p-14" aria-label="Formulir masuk dan daftar">
+        <section className="flex flex-1 items-center justify-center p-8 lg:p-14" aria-label="Formulir masuk">
           <div className="flex w-full max-w-md flex-col gap-6 rounded-2xl border border-line bg-card p-8">
             <div className="flex flex-col gap-2">
-              <h1 className="font-display text-2xl font-bold">{mode === 'login' ? 'Masuk' : 'Daftar Akun'}</h1>
-              <p className="text-sm leading-relaxed text-muted">
-                {mode === 'login' ? 'Lanjutkan ke dashboard KlipKlop.' : 'Mulai perjalananmu membuat klip viral.'}
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-1 rounded-xl border border-line bg-secondary p-1" role="tablist">
-              <button 
-                type="button" 
-                onClick={() => setMode('login')}
-                className={`h-10 rounded-lg text-sm font-bold capitalize transition-colors ${mode === 'login' ? 'bg-primary text-primary-foreground' : 'bg-transparent text-muted hover:text-foreground'}`}
-                role="tab" 
-                aria-selected={mode === 'login'}
-              >
-                Masuk
-              </button>
-              <button 
-                type="button" 
-                onClick={() => setMode('signup')}
-                className={`h-10 rounded-lg text-sm font-bold capitalize transition-colors ${mode === 'signup' ? 'bg-primary text-primary-foreground' : 'bg-transparent text-muted hover:text-foreground'}`}
-                role="tab" 
-                aria-selected={mode === 'signup'}
-              >
-                Daftar
-              </button>
+              <h1 className="font-display text-2xl font-bold">Masuk</h1>
+              <p className="text-sm leading-relaxed text-muted">Lanjutkan ke dashboard KlipKlop.</p>
             </div>
 
             <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-              {mode === 'signup' && (
-                <div className="flex flex-col gap-2">
-                  <label htmlFor="auth-name" className="text-sm font-medium">Nama</label>
-                  <input 
-                    id="auth-name" 
-                    type="text" 
-                    placeholder="Nama kamu" 
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                    className="h-11 w-full rounded-xl border border-line bg-secondary px-4 text-sm text-foreground placeholder:text-muted focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary" 
-                  />
-                </div>
-              )}
 
               <div className="flex flex-col gap-2">
                 <label htmlFor="auth-email" className="text-sm font-medium">Email</label>
@@ -168,11 +128,9 @@ export default function Login() {
                 </div>
               </div>
 
-              {mode === 'login' && (
-                <div className="flex justify-end">
-                  <button type="button" className="p-0 text-xs font-medium text-primary transition-opacity hover:opacity-80">Lupa password?</button>
-                </div>
-              )}
+              <div className="flex justify-end">
+                <button type="button" className="p-0 text-xs font-medium text-primary transition-opacity hover:opacity-80">Lupa password?</button>
+              </div>
 
               {error && (
                 <div className="rounded-lg bg-destructive/10 p-3 text-sm font-medium text-destructive border border-destructive/20">
@@ -187,15 +145,10 @@ export default function Login() {
               >
                 {isLoading ? (
                   <span>Memproses...</span>
-                ) : mode === 'login' ? (
+                ) : (
                   <>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m10 17 5-5-5-5"/><path d="M15 12H3"/><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/></svg>
                     <span>Masuk</span>
-                  </>
-                ) : (
-                  <>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 21a8 8 0 0 1 13.292-6"/><circle cx="10" cy="8" r="5"/><line x1="19" x2="19" y1="16" y2="22"/><line x1="16" x2="22" y1="19" y2="19"/></svg>
-                    <span>Daftar Akun</span>
                   </>
                 )}
               </button>

@@ -420,7 +420,7 @@ def test_api_caption_setting_is_ignored_for_local_default(tmp_path):
     thread = manager.thread
     if thread:
         thread.join(1)
-    assert result["status"] == "started"
+    assert result["status"] == "queued"
     assert manager.captured["add_captions"] is True
 
 
@@ -434,7 +434,7 @@ def test_unsupported_screen_size_is_ignored(tmp_path):
     thread = manager.thread
     if thread:
         thread.join(1)
-    assert result["status"] == "started"
+    assert result["status"] == "queued"
 
 
 def test_rejects_when_busy(tmp_path):
@@ -583,11 +583,14 @@ def test_output_listing_groups_run_folders(tmp_path):
     clip.mkdir(parents=True)
     (run / "run.json").write_text(json.dumps({"title": "Judul", "caption": "2 klip", "timestamp": "2026-07-06T12:00:00"}))
     (clip / "master.mp4").write_bytes(b"x")
+    (clip / "data.json").write_text(json.dumps({"start_time": "00:01:02,000", "end_time": "00:01:12,000", "duration_seconds": 10, "virality_score": 9}), encoding="utf-8")
     manager = mod.WebJobManager(app_dir=tmp_path)
     result = manager.list_outputs()
     groups = result["groups"]
     assert groups[0]["title"] == "Judul"
     assert groups[0]["thumbnail"].endswith("master.mp4")
+    assert groups[0]["clips"][0]["start_time"] == "00:01:02,000"
+    assert groups[0]["clips"][0]["end_time"] == "00:01:12,000"
     assert result["outputs"] == result["files"]
 
 
@@ -646,6 +649,18 @@ def test_status_sanitizes_login_file_errors(tmp_path):
     assert "login file" in raw
 
 
+def test_any_staged_output_blocks_new_generation(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    run = tmp_path / "output" / "run"
+    clip = run / "clip"
+    clip.mkdir(parents=True)
+    (clip / "master.mp4").write_bytes(b"x")
+    (run / "run.json").write_text(json.dumps({"url": "https://www.youtube.com/watch?v=aaaaaaaaaaa", "status": "staged", "file_exists": True}), encoding="utf-8")
+    assert manager._has_staged_outputs() is True
+    result = manager.start({"url": "https://www.youtube.com/watch?v=bbbbbbbbbbb"})
+    assert result == {"status": "busy", "message": "Simpan atau hapus semua klip di Beranda sebelum generate baru"}
+
+
 class InstantJobManager(mod.WebJobManager):
     def _run(self, url, num_clips, add_captions, add_hook, subtitle_language, instruction):
         self.captured = {
@@ -664,7 +679,7 @@ def test_enable_captions_alias_can_disable_captions(tmp_path):
     manager = InstantJobManager(app_dir=tmp_path)
     result = manager.start({"url": "https://www.youtube.com/watch?v=abc", "enable_captions": False})
     thread = manager.thread
-    assert result == {"status": "started"}
+    assert result == {"status": "queued", "queue_position": 1}
     if thread:
         thread.join(1)
     assert manager.captured["add_captions"] is False
@@ -712,7 +727,7 @@ def test_youtube_url_alias_starts_job(tmp_path):
     thread = manager.thread
     if thread:
         thread.join(1)
-    assert result == {"status": "started"}
+    assert result == {"status": "queued", "queue_position": 1}
     assert manager.captured["url"] == "https://www.youtube.com/watch?v=abc"
 
 
@@ -722,7 +737,7 @@ def test_sixteen_by_nine_screen_size_is_ignored(tmp_path):
     thread = manager.thread
     if thread:
         thread.join(1)
-    assert result == {"status": "started"}
+    assert result == {"status": "queued", "queue_position": 1}
 
 
 class LegacySevenArgJobManager(mod.WebJobManager):
@@ -737,7 +752,7 @@ def test_legacy_seven_arg_run_gets_landscape_blur_enabled(tmp_path):
     thread = manager.thread
     if thread:
         thread.join(1)
-    assert result == {"status": "started"}
+    assert result == {"status": "queued", "queue_position": 1}
     assert manager.captured["landscape_blur"] is True
 
 
@@ -861,11 +876,12 @@ def test_blur_filter_matches_preview_geometry():
     harness = object.__new__(PortraitMixin)
     harness.blur_background_settings = {"zoom": 1.08, "strength": 3, "scale": 1.5}
     filter_graph = harness._preview_blur_filter(720, 1280)
-    assert "scale=1080:608:force_original_aspect_ratio=increase,crop=1080:608[fg]" in filter_graph
+    assert "scale=1080:608:force_original_aspect_ratio=decrease" in filter_graph
+    assert "pad=1080:608:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1[fg]" in filter_graph
     assert "boxblur=" in filter_graph
     assert "scale=320:569" in filter_graph
     assert "colorchannelmixer=rr=0.6:gg=0.6:bb=0.6" in filter_graph
-    assert "overlay=(W-w)/2:(H-h)/2" in filter_graph
+    assert "overlay=(W-w)/2:(H-h)/2,setsar=1" in filter_graph
     harness.blur_background_settings["strength"] = 0
     assert "boxblur=" not in harness._preview_blur_filter(720, 1280)
 

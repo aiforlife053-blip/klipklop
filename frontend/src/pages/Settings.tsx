@@ -5,6 +5,16 @@ import { api } from '@/lib/api';
 type ApiCheckState = 'idle' | 'checking' | 'ok' | 'error';
 type ProviderName = 'highlight_finder' | 'caption_maker';
 
+const settingsPayload = (settings: any) => ({
+  base_url: settings.base_url,
+  model: settings.model,
+  caption_base_url: settings.caption_base_url,
+  caption_model: settings.caption_model,
+  output_dir: settings.output_dir,
+  ...(settings.api_key ? { api_key: settings.api_key } : {}),
+  ...(settings.caption_api_key ? { caption_api_key: settings.caption_api_key } : {}),
+});
+
 export default function Settings() {
   const { settings, setSettings } = useOutletContext<any>();
   const [isSaving, setIsSaving] = useState(false);
@@ -42,15 +52,24 @@ export default function Settings() {
   };
 
   const handleConnectYoutube = async () => {
+    const popup = window.open('', '_blank');
+    if (!popup) {
+      alert('Error: Popup diblokir browser');
+      return;
+    }
+    popup.opener = null;
     try {
       const res = await api('/api/social/youtube/connect', { method: 'POST' });
       if (res.auth_url) {
-        window.open(res.auth_url, '_blank');
+        const authUrl = new URL(res.auth_url);
+        if (authUrl.protocol !== 'https:') throw new Error('URL login YouTube tidak aman');
+        popup.location.replace(authUrl.href);
         alert('Selesaikan login di tab baru, lalu refresh halaman ini.');
       } else {
-        alert('Gagal mendapatkan URL login YouTube.');
+        throw new Error('Gagal mendapatkan URL login YouTube');
       }
     } catch (e: any) {
+      popup.close();
       alert('Error: ' + e.message);
     }
   };
@@ -71,7 +90,7 @@ export default function Settings() {
     try {
       const res = await api('/api/settings', {
         method: 'POST',
-        body: JSON.stringify(settings)
+        body: JSON.stringify(settingsPayload(settings))
       });
       applySavedSettings(res.settings);
       showSaveMessage('Konfigurasi berhasil disimpan.');
@@ -133,7 +152,7 @@ export default function Settings() {
         : { clear_caption_api_key: true };
       const res = await api('/api/settings', {
         method: 'POST',
-        body: JSON.stringify({ ...settings, api_key: '', caption_api_key: '', ...clearSetting }),
+        body: JSON.stringify({ ...settingsPayload(settings), api_key: undefined, caption_api_key: undefined, ...clearSetting }),
       });
       applySavedSettings(res.settings);
       if (providerName === 'highlight_finder') {

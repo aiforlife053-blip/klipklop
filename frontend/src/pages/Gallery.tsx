@@ -170,7 +170,8 @@ export default function Gallery() {
             </button>
             <div className="relative mx-auto aspect-[9/16] w-full max-w-[280px] overflow-hidden rounded-xl border border-line bg-black">
               <video
-                className="size-full object-contain"
+                 className="absolute inset-0 size-full object-contain"
+
                 controls
                 preload="metadata"
                 poster={fmtImg(showDetailModal) || undefined}

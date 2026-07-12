@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="id" class="bg-background">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pengaturan — KlipKlop</title>
+<meta name="description" content="Kelola API key, model pemrosesan, dan pengaturan subtitle untuk KlipKlop." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          background: '#131417',
+          foreground: '#ebecef',
+          card: '#1c1d22',
+          secondary: '#24262c',
+          muted: '#8f929c',
+          primary: { DEFAULT: '#f2a33c', foreground: '#2b1e08' },
+          line: 'rgba(255,255,255,0.08)',
+          field: 'rgba(255,255,255,0.1)'
+        },
+        fontFamily: {
+          sans: ['Inter', 'system-ui', 'sans-serif'],
+          display: ['"Space Grotesk"', 'system-ui', 'sans-serif'],
+          mono: ['ui-monospace', '"SF Mono"', '"Cascadia Mono"', 'monospace']
+        }
+      }
+    }
+  }
+</script>
+<style>
+  :root { color-scheme: dark; }
+</style>
+</head>
+<body class="min-h-dvh bg-background font-sans text-foreground antialiased">
+
+<header class="sticky top-0 z-40 border-b border-line bg-background/80 backdrop-blur-md">
+  <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
+    <a href="index.html" class="flex items-center gap-2.5">
+      <span class="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/></svg>
+      </span>
+      <span class="font-display text-lg font-bold tracking-tight">KlipKlop</span>
+    </a>
+    <nav class="hidden items-center gap-1 md:flex" aria-label="Navigasi utama">
+      <a href="index.html" class="rounded-full px-4 py-2 text-sm text-muted transition-colors hover:bg-secondary hover:text-foreground">Dashboard</a>
+      <a href="galeri.html" class="rounded-full px-4 py-2 text-sm text-muted transition-colors hover:bg-secondary hover:text-foreground">Galeri</a>
+      <a href="konsol.html" class="rounded-full px-4 py-2 text-sm text-muted transition-colors hover:bg-secondary hover:text-foreground">Konsol</a>
+      <a href="preview-editor.html" class="rounded-full px-4 py-2 text-sm text-muted transition-colors hover:bg-secondary hover:text-foreground">Preview Editor</a>
+    </nav>
+    <div class="flex items-center gap-2">
+      <a href="pengaturan.html" class="flex size-9 items-center justify-center rounded-full border border-line bg-primary/15 text-primary" aria-label="Pengaturan" aria-current="page">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+      </a>
+      <button type="button" class="flex size-9 items-center justify-center rounded-full border border-line bg-secondary text-muted transition-colors hover:text-foreground" aria-label="Akun">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      </button>
+    </div>
+  </div>
+  <nav class="flex items-center gap-1 overflow-x-auto border-t border-line px-4 py-2 md:hidden" aria-label="Navigasi mobile">
+    <a href="index.html" class="whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm text-muted">Dashboard</a>
+    <a href="galeri.html" class="whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm text-muted">Galeri</a>
+    <a href="konsol.html" class="whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm text-muted">Konsol</a>
+    <a href="preview-editor.html" class="whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm text-muted">Preview Editor</a>
+  </nav>
+</header>
+
+<main class="mx-auto flex max-w-3xl flex-col gap-8 px-6 py-10">
+  <div class="flex flex-col gap-2">
+    <p class="text-sm font-medium uppercase tracking-widest text-primary">Pengaturan</p>
+    <h1 class="font-display text-3xl font-bold tracking-tight md:text-4xl">Konfigurasi Pengaturan</h1>
+    <p class="leading-relaxed text-muted">Kelola API key, model pemrosesan, dan pengaturan subtitle untuk KlipKlop.</p>
+  </div>
+
+  <form class="flex flex-col gap-6" onsubmit="event.preventDefault()">
+    <!-- Core Engine -->
+    <section class="flex flex-col gap-5 rounded-2xl border border-line bg-card p-6">
+      <div class="flex items-center gap-3">
+        <span class="flex size-9 items-center justify-center rounded-lg bg-primary/15 text-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>
+        </span>
+        <h2 class="font-display text-lg font-bold">Core Engine</h2>
+      </div>
+      <div class="flex flex-col gap-2">
+        <label for="base-url" class="text-sm font-medium">Base URL / Provider</label>
+        <input id="base-url" type="url" placeholder="https://generativelanguage.googleapis.com/v1beta/openai"
+          class="h-11 w-full rounded-xl border border-field bg-secondary px-4 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary" />
+      </div>
+      <div class="flex flex-col gap-2">
+        <label for="api-key" class="text-sm font-medium">API Key</label>
+        <div class="flex gap-3">
+          <input id="api-key" type="password" placeholder="Gemini/Groq API key"
+            class="h-11 min-w-0 flex-1 rounded-xl border border-field bg-secondary px-4 font-mono text-sm text-foreground placeholder:font-sans placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary" />
+          <button type="button" class="h-11 shrink-0 rounded-xl border border-primary/40 bg-primary/15 px-5 text-sm font-medium text-primary transition-colors hover:bg-primary/25">Check API</button>
+        </div>
+      </div>
+      <div class="flex flex-col gap-2">
+        <label for="model" class="text-sm font-medium">Model LLM / Pemrosesan</label>
+        <input id="model" type="text" placeholder="gemini-2.5-flash"
+          class="h-11 w-full rounded-xl border border-field bg-secondary px-4 font-mono text-sm text-foreground placeholder:font-sans placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary" />
+      </div>
+    </section>
+
+    <!-- Penyimpanan -->
+    <section class="flex flex-col gap-5 rounded-2xl border border-line bg-card p-6">
+      <div class="flex items-center gap-3">
+        <span class="flex size-9 items-center justify-center rounded-lg bg-primary/15 text-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>
+        </span>
+        <h2 class="font-display text-lg font-bold">Penyimpanan</h2>
+      </div>
+      <div class="flex flex-col gap-2">
+        <div class="flex items-center justify-between">
+          <label for="output-folder" class="text-sm font-medium">Folder Output</label>
+          <span class="rounded-full bg-secondary px-2.5 py-0.5 text-xs text-muted">Opsional</span>
+        </div>
+        <input id="output-folder" type="text" placeholder="Contoh: /Downloads/KlipKlop-Output"
+          class="h-11 w-full rounded-xl border border-field bg-secondary px-4 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary" />
+      </div>
+    </section>
+
+    <!-- Koneksi Sosial Media -->
+    <section class="flex flex-col gap-5 rounded-2xl border border-line bg-card p-6">
+      <div class="flex items-center gap-3">
+        <span class="flex size-9 items-center justify-center rounded-lg bg-primary/15 text-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/></svg>
+        </span>
+        <h2 class="font-display text-lg font-bold">Koneksi Sosial Media</h2>
+      </div>
+      <p class="text-sm leading-relaxed text-muted">Hubungkan akun sosial media untuk mempublikasikan klip langsung dari dashboard.</p>
+      <div class="flex flex-wrap gap-3">
+        <button type="button" class="rounded-xl border border-line bg-secondary px-5 py-2.5 text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary">Hubungkan TikTok</button>
+        <button type="button" class="rounded-xl border border-line bg-secondary px-5 py-2.5 text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary">Hubungkan Instagram</button>
+        <button type="button" class="rounded-xl border border-line bg-secondary px-5 py-2.5 text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary">Hubungkan YouTube Shorts</button>
+      </div>
+    </section>
+
+    <button type="submit" class="flex h-12 items-center justify-center gap-2 self-start rounded-xl bg-primary px-8 font-display text-base font-bold text-primary-foreground transition-opacity hover:opacity-90">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/></svg>
+      Simpan Pengaturan
+    </button>
+  </form>
+</main>
+</body>
+</html>

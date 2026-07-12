@@ -3,6 +3,14 @@ import { useOutletContext } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { api } from '@/lib/api';
 
+const loadingPhrases = [
+  'Sabar, biarkan AI memasak 🔥',
+  'Mencari momen paling FYP 🚀',
+  'Bikin klip yang bikin fyp meledak 💥',
+  'Meracik visual biar makin estetik 🎨',
+  'Tunggu bentar, lagi ngopi subtitle ☕',
+];
+
 export default function Dashboard() {
   const { status: globalStatus, settings } = useOutletContext<any>();
   const [youtubeUrl, setYoutubeUrl] = useState(() => sessionStorage.getItem('klipklop.youtubeUrl') || '');
@@ -48,13 +56,6 @@ export default function Dashboard() {
   };
   const [toastMessage, setToastMessage] = useState('');
 
-  const loadingPhrases = [
-    'Sabar, biarkan AI memasak 🔥',
-    'Mencari momen paling FYP 🚀',
-    'Bikin klip yang bikin fyp meledak 💥',
-    'Meracik visual biar makin estetik 🎨',
-    'Tunggu bentar, lagi ngopi subtitle ☕',
-  ];
   const [loadingPhraseIdx, setLoadingPhraseIdx] = useState(0);
 
   useEffect(() => {
@@ -70,7 +71,7 @@ export default function Dashboard() {
   const [, setJobStatus] = useState<any>(null);
   const [clips, setClips] = useState<any[]>([]);
   const [error, setError] = useState('');
-  const [videoMeta, setVideoMeta] = useState<{title?: string, author_name?: string, thumbnail_url?: string} | null>(() => {
+  const [videoMeta, setVideoMeta] = useState<{title?: string, author_name?: string, thumbnail_url?: string, thumbnail?: string} | null>(() => {
     try {
       return JSON.parse(sessionStorage.getItem('klipklop.videoMeta') || 'null');
     } catch {
@@ -110,9 +111,14 @@ export default function Dashboard() {
   const fetchOutputs = useCallback(async () => {
     try {
       const data = await api('/api/outputs');
-      const outputClips = (data?.groups || []).flatMap((group: any) =>
-        (group.clips || group.files || []).map((clip: any) => ({ ...clip, groupPath: group.path }))
-      );
+      const stagedGroup = (data?.groups || []).find((group: any) => {
+        const savedPaths = new Set(group.saved_clips || []);
+        return (group.clips || group.files || []).some((clip: any) => !savedPaths.has(clip.path));
+      });
+      const savedPaths = new Set(stagedGroup?.saved_clips || []);
+      const outputClips = (stagedGroup?.clips || stagedGroup?.files || [])
+        .filter((clip: any) => !savedPaths.has(clip.path))
+        .map((clip: any) => ({ ...clip, groupPath: stagedGroup.path, groupUrl: stagedGroup.url }));
       setClips(outputClips);
     } catch (e) {
       console.error('Fetch outputs failed', e);
@@ -181,7 +187,7 @@ export default function Dashboard() {
         method: 'POST',
         body: JSON.stringify(buildStartPayload()),
       });
-      if (result.status === 'error') {
+      if (result.status !== 'started') {
         setError(result.message || 'Gagal memulai proses.');
         setIsProcessing(false);
         return;
@@ -286,6 +292,38 @@ export default function Dashboard() {
     return clip.img || "";
   };
 
+  const parseTimestamp = (value: string) => {
+    const parts = String(value || '').replace(',', '.').split(':').map(Number);
+    if (parts.length !== 3 || parts.some(Number.isNaN)) return 0;
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  };
+
+  const fmtClock = (seconds: number) => {
+    const safeSeconds = Math.max(0, Math.round(seconds));
+    const minutes = Math.floor(safeSeconds / 60);
+    const secs = safeSeconds % 60;
+    return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
+
+  const previewThumbnail = videoMeta?.thumbnail_url || videoMeta?.thumbnail || '';
+
+  const viralityStats = (() => {
+    if (!clips.length) return null;
+    const scoredClips = clips.map((clip, index) => {
+      const rawScore = Number(clip.virality_score ?? 5);
+      const score = Math.max(0, Math.min(100, Math.round(rawScore <= 10 ? rawScore * 10 : rawScore)));
+      return { clip, index, score };
+    });
+    const best = scoredClips.reduce((top, item) => item.score > top.score ? item : top, scoredClips[0]);
+    const average = Math.round(scoredClips.reduce((sum, item) => sum + item.score, 0) / scoredClips.length);
+    const totalDuration = clips.reduce((sum, clip) => sum + (Number(clip.duration_seconds) || 0), 0);
+    const bars = Array.from({ length: 14 }, (_, index) => scoredClips[index % scoredClips.length]?.score || 0);
+    const timeline = scoredClips.map((item) => ({ ...item, startSeconds: parseTimestamp(item.clip.start_time) }));
+    const label = average >= 85 ? 'EXCELLENT' : average >= 70 ? 'GOOD' : average >= 50 ? 'FAIR' : 'LOW';
+    const uploadWindow = best.score >= 85 ? '18.00–21.00' : average >= 70 ? '12.00–14.00 atau 18.00–20.00' : '19.00–21.00';
+    return { best, average, totalDuration, bars, timeline, label, uploadWindow };
+  })();
+
   const [showDirections, setShowDirections] = useState(false);
 
   return (
@@ -352,9 +390,9 @@ export default function Dashboard() {
 
         <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-line bg-card text-left">
           <div className="relative min-h-[240px] flex-1 overflow-hidden bg-secondary">
-            {videoMeta?.thumbnail_url ? (
+            {previewThumbnail ? (
               <>
-                <img src={videoMeta.thumbnail_url} alt="Thumbnail" className="absolute inset-0 size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]" />
+                <img src={previewThumbnail} alt="Thumbnail" className="absolute inset-0 size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]" />
                 <span className="absolute inset-0 z-[2] flex items-center justify-center" aria-hidden="true">
                   <span className="flex size-14 items-center justify-center rounded-full bg-foreground/90 text-background backdrop-blur transition-transform duration-200 group-hover:scale-110">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" className="ml-0.5"><polygon points="6 3 20 12 6 21 6 3"/></svg>
@@ -389,7 +427,7 @@ export default function Dashboard() {
               <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
               Memproses
             </span>
-            <button onClick={handleStop} className="rounded-full border border-destructive/40 bg-destructive/10 px-4 py-1.5 text-xs font-bold text-destructive">Batal</button>
+            <button onClick={handleStop} className="rounded-full border border-destructive/40 bg-destructive/10 px-4 py-1.5 text-xs font-bold text-destructive">Batalkan proses</button>
           </div>
           <div className="grid gap-4 min-[900px]:grid-cols-4 min-[900px]:gap-0">
              <div className="relative flex items-start gap-3 min-[900px]:pr-6 min-[900px]:after:absolute min-[900px]:after:right-4 min-[900px]:after:top-5 min-[900px]:after:h-px min-[900px]:after:w-[calc(100%-4.25rem)] min-[900px]:after:bg-primary min-[900px]:after:content-['']">
@@ -489,7 +527,7 @@ export default function Dashboard() {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f2a33c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
               <h2 className="text-xs font-bold uppercase tracking-[0.15em] text-muted">Virality Wave</h2>
             </div>
-            {clips.length === 0 ? (
+            {clips.length === 0 || !viralityStats ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-3 py-8 text-center text-muted">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted/50"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
                 <p className="text-sm font-medium">Belum ada data</p>
@@ -498,23 +536,32 @@ export default function Dashboard() {
             ) : (
               <>
                 <div className="flex items-baseline justify-between">
-                  <p className="font-display text-5xl font-bold text-foreground">84%</p>
-                  <span className="rounded-full bg-primary/15 px-3 py-1 text-[0.6875rem] font-bold tracking-wider text-primary">EXCELLENT</span>
+                  <p className="font-display text-5xl font-bold text-foreground">{viralityStats.average}%</p>
+                  <span className="rounded-full bg-primary/15 px-3 py-1 text-[0.6875rem] font-bold tracking-wider text-primary">{viralityStats.label}</span>
                 </div>
-                <div className="flex h-24 items-end gap-1.5" role="img" aria-label="Grafik gelombang viralitas dengan skor rata-rata 84 persen">
-                  {[28, 42, 35, 88, 96, 52, 46, 78, 40, 90, 58, 72, 34, 26].map((h, i) => (
-                    <span key={i} className={`flex-1 rounded-full ${h >= 70 ? 'bg-primary' : 'bg-secondary'}`} style={{ height: `${h}%` }}></span>
+                <div className="flex h-24 items-end gap-1.5" role="img" aria-label={`Grafik gelombang viralitas dengan skor rata-rata ${viralityStats.average} persen`}>
+                  {viralityStats.bars.map((score, i) => (
+                    <span key={i} className={`flex-1 rounded-full ${score >= viralityStats.average ? 'bg-primary' : 'bg-secondary'}`} style={{ height: `${Math.max(18, score)}%` }}></span>
                   ))}
                 </div>
-                <p className="text-sm leading-relaxed text-muted">Peak engagement terdeteksi di <strong className="font-medium text-foreground">00:45</strong> karena kontras adegan tinggi dan pattern interrupt.</p>
+                <div className="flex flex-col gap-2 rounded-xl bg-secondary/45 p-3">
+                  {viralityStats.timeline.map((item) => (
+                    <div key={item.clip.path || item.index} className="grid grid-cols-[auto_1fr_auto] items-center gap-2 text-xs">
+                      <span className="font-bold text-primary">Klip {item.index + 1}</span>
+                      <span className="truncate text-muted">{fmtClock(item.startSeconds)} • {item.clip.title || item.clip.name}</span>
+                      <span className="font-bold text-foreground">{item.score}%</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-sm leading-relaxed text-muted">Semua klip di atas berasal dari link terakhir yang berhasil digenerate. Skor tertinggi ada pada <strong className="font-medium text-foreground">Klip {viralityStats.best.index + 1}</strong>.</p>
                 <div className="flex flex-col gap-2.5 border-t border-line pt-4">
-                  <div className="flex items-center justify-between text-sm"><span className="text-muted">Skor tertinggi</span><span className="font-bold text-primary">92%</span></div>
-                  <div className="flex items-center justify-between text-sm"><span className="text-muted">Rata-rata skor</span><span className="font-bold">84%</span></div>
-                  <div className="flex items-center justify-between text-sm"><span className="text-muted">Total durasi</span><span className="font-bold">464s</span></div>
+                  <div className="flex items-center justify-between text-sm"><span className="text-muted">Skor tertinggi</span><span className="font-bold text-primary">{viralityStats.best.score}%</span></div>
+                  <div className="flex items-center justify-between text-sm"><span className="text-muted">Rata-rata skor</span><span className="font-bold">{viralityStats.average}%</span></div>
+                  <div className="flex items-center justify-between text-sm"><span className="text-muted">Total durasi</span><span className="font-bold">{Math.round(viralityStats.totalDuration)}s</span></div>
                 </div>
                 <div className="flex items-start gap-2.5 rounded-xl border border-primary/30 bg-primary/10 p-3.5 text-primary">
                   <svg className="mt-0.5 flex-none" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
-                  <p className="text-xs leading-relaxed">Klip 1 punya potensi viral tertinggi. Unggah antara pukul <strong>18.00&ndash;21.00</strong> untuk jangkauan maksimal.</p>
+                  <p className="text-xs leading-relaxed">Tips upload: unggah <strong>Klip {viralityStats.best.index + 1}</strong> sekitar pukul <strong>{viralityStats.uploadWindow}</strong>. Pakai hook awal yang sama dengan judul: <strong>{viralityStats.best.clip.title || viralityStats.best.clip.name}</strong>.</p>
                 </div>
               </>
             )}
@@ -529,7 +576,7 @@ export default function Dashboard() {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
             </button>
              <div className="relative mx-auto aspect-[9/16] w-full max-w-[260px] overflow-hidden rounded-xl border border-line bg-black">
-               <video className="size-full object-contain" controls preload="metadata" poster={fmtImg(showDetailModal) || undefined} src={`/api/stream?path=${encodeURIComponent(showDetailModal.path)}`} />
+               <video className="absolute inset-0 size-full object-contain" controls preload="metadata" poster={fmtImg(showDetailModal) || undefined} src={`/api/stream?path=${encodeURIComponent(showDetailModal.path)}`} />
                <span className="pointer-events-none absolute left-2.5 top-2.5 flex items-center gap-1.5 rounded-full bg-primary px-2.5 py-1 text-xs font-bold text-primary-foreground">
                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
                  <span>{fmtScore(showDetailModal)}</span>

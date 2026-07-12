@@ -69,12 +69,12 @@ export default function Console() {
         </div>
       </div>
 
-      <section className="overflow-hidden flex flex-col h-[500px] flex-1 rounded-2xl border border-line bg-card" aria-label="Log konsol">
+      <section className="flex max-h-[min(620px,calc(100vh-220px))] min-h-[360px] flex-col overflow-hidden rounded-2xl border border-line bg-card" aria-label="Log konsol">
         <div className="flex items-center gap-2 border-b border-line bg-secondary/50 px-5 py-3">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f2a33c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>
           <span className="font-mono text-xs text-muted">klipklop — pipeline.log</span>
         </div>
-        <div className="flex-1 overflow-auto p-5">
+        <div className="min-h-0 flex-1 overflow-auto overscroll-contain p-5">
           <ul className="flex list-none flex-col gap-1 font-mono text-sm">
             {logs.length === 0 ? (
               <li className="text-muted italic">Menunggu log pemrosesan...</li>
@@ -97,7 +97,7 @@ export default function Console() {
                 return (
                   <li key={i} className="flex flex-col sm:flex-row gap-2 sm:gap-4 rounded-lg px-2 py-1.5 hover:bg-secondary/50">
                     <span className={`shrink-0 uppercase ${levelClass} min-w-[70px]`}>{level}</span>
-                    <span className="leading-relaxed text-foreground/90 break-words flex-1 whitespace-pre-wrap">{log}</span>
+                    <span className="min-w-0 flex-1 whitespace-pre-wrap break-all leading-relaxed text-foreground/90">{log}</span>
                   </li>
                 );
               })

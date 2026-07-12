@@ -1,11 +1,16 @@
 import json
+import os
+import queue
 import re
+import uuid
 import shutil
 import sys
 import threading
 from datetime import datetime
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import parse_qs, quote, urlparse
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -22,10 +27,57 @@ GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 GEMINI_MODEL = "gemini-2.5-flash"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 GROQ_MODEL = "whisper-large-v3-turbo"
+_GLOBAL_QUEUE = queue.Queue()
+_GLOBAL_QUEUE_LOCK = threading.Lock()
+_GLOBAL_PENDING = []
+
+
+def _queue_position_for(manager):
+    with _GLOBAL_QUEUE_LOCK:
+        for index, item in enumerate(_GLOBAL_PENDING, 1):
+            if item is manager:
+                return index
+    return None
+
+
+def _global_worker():
+    while True:
+        manager, args = _GLOBAL_QUEUE.get()
+        handle = manager.thread
+        with _GLOBAL_QUEUE_LOCK:
+            if _GLOBAL_PENDING and _GLOBAL_PENDING[0] is manager:
+                _GLOBAL_PENDING.pop(0)
+            elif manager in _GLOBAL_PENDING:
+                _GLOBAL_PENDING.remove(manager)
+        try:
+            if manager._cancel_requested:
+                manager._status, manager._message = "idle", "Stopped"
+            else:
+                manager._status, manager._message = "running", "Starting"
+                manager._job_start_time = datetime.now()
+                manager._run(*args)
+        finally:
+            handle.done.set()
+            _GLOBAL_QUEUE.task_done()
+
+
+threading.Thread(target=_global_worker, daemon=True, name="klipklop-global-worker").start()
+
+
+class _JobHandle:
+    def __init__(self):
+        self.done = threading.Event()
+
+    def is_alive(self):
+        return not self.done.is_set()
+
+    def join(self, timeout=None):
+        self.done.wait(timeout)
 
 
 class WebJobManager:
-    def __init__(self, app_dir=None):
+    def __init__(self, app_dir=None, user_id=None):
+        self.user_id = str(uuid.UUID(str(user_id))) if user_id else None
         self.app_dir = Path(app_dir) if app_dir else get_app_dir()
         self.output_dir = self.app_dir / "output"
         self.config_file = self.app_dir / "config.json"
@@ -43,6 +95,7 @@ class WebJobManager:
         self._job_timeout = 3600  # 1 hour default timeout
         self._cancel_requested = False
         self._active_url = ""
+        self._queue_position = None
 
     def start(self, payload):
         if not isinstance(payload, dict):
@@ -62,7 +115,7 @@ class WebJobManager:
             if self.thread and self.thread.is_alive():
                 return {"status": "busy", "message": "Processing is already running"}
         if self._has_staged_outputs():
-            return {"status": "busy", "message": "Simpan atau hapus klip di Beranda sebelum generate baru"}
+            return {"status": "busy", "message": "Simpan atau hapus semua klip di Beranda sebelum generate baru"}
             
         if "settings" in payload and isinstance(payload["settings"], dict):
             self.save_settings(self._settings_from_start_payload(payload))
@@ -81,8 +134,8 @@ class WebJobManager:
         with self._lock:
             if self.thread and self.thread.is_alive():
                 return {"status": "busy", "message": "Processing is already running"}
-            self._status = "running"
-            self._message = "Starting"
+            self._status = "queued"
+            self._message = "Queued"
             self._progress = 0.0
             self._error = ""
             self._cancel_requested = False
@@ -102,14 +155,12 @@ class WebJobManager:
                 args = args[:8]
             elif expected_args == 9:
                 args = args[:9]
-            self.thread = threading.Thread(
-                target=self._run,
-                args=args,
-                daemon=True,
-            )
-            self.thread.start()
-            self._job_start_time = datetime.now()
-        return {"status": "started"}
+            self.thread = _JobHandle()
+            with _GLOBAL_QUEUE_LOCK:
+                _GLOBAL_PENDING.append(self)
+                queue_position = len(_GLOBAL_PENDING)
+            _GLOBAL_QUEUE.put((self, args))
+        return {"status": "queued", "queue_position": queue_position}
 
     @staticmethod
     def _parallel_workers_for_quality(configured_workers, quality):
@@ -135,6 +186,7 @@ class WebJobManager:
             "progress": self._progress,
             "error": self._public_text(self._error),
             "url": self._active_url,
+            "queue_position": _queue_position_for(self) if self._status == "queued" else None,
             "logs": self._logs[-500:],
         }
 
@@ -164,7 +216,8 @@ class WebJobManager:
         entry = {"timestamp": datetime.now().isoformat(timespec="seconds"), "action": action, "detail": detail}
         if action == "ticket":
             try:
-                ticket_file = ROOT / "tickets.json"
+                ticket_file = self.app_dir / "tickets.json"
+                ticket_file.parent.mkdir(parents=True, exist_ok=True)
                 tickets = json.loads(ticket_file.read_text(encoding="utf-8")) if ticket_file.exists() else []
                 tickets.append(entry)
                 ticket_file.write_text(json.dumps(tickets, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -182,17 +235,48 @@ class WebJobManager:
         self._activities = []
         return {"status": "cleared"}
 
+    def _vault_rpc(self, function, payload=None):
+        url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+        if not self.user_id or not url or not service_key:
+            raise RuntimeError("Supabase Vault belum dikonfigurasi")
+        request = Request(
+            f"{url}/rest/v1/rpc/{function}",
+            data=json.dumps({"p_user_id": self.user_id, **(payload or {})}).encode(),
+            headers={"apikey": service_key, "Authorization": f"Bearer {service_key}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=15) as response:
+                raw = response.read()
+        except HTTPError as exc:
+            raise RuntimeError("Supabase Vault gagal") from exc
+        return json.loads(raw.decode()) if raw else None
+
+    def _vault_key_exists(self, provider):
+        return bool(self._vault_rpc("klipklop_provider_key_exists", {"p_provider": provider}))
+
+    def _vault_read_key(self, provider):
+        value = self._vault_rpc("klipklop_read_provider_key", {"p_provider": provider})
+        return str(value or "")
+
+    def _vault_write_key(self, provider, value):
+        self._vault_rpc("klipklop_set_provider_key", {"p_provider": provider, "p_secret": value})
+
+    def _vault_delete_key(self, provider):
+        self._vault_rpc("klipklop_delete_provider_key", {"p_provider": provider})
+
     def get_settings(self):
         cfg = self._config().config
         provider = cfg.get("ai_providers", {}).get("highlight_finder", {})
-        key_saved = bool(provider.get("api_key") or cfg.get("api_key"))
-        caption_key_saved = bool(cfg.get("ai_providers", {}).get("caption_maker", {}).get("api_key"))
+        key_saved = self._vault_key_exists("highlight") if self.user_id else bool(provider.get("api_key") or cfg.get("api_key"))
+        caption_key_saved = self._vault_key_exists("caption") if self.user_id else bool(cfg.get("ai_providers", {}).get("caption_maker", {}).get("api_key"))
         base_url = provider.get("base_url", cfg.get("base_url", GEMINI_BASE_URL))
         model = provider.get("model", cfg.get("model", GEMINI_MODEL))
         cookies = self.cookie_status()
         caption_provider = cfg.get("ai_providers", {}).get("caption_maker", {})
         hook_provider = cfg.get("ai_providers", {}).get("hook_maker", {})
-        hook_key_saved = bool(hook_provider.get("api_key") or provider.get("api_key") or cfg.get("api_key"))
+        hook_key_saved = key_saved if self.user_id else bool(hook_provider.get("api_key") or provider.get("api_key") or cfg.get("api_key"))
         return {
             "base_url": base_url,
             "api_key": "",
@@ -234,9 +318,9 @@ class WebJobManager:
         saved_provider = cfg_mgr.config.get("ai_providers", {}).get(provider_name, {})
         if not api_key:
             if provider_name == "highlight_finder":
-                api_key = saved_provider.get("api_key") or cfg_mgr.config.get("api_key", "")
+                api_key = self._vault_read_key("highlight") if self.user_id else saved_provider.get("api_key") or cfg_mgr.config.get("api_key", "")
             elif provider_name == "caption_maker":
-                api_key = saved_provider.get("api_key", "")
+                api_key = self._vault_read_key("caption") if self.user_id else saved_provider.get("api_key", "")
             else:
                 return {"status": "error", "message": "Provider tidak dikenal"}
             if base_url.rstrip("/") != str(saved_provider.get("base_url", "")).rstrip("/") or model != str(saved_provider.get("model", "")):
@@ -316,7 +400,9 @@ class WebJobManager:
         subtitle_style["bottom_margin"] = max(40, min(900, self._as_int(subtitle_style.get("bottom_margin"), 360)))
         watermark = {**cfg_mgr.config.get("watermark", {"enabled": False}), **(payload.get("watermark") if isinstance(payload.get("watermark"), dict) else {})}
         watermark["enabled"] = self._as_bool(watermark.get("enabled", False), False)
-        watermark["image_path"] = str(watermark.get("image_path") or "")
+        watermark_root = (self.app_dir / "watermark").resolve()
+        saved_watermark = Path(str(cfg_mgr.config.get("watermark", {}).get("image_path") or "")).resolve()
+        watermark["image_path"] = str(saved_watermark) if saved_watermark.is_file() and watermark_root in saved_watermark.parents else ""
         watermark["opacity"] = max(0.0, min(1.0, float(self._as_float(watermark.get("opacity"), 0.8))))
         watermark["scale"] = max(0.1, min(2.0, float(self._as_float(watermark.get("scale"), 0.15))))
         watermark["position_x"] = max(0.0, min(1.0, float(self._as_float(watermark.get("position_x"), 0.5))))
@@ -366,19 +452,31 @@ class WebJobManager:
         blur_background["scale"] = max(0.5, min(1.5, float(self._as_float(blur_background.get("scale"), 1.0))))
         blur_background["zoom"] = max(1.0, min(3.0, float(blur_background.get("zoom", 1.08) or 1.08)))
         blur_background["strength"] = max(0, min(100, self._as_int(blur_background.get("strength"), 30)))
+        if self.user_id:
+            try:
+                if clear_api_key or clear_highlight_api_key:
+                    self._vault_delete_key("highlight")
+                elif api_key:
+                    self._vault_write_key("highlight", api_key)
+                if clear_api_key or clear_caption_api_key:
+                    self._vault_delete_key("caption")
+                elif caption_api_key:
+                    self._vault_write_key("caption", caption_api_key)
+            except RuntimeError as exc:
+                return {"status": "error", "message": str(exc)}
         providers = cfg_mgr.config.setdefault("ai_providers", {})
         for name in ("highlight_finder", "youtube_title_maker"):
             current = providers.setdefault(name, {})
             current["base_url"] = base_url
             current["model"] = model
-            if clear_api_key or clear_highlight_api_key:
+            if clear_api_key or clear_highlight_api_key or self.user_id:
                 current["api_key"] = ""
             elif api_key:
                 current["api_key"] = api_key
         caption_current = providers.setdefault("caption_maker", {})
         caption_current["base_url"] = caption_base_url
         caption_current["model"] = caption_model
-        if clear_api_key or clear_caption_api_key:
+        if clear_api_key or clear_caption_api_key or self.user_id:
             caption_current["api_key"] = ""
         elif caption_api_key:
             caption_current["api_key"] = caption_api_key
@@ -388,7 +486,7 @@ class WebJobManager:
         hook_current["api_key"] = ""
         cfg_mgr.config["base_url"] = base_url
         cfg_mgr.config["model"] = model
-        if clear_api_key or clear_highlight_api_key:
+        if clear_api_key or clear_highlight_api_key or self.user_id:
             cfg_mgr.config["api_key"] = ""
         elif api_key:
             cfg_mgr.config["api_key"] = api_key
@@ -474,6 +572,8 @@ class WebJobManager:
                         title=(cm.get("title") or file["name"]),
                         description=(cm.get("description") or ""),
                         duration_seconds=dur_s,
+                        start_time=cm.get("start_time", ""),
+                        end_time=cm.get("end_time", ""),
                         duration=dur_str,
                         channel_name=cm.get("channel_name", ""),
                         virality_score=viral,
@@ -485,6 +585,7 @@ class WebJobManager:
                     "path": str(folder),
                     "title": title or meta.get("title") or folder.name,
                     "caption": description or meta.get("caption") or meta.get("url") or f"{len(clips)} klip",
+                    "url": meta.get("url", ""),
                     "timestamp": meta.get("timestamp") or datetime.fromtimestamp(folder.stat().st_mtime).isoformat(timespec="seconds"),
                     "video_quality": str(meta.get("video_quality", "720")),
                     "landscape_blur": bool(meta.get("landscape_blur", False)),
@@ -556,7 +657,13 @@ class WebJobManager:
                 **cfg.get("subtitle", {}),
                 "position": cfg.get("subtitle_position", "auto")
             }
-            ai_providers = dict(cfg.get("ai_providers") or {})
+            ai_providers = {name: dict(value) for name, value in (cfg.get("ai_providers") or {}).items()}
+            if self.user_id:
+                highlight_key = self._vault_read_key("highlight")
+                caption_key = self._vault_read_key("caption")
+                for name in ("highlight_finder", "youtube_title_maker", "hook_maker"):
+                    ai_providers.setdefault(name, {})["api_key"] = highlight_key
+                ai_providers.setdefault("caption_maker", {})["api_key"] = caption_key
             quality = str(cfg.get("video_quality", "720"))
             ai_providers["parallel_workers"] = self._parallel_workers_for_quality(cfg.get("parallel_workers", 1), quality)
             core = AutoClipperCore(

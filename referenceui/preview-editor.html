@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="id" class="bg-background">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Preview Editor — KlipKlop</title>
+<meta name="description" content="Atur watermark, credit text, hook title, subtitle, dan latar video dengan pratinjau live." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          background: '#131417',
+          foreground: '#ebecef',
+          card: '#1c1d22',
+          secondary: '#24262c',
+          muted: '#8f929c',
+          primary: { DEFAULT: '#f2a33c', foreground: '#2b1e08' },
+          line: 'rgba(255,255,255,0.08)',
+          field: 'rgba(255,255,255,0.1)'
+        },
+        fontFamily: {
+          sans: ['Inter', 'system-ui', 'sans-serif'],
+          display: ['"Space Grotesk"', 'system-ui', 'sans-serif'],
+          mono: ['ui-monospace', '"SF Mono"', '"Cascadia Mono"', 'monospace']
+        }
+      }
+    }
+  }
+</script>
+<style>
+  :root { color-scheme: dark; }
+  /* Range slider thumb (tidak bisa lewat utility) */
+  input[type="range"] { appearance: none; height: 0.375rem; border-radius: 9999px; background: #24262c; accent-color: #f2a33c; cursor: pointer; }
+  input[type="range"]::-webkit-slider-thumb { appearance: none; width: 1rem; height: 1rem; border-radius: 9999px; background: #f2a33c; }
+  input[type="range"]::-moz-range-thumb { width: 1rem; height: 1rem; border: none; border-radius: 9999px; background: #f2a33c; }
+  /* Toggle switch state via aria-checked */
+  .toggle[aria-checked="true"] { background: #f2a33c; }
+  .toggle[aria-checked="true"] .toggle-knob { transform: translateX(22px); }
+</style>
+</head>
+<body class="min-h-dvh bg-background font-sans text-foreground antialiased">
+
+<header class="sticky top-0 z-40 border-b border-line bg-background/80 backdrop-blur-md">
+  <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
+    <a href="index.html" class="flex items-center gap-2.5">
+      <span class="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/></svg>
+      </span>
+      <span class="font-display text-lg font-bold tracking-tight">KlipKlop</span>
+    </a>
+    <nav class="hidden items-center gap-1 md:flex" aria-label="Navigasi utama">
+      <a href="index.html" class="rounded-full px-4 py-2 text-sm text-muted transition-colors hover:bg-secondary hover:text-foreground">Dashboard</a>
+      <a href="galeri.html" class="rounded-full px-4 py-2 text-sm text-muted transition-colors hover:bg-secondary hover:text-foreground">Galeri</a>
+      <a href="konsol.html" class="rounded-full px-4 py-2 text-sm text-muted transition-colors hover:bg-secondary hover:text-foreground">Konsol</a>
+      <a href="preview-editor.html" class="rounded-full bg-primary/15 px-4 py-2 text-sm font-medium text-primary" aria-current="page">Preview Editor</a>
+    </nav>
+    <div class="flex items-center gap-2">
+      <a href="pengaturan.html" class="flex size-9 items-center justify-center rounded-full border border-line text-muted transition-colors hover:bg-secondary hover:text-foreground" aria-label="Pengaturan">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+      </a>
+      <button type="button" class="flex size-9 items-center justify-center rounded-full border border-line bg-secondary text-muted transition-colors hover:text-foreground" aria-label="Akun">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      </button>
+    </div>
+  </div>
+  <nav class="flex items-center gap-1 overflow-x-auto border-t border-line px-4 py-2 md:hidden" aria-label="Navigasi mobile">
+    <a href="index.html" class="whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm text-muted">Dashboard</a>
+    <a href="galeri.html" class="whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm text-muted">Galeri</a>
+    <a href="konsol.html" class="whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm text-muted">Konsol</a>
+    <a href="preview-editor.html" class="whitespace-nowrap rounded-full bg-primary/15 px-3.5 py-1.5 text-sm font-medium text-primary" aria-current="page">Preview Editor</a>
+  </nav>
+</header>
+
+<main class="mx-auto flex max-w-7xl flex-col gap-8 px-6 py-10">
+  <div class="flex flex-col gap-2">
+    <p class="text-sm font-medium uppercase tracking-widest text-primary">Preview Editor</p>
+    <h1 class="font-display text-3xl font-bold tracking-tight md:text-4xl">Editor Klip</h1>
+    <p class="text-muted">Atur watermark, teks, dan latar video — semua perubahan langsung terlihat di pratinjau.</p>
+  </div>
+
+  <div class="grid gap-6 lg:grid-cols-[minmax(0,380px)_1fr]">
+    <!-- Pratinjau live -->
+    <section class="flex flex-col gap-4 rounded-2xl border border-line bg-card/50 p-6 lg:sticky lg:top-24 lg:self-start" aria-label="Pratinjau klip">
+      <div class="flex items-center justify-between">
+        <h2 class="font-display text-base font-bold">Pratinjau Live</h2>
+        <span class="rounded-full border border-line bg-secondary px-3 py-1 text-xs text-muted">9:16</span>
+      </div>
+
+      <div class="relative mx-auto aspect-[9/16] w-full max-w-[300px] overflow-hidden rounded-2xl border border-line bg-background">
+        <img id="bg-layer" src="images/clip-vertical-3.png" alt="" aria-hidden="true" class="absolute inset-0 size-full object-cover" />
+        <div class="absolute inset-0 flex items-center justify-center">
+          <div id="video-layer" class="relative aspect-video w-full overflow-hidden">
+            <img src="images/clip-vertical-3.png" alt="Pratinjau klip yang sedang diedit" class="size-full object-cover" />
+          </div>
+        </div>
+        <p id="hook-layer" class="absolute inset-x-4 top-8 text-center font-display text-lg font-bold uppercase leading-snug text-white [text-shadow:0_2px_8px_rgba(0,0,0,0.8)]">Momen Clutch Paling Gila!</p>
+        <p id="subtitle-layer" class="absolute inset-x-6 bottom-16 rounded-lg bg-background/70 px-3 py-2 text-center text-sm font-bold text-primary">ini dia momen yang ditunggu-tunggu</p>
+        <div id="watermark-layer" class="absolute right-3 top-3 flex origin-top-right items-center justify-center rounded-md border border-white/40 bg-white/10 px-2 py-1"><span class="text-[10px] font-bold text-white">LOGO</span></div>
+        <p id="credit-layer" class="absolute inset-x-4 bottom-4 text-center font-mono">sc : @klipklop</p>
+      </div>
+
+      <button type="button" class="flex h-12 items-center justify-center gap-2 rounded-xl bg-primary font-display text-sm font-bold text-primary-foreground transition-opacity hover:opacity-90">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+        Ekspor Klip
+      </button>
+    </section>
+
+    <!-- Kartu kontrol -->
+    <div class="flex flex-col gap-5">
+      <div class="grid gap-5 xl:grid-cols-2">
+        <!-- Watermark Logo -->
+        <section class="flex flex-col gap-4 rounded-2xl border border-line bg-card p-5">
+          <div class="flex items-center justify-between gap-3 border-b border-line pb-4">
+            <div class="flex items-center gap-3">
+              <span class="flex size-9 items-center justify-center rounded-lg bg-primary/15 text-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+              </span>
+              <h2 class="font-display text-base font-bold">Watermark Logo</h2>
+            </div>
+            <button type="button" class="toggle relative h-6 w-11 shrink-0 rounded-full bg-secondary transition-colors" role="switch" aria-checked="true" aria-label="Aktifkan Watermark Logo" data-target="watermark"><span class="toggle-knob absolute left-0 top-0.5 size-5 translate-x-0.5 rounded-full bg-foreground transition-transform"></span></button>
+          </div>
+          <div class="flex flex-col gap-4 transition-opacity" id="body-watermark">
+            <button type="button" class="flex h-12 items-center justify-center gap-2 rounded-xl border border-dashed border-line bg-secondary/50 text-sm font-medium text-muted transition-colors hover:border-primary/40 hover:text-primary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+              Upload Image
+            </button>
+            <div class="flex flex-1 flex-col gap-2">
+              <div class="flex items-center justify-between text-xs"><span class="font-medium">Opacity</span><span class="text-muted" id="val-wm-opacity">49%</span></div>
+              <input type="range" id="wm-opacity" min="0" max="100" value="49" class="w-full" aria-label="Opacity watermark" />
+            </div>
+            <div class="flex flex-1 flex-col gap-2">
+              <div class="flex items-center justify-between text-xs"><span class="font-medium">Scale</span><span class="text-muted" id="val-wm-scale">53%</span></div>
+              <input type="range" id="wm-scale" min="10" max="100" value="53" class="w-full" aria-label="Scale watermark" />
+            </div>
+          </div>
+        </section>
+
+        <!-- Credit Text -->
+        <section class="flex flex-col gap-4 rounded-2xl border border-line bg-card p-5">
+          <div class="flex items-center justify-between gap-3 border-b border-line pb-4">
+            <div class="flex items-center gap-3">
+              <span class="flex size-9 items-center justify-center rounded-lg bg-primary/15 text-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/></svg>
+              </span>
+              <h2 class="font-display text-base font-bold">Credit Text</h2>
+            </div>
+            <button type="button" class="toggle relative h-6 w-11 shrink-0 rounded-full bg-secondary transition-colors" role="switch" aria-checked="true" aria-label="Aktifkan Credit Text" data-target="credit"><span class="toggle-knob absolute left-0 top-0.5 size-5 translate-x-0.5 rounded-full bg-foreground transition-transform"></span></button>
+          </div>
+          <div class="flex flex-col gap-4 transition-opacity" id="body-credit">
+            <input type="text" id="credit-text" value="sc : {channel}" aria-label="Teks kredit"
+              class="h-11 w-full rounded-xl border border-field bg-secondary px-4 font-mono text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
+            <div class="flex items-center gap-3">
+              <label class="relative flex size-11 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-xl border border-field" id="credit-swatch" style="background-color: #FFFFFF;">
+                <span class="sr-only">Pilih warna teks kredit</span>
+                <input type="color" id="credit-color" value="#FFFFFF" class="absolute inset-0 cursor-pointer opacity-0" />
+              </label>
+              <input type="text" id="credit-hex" value="#FFFFFF" aria-label="Kode warna hex"
+                class="h-11 w-full rounded-xl border border-field bg-secondary px-4 font-mono text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
+            </div>
+            <div class="flex gap-4">
+              <div class="flex flex-1 flex-col gap-2">
+                <div class="flex items-center justify-between text-xs"><span class="font-medium">Size</span><span class="text-muted" id="val-credit-size">45%</span></div>
+                <input type="range" id="credit-size" min="10" max="100" value="45" class="w-full" aria-label="Ukuran teks kredit" />
+              </div>
+              <div class="flex flex-1 flex-col gap-2">
+                <div class="flex items-center justify-between text-xs"><span class="font-medium">Opacity</span><span class="text-muted" id="val-credit-opacity">55%</span></div>
+                <input type="range" id="credit-opacity" min="0" max="100" value="55" class="w-full" aria-label="Opacity teks kredit" />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Hook Title -->
+        <section class="flex flex-col gap-4 rounded-2xl border border-line bg-card p-5">
+          <div class="flex items-center justify-between gap-3 border-b border-line pb-4">
+            <div class="flex items-center gap-3">
+              <span class="flex size-9 items-center justify-center rounded-lg bg-primary/15 text-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
+              </span>
+              <h2 class="font-display text-base font-bold">Hook Title</h2>
+            </div>
+            <button type="button" class="toggle relative h-6 w-11 shrink-0 rounded-full bg-secondary transition-colors" role="switch" aria-checked="true" aria-label="Aktifkan Hook Title" data-target="hook"><span class="toggle-knob absolute left-0 top-0.5 size-5 translate-x-0.5 rounded-full bg-foreground transition-transform"></span></button>
+          </div>
+          <div class="flex flex-col gap-4 transition-opacity" id="body-hook">
+            <p class="text-xs leading-relaxed text-muted">Geser hook title di preview untuk mengubah posisi.</p>
+          </div>
+        </section>
+
+        <!-- Subtitle -->
+        <section class="flex flex-col gap-4 rounded-2xl border border-line bg-card p-5">
+          <div class="flex items-center justify-between gap-3 border-b border-line pb-4">
+            <div class="flex items-center gap-3">
+              <span class="flex size-9 items-center justify-center rounded-lg bg-primary/15 text-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="3" y1="6" y2="6"/><line x1="15" x2="3" y1="12" y2="12"/><line x1="17" x2="3" y1="18" y2="18"/></svg>
+              </span>
+              <h2 class="font-display text-base font-bold">Subtitle</h2>
+            </div>
+            <button type="button" class="toggle relative h-6 w-11 shrink-0 rounded-full bg-secondary transition-colors" role="switch" aria-checked="true" aria-label="Aktifkan Subtitle" data-target="subtitle"><span class="toggle-knob absolute left-0 top-0.5 size-5 translate-x-0.5 rounded-full bg-foreground transition-transform"></span></button>
+          </div>
+          <div class="flex flex-col gap-4 transition-opacity" id="body-subtitle">
+            <p class="text-xs leading-relaxed text-muted">Geser subtitle di preview untuk mengubah posisi.</p>
+          </div>
+        </section>
+      </div>
+
+      <!-- Latar Video -->
+      <section class="flex flex-col gap-4 rounded-2xl border border-line bg-card p-5">
+        <div class="flex items-center justify-between gap-3 border-b border-line pb-4">
+          <div class="flex items-center gap-3">
+            <span class="flex size-9 items-center justify-center rounded-lg bg-primary/15 text-primary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/></svg>
+            </span>
+            <h2 class="font-display text-base font-bold">Latar Video</h2>
+          </div>
+          <button type="button" class="toggle relative h-6 w-11 shrink-0 rounded-full bg-secondary transition-colors" role="switch" aria-checked="true" aria-label="Aktifkan Latar Video" data-target="bg"><span class="toggle-knob absolute left-0 top-0.5 size-5 translate-x-0.5 rounded-full bg-foreground transition-transform"></span></button>
+        </div>
+        <div class="flex flex-col gap-4 transition-opacity" id="body-bg">
+          <div class="flex flex-col gap-4 sm:flex-row sm:gap-6">
+            <div class="flex flex-1 flex-col gap-2">
+              <div class="flex items-center justify-between text-xs"><span class="font-medium">Video Scale</span><span class="text-muted" id="val-video-scale">150%</span></div>
+              <input type="range" id="video-scale" min="100" max="200" value="150" class="w-full" aria-label="Skala video" />
+            </div>
+            <div class="flex flex-1 flex-col gap-2">
+              <div class="flex items-center justify-between text-xs"><span class="font-medium">Bg Zoom</span><span class="text-muted" id="val-bg-zoom">108%</span></div>
+              <input type="range" id="bg-zoom" min="100" max="200" value="108" class="w-full" aria-label="Zoom latar" />
+            </div>
+            <div class="flex flex-1 flex-col gap-2">
+              <div class="flex items-center justify-between text-xs"><span class="font-medium">Blur Strength</span><span class="text-muted" id="val-blur">3</span></div>
+              <input type="range" id="blur-strength" min="0" max="10" value="3" class="w-full" aria-label="Kekuatan blur" />
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<script>
+  // ---------- State ----------
+  var state = {
+    watermark: true, wmOpacity: 49, wmScale: 53,
+    credit: true, creditText: 'sc : {channel}', creditColor: '#FFFFFF', creditSize: 45, creditOpacity: 55,
+    hook: true, subtitle: true,
+    bg: true, videoScale: 150, bgZoom: 108, blur: 3
+  };
+
+  // ---------- Elemen pratinjau ----------
+  var bgLayer = document.getElementById('bg-layer');
+  var videoLayer = document.getElementById('video-layer');
+  var hookLayer = document.getElementById('hook-layer');
+  var subtitleLayer = document.getElementById('subtitle-layer');
+  var watermarkLayer = document.getElementById('watermark-layer');
+  var creditLayer = document.getElementById('credit-layer');
+
+  function render() {
+    // Latar
+    bgLayer.style.display = state.bg ? 'block' : 'none';
+    bgLayer.style.transform = 'scale(' + state.bgZoom / 100 + ')';
+    bgLayer.style.filter = 'blur(' + state.blur * 4 + 'px)';
+    videoLayer.style.transform = 'scale(' + state.videoScale / 150 + ')';
+    // Hook & subtitle
+    hookLayer.style.display = state.hook ? 'block' : 'none';
+    subtitleLayer.style.display = state.subtitle ? 'block' : 'none';
+    // Watermark
+    watermarkLayer.style.display = state.watermark ? 'flex' : 'none';
+    watermarkLayer.style.opacity = state.wmOpacity / 100;
+    watermarkLayer.style.transform = 'scale(' + (0.6 + state.wmScale / 100) + ')';
+    // Credit
+    creditLayer.style.display = state.credit ? 'block' : 'none';
+    creditLayer.textContent = state.creditText.replace('{channel}', '@klipklop');
+    creditLayer.style.color = state.creditColor;
+    creditLayer.style.opacity = state.creditOpacity / 100;
+    creditLayer.style.fontSize = (8 + (state.creditSize / 100) * 8) + 'px';
+  }
+
+  // ---------- Toggle ----------
+  document.querySelectorAll('.toggle').forEach(function (toggle) {
+    toggle.addEventListener('click', function () {
+      var key = toggle.dataset.target;
+      var next = toggle.getAttribute('aria-checked') !== 'true';
+      toggle.setAttribute('aria-checked', String(next));
+      state[key] = next;
+      var body = document.getElementById('body-' + key);
+      if (body) {
+        body.classList.toggle('pointer-events-none', !next);
+        body.classList.toggle('opacity-40', !next);
+      }
+      render();
+    });
+  });
+
+  // ---------- Slider helper ----------
+  function bindSlider(id, key, valId, suffix) {
+    var el = document.getElementById(id);
+    var val = document.getElementById(valId);
+    el.addEventListener('input', function () {
+      state[key] = Number(el.value);
+      val.textContent = el.value + (suffix === undefined ? '%' : suffix);
+      render();
+    });
+  }
+  bindSlider('wm-opacity', 'wmOpacity', 'val-wm-opacity');
+  bindSlider('wm-scale', 'wmScale', 'val-wm-scale');
+  bindSlider('credit-size', 'creditSize', 'val-credit-size');
+  bindSlider('credit-opacity', 'creditOpacity', 'val-credit-opacity');
+  bindSlider('video-scale', 'videoScale', 'val-video-scale');
+  bindSlider('bg-zoom', 'bgZoom', 'val-bg-zoom');
+  bindSlider('blur-strength', 'blur', 'val-blur', '');
+
+  // ---------- Credit text & warna ----------
+  document.getElementById('credit-text').addEventListener('input', function (e) {
+    state.creditText = e.target.value;
+    render();
+  });
+  var colorInput = document.getElementById('credit-color');
+  var hexInput = document.getElementById('credit-hex');
+  var swatch = document.getElementById('credit-swatch');
+  colorInput.addEventListener('input', function (e) {
+    state.creditColor = e.target.value;
+    hexInput.value = e.target.value.toUpperCase();
+    swatch.style.backgroundColor = e.target.value;
+    render();
+  });
+  hexInput.addEventListener('input', function (e) {
+    var v = e.target.value;
+    if (/^#[0-9A-Fa-f]{6}$/.test(v)) {
+      state.creditColor = v;
+      colorInput.value = v;
+      swatch.style.backgroundColor = v;
+      render();
+    }
+  });
+
+  render();
+</script>
+</body>
+</html>

@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="id" class="bg-background">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>KlipKlop — Dashboard</title>
+<meta name="description" content="Ubah video YouTube panjang menjadi klip viral vertikal dengan AI." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          background: '#131417',
+          foreground: '#ebecef',
+          card: '#1c1d22',
+          secondary: '#24262c',
+          muted: '#8f929c',
+          primary: { DEFAULT: '#f2a33c', foreground: '#2b1e08' },
+          destructive: '#e05d47',
+          line: 'rgba(255,255,255,0.08)',
+          field: 'rgba(255,255,255,0.1)'
+        },
+        fontFamily: {
+          sans: ['Inter', 'system-ui', 'sans-serif'],
+          display: ['"Space Grotesk"', 'system-ui', 'sans-serif']
+        }
+      }
+    }
+  }
+</script>
+<style>
+  :root { color-scheme: dark; }
+</style>
+</head>
+<body class="min-h-dvh bg-background font-sans text-foreground antialiased">
+
+<header class="sticky top-0 z-40 border-b border-line bg-background/80 backdrop-blur-md">
+  <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
+    <a href="index.html" class="flex items-center gap-2.5">
+      <span class="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/></svg>
+      </span>
+      <span class="font-display text-lg font-bold tracking-tight">KlipKlop</span>
+    </a>
+    <nav class="hidden items-center gap-1 md:flex" aria-label="Navigasi utama">
+      <a href="index.html" class="rounded-full bg-primary/15 px-4 py-2 text-sm font-medium text-primary" aria-current="page">Dashboard</a>
+      <a href="galeri.html" class="rounded-full px-4 py-2 text-sm text-muted transition-colors hover:bg-secondary hover:text-foreground">Galeri</a>
+      <a href="konsol.html" class="rounded-full px-4 py-2 text-sm text-muted transition-colors hover:bg-secondary hover:text-foreground">Konsol</a>
+      <a href="preview-editor.html" class="rounded-full px-4 py-2 text-sm text-muted transition-colors hover:bg-secondary hover:text-foreground">Preview Editor</a>
+    </nav>
+    <div class="flex items-center gap-2">
+      <a href="pengaturan.html" class="flex size-9 items-center justify-center rounded-full border border-line text-muted transition-colors hover:bg-secondary hover:text-foreground" aria-label="Pengaturan">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+      </a>
+      <button type="button" class="flex size-9 items-center justify-center rounded-full border border-line bg-secondary text-muted transition-colors hover:text-foreground" aria-label="Akun">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      </button>
+    </div>
+  </div>
+  <nav class="flex items-center gap-1 overflow-x-auto border-t border-line px-4 py-2 md:hidden" aria-label="Navigasi mobile">
+    <a href="index.html" class="whitespace-nowrap rounded-full bg-primary/15 px-3.5 py-1.5 text-sm font-medium text-primary" aria-current="page">Dashboard</a>
+    <a href="galeri.html" class="whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm text-muted">Galeri</a>
+    <a href="konsol.html" class="whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm text-muted">Konsol</a>
+    <a href="preview-editor.html" class="whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm text-muted">Preview Editor</a>
+  </nav>
+</header>
+
+<main class="mx-auto flex max-w-7xl flex-col gap-8 px-6 py-10">
+  <!-- Baris 1: Hero + Lanjutkan -->
+  <div class="grid gap-6 lg:grid-cols-[1fr_380px]">
+    <form id="clip-form" class="flex flex-col justify-center gap-6 rounded-2xl border border-dashed border-line bg-card p-8 lg:p-10">
+      <span class="inline-flex w-fit items-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-4 py-1.5 text-xs font-bold text-primary">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>
+        AI Clipping Engine v3
+      </span>
+      <h1 class="font-display text-3xl font-bold leading-tight tracking-tight md:text-[2.75rem] md:leading-[1.15]">Ubah satu video jadi seminggu konten shorts.</h1>
+      <p class="max-w-xl text-[0.9375rem] leading-relaxed text-muted">Tempel link YouTube atau upload file. AI kami mencari hook, memotong klip, dan menambahkan caption — dalam hitungan menit.</p>
+
+      <div class="flex flex-col gap-3 sm:flex-row">
+        <div class="relative flex-1">
+          <svg class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/></svg>
+          <input id="yt-url" type="url" placeholder="https://youtube.com/watch?v=..." aria-label="Link YouTube"
+            class="h-12 w-full rounded-xl border border-field bg-secondary pl-10 pr-4 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary" />
+        </div>
+        <button type="submit" class="flex h-12 items-center justify-center gap-2 rounded-xl bg-primary px-6 font-display text-base font-bold text-primary-foreground transition-opacity hover:opacity-90">
+          Proses Klip
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </button>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3 text-xs text-muted">
+        <div class="relative">
+          <label class="sr-only" for="quality">Kualitas Video</label>
+          <select id="quality" class="h-9 appearance-none rounded-full border border-field bg-secondary pl-3.5 pr-8 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary">
+            <option>480p</option>
+            <option selected>720p</option>
+            <option>1080p</option>
+          </select>
+          <svg class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </div>
+        <div class="relative">
+          <label class="sr-only" for="clip-count">Jumlah Klip</label>
+          <select id="clip-count" class="h-9 appearance-none rounded-full border border-field bg-secondary pl-3.5 pr-8 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary">
+            <option>1 klip</option><option>2 klip</option><option>3 klip</option><option>4 klip</option><option selected>5 klip</option>
+          </select>
+          <svg class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </div>
+        <button type="button" id="toggle-directions" class="inline-flex items-center gap-1.5 self-center text-xs font-medium text-primary transition-opacity hover:opacity-80">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"/></svg>
+          Tambah Arahan
+        </button>
+        <div class="ml-auto flex items-center gap-2">
+          <span id="status-dot" class="size-2 rounded-full bg-muted/40" aria-hidden="true"></span>
+          <span id="status-text">Status: Idle</span>
+        </div>
+      </div>
+      <textarea id="directions" rows="3" hidden placeholder="Contoh: fokus pada momen lucu, sertakan hook di 3 detik pertama..."
+        class="w-full rounded-xl border border-field bg-secondary px-4 py-3 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary"></textarea>
+
+      <div class="flex flex-wrap items-center gap-2 text-[0.8125rem] text-muted">
+        <span class="h-px w-8 bg-line" aria-hidden="true"></span>
+        <span>atau</span>
+        <button type="button" class="inline-flex items-center gap-1.5 font-bold text-foreground transition-colors hover:text-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+          upload video
+        </button>
+        <span>— drag &amp; drop juga bisa</span>
+      </div>
+    </form>
+
+    <a href="preview-editor.html" class="group relative flex flex-col overflow-hidden rounded-2xl border border-line bg-card text-left transition-colors hover:border-primary/50">
+      <div class="relative min-h-60 flex-1 overflow-hidden">
+        <img src="images/project-podcast.png" alt="Thumbnail episode podcast terakhir yang diproses" class="absolute inset-0 size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]" />
+        <div class="absolute inset-0 bg-gradient-to-t from-card to-transparent" style="background: linear-gradient(to top, #1c1d22, transparent 55%);" aria-hidden="true"></div>
+        <span class="absolute inset-0 z-[2] flex items-center justify-center" aria-hidden="true">
+          <span class="flex size-14 items-center justify-center rounded-full bg-foreground/90 text-background backdrop-blur transition-transform duration-200 group-hover:scale-110">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" class="ml-0.5"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+          </span>
+        </span>
+      </div>
+      <div class="relative z-[2] -mt-10 flex flex-col gap-1.5 p-5">
+        <p class="text-[0.6875rem] font-bold uppercase tracking-[0.15em] text-primary">Lanjutkan dari terakhir</p>
+        <p class="font-display text-xl font-bold tracking-tight">The Founder Mindset — Ep. 42</p>
+        <div class="flex flex-wrap items-center gap-1.5 text-[0.8125rem] text-muted">
+          <span>14 klip dihasilkan</span>
+          <span class="size-[3px] rounded-full bg-muted" aria-hidden="true"></span>
+          <span>6 diekspor</span>
+          <span class="size-[3px] rounded-full bg-muted" aria-hidden="true"></span>
+          <span>Diedit 2 jam lalu</span>
+        </div>
+      </div>
+    </a>
+  </div>
+
+  <!-- Kartu proses AI -->
+  <section class="flex flex-col gap-6 rounded-2xl border border-line bg-card p-6" aria-label="Proses AI sedang berjalan">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <div class="flex flex-col gap-1">
+        <h2 class="font-display text-[1.0625rem] font-bold">AI sedang memproses &ldquo;Gaming Marathon Highlights&rdquo;</h2>
+        <p class="text-[0.8125rem] text-muted">Dimulai 4 menit lalu &middot; sekitar 3 menit tersisa</p>
+      </div>
+      <span class="inline-flex items-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-4 py-1.5 text-xs font-bold text-primary">
+        <svg class="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+        Memproses
+      </span>
+    </div>
+
+    <div class="grid gap-4 min-[900px]:grid-cols-4 min-[900px]:gap-0">
+      <div class="relative flex items-start gap-3 min-[900px]:pr-6 min-[900px]:after:absolute min-[900px]:after:right-4 min-[900px]:after:top-5 min-[900px]:after:h-px min-[900px]:after:w-[calc(100%-4.25rem)] min-[900px]:after:bg-line min-[900px]:after:content-['']">
+        <span class="flex size-10 flex-none items-center justify-center rounded-xl border border-primary/40 bg-primary/10 text-primary" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        </span>
+        <div class="flex min-w-0 flex-col gap-0.5">
+          <p class="text-sm font-bold">Transkripsi</p>
+          <p class="truncate text-xs text-muted">48 menit audio diproses</p>
+        </div>
+      </div>
+      <div class="relative flex items-start gap-3 min-[900px]:pr-6 min-[900px]:after:absolute min-[900px]:after:right-4 min-[900px]:after:top-5 min-[900px]:after:h-px min-[900px]:after:w-[calc(100%-4.25rem)] min-[900px]:after:bg-line min-[900px]:after:content-['']">
+        <span class="flex size-10 flex-none items-center justify-center rounded-xl border border-primary/40 bg-primary/10 text-primary" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        </span>
+        <div class="flex min-w-0 flex-col gap-0.5">
+          <p class="text-sm font-bold">Mencari Hook</p>
+          <p class="truncate text-xs text-muted">23 momen viral terdeteksi</p>
+        </div>
+      </div>
+      <div class="relative flex items-start gap-3 min-[900px]:pr-6 min-[900px]:after:absolute min-[900px]:after:right-4 min-[900px]:after:top-5 min-[900px]:after:h-px min-[900px]:after:w-[calc(100%-4.25rem)] min-[900px]:after:bg-line min-[900px]:after:content-['']">
+        <span class="flex size-10 flex-none items-center justify-center rounded-xl border border-primary bg-primary text-primary-foreground" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/></svg>
+        </span>
+        <div class="flex min-w-0 flex-col gap-0.5">
+          <p class="text-sm font-bold">Memotong Klip</p>
+          <p class="truncate text-xs text-muted">Klip 9 dari 14 &mdash; reframing ke 9:16</p>
+        </div>
+      </div>
+      <div class="relative flex items-start gap-3">
+        <span class="flex size-10 flex-none items-center justify-center rounded-xl border border-line bg-secondary text-muted" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="14" x="3" y="5" rx="2" ry="2"/><path d="M7 15h4M15 15h2M7 11h2M13 11h4"/></svg>
+        </span>
+        <div class="flex min-w-0 flex-col gap-0.5">
+          <p class="text-sm font-bold text-muted">Caption</p>
+          <p class="truncate text-xs text-muted">Antre &mdash; gaya: Bold Pop</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Baris 2: Hasil + Analisis -->
+  <div class="grid gap-6 xl:grid-cols-[1fr_320px]">
+    <section class="flex flex-col gap-6 rounded-2xl border border-line bg-card/50 p-6" aria-label="Hasil generasi klip">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="flex flex-col gap-1">
+          <h2 class="font-display text-xl font-bold tracking-tight">Hasil Generasi Klip</h2>
+          <p class="text-sm text-muted">5 klip berhasil dihasilkan dari video Anda. Klik klip untuk melihat detail.</p>
+        </div>
+        <button type="button" class="inline-flex items-center gap-2 rounded-full border border-line bg-secondary px-4 py-2 text-xs font-medium transition-colors hover:border-primary/40 hover:text-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 12a1 1 0 0 0-1 1v1a1 1 0 0 1-1 1 1 1 0 0 1 1 1v1a1 1 0 0 0 1 1"/><path d="M14 18a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-1a1 1 0 0 0-1-1"/></svg>
+          JSON Payload
+        </button>
+      </div>
+
+      <div class="grid flex-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5" id="clips-grid"></div>
+
+      <p class="border-t border-line pt-4 text-center text-xs text-muted">Butuh bantuan? Silakan kirim ke <a href="mailto:bfrotok@klipklop.id" class="font-medium text-primary hover:underline">bfrotok@klipklop.id</a></p>
+    </section>
+
+    <aside class="flex h-fit flex-col gap-5 rounded-2xl border border-line bg-card p-6 xl:sticky xl:top-24" aria-label="Analisis viralitas">
+      <div class="flex items-center gap-2">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f2a33c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
+        <h2 class="text-xs font-bold uppercase tracking-[0.15em] text-muted">Virality Wave</h2>
+      </div>
+      <div class="flex items-baseline justify-between">
+        <p class="font-display text-5xl font-bold text-foreground">84%</p>
+        <span class="rounded-full bg-primary/15 px-3 py-1 text-[0.6875rem] font-bold tracking-wider text-primary">EXCELLENT</span>
+      </div>
+      <div id="wave" class="flex h-24 items-end gap-1.5" role="img" aria-label="Grafik gelombang viralitas dengan skor rata-rata 84 persen"></div>
+      <p class="text-sm leading-relaxed text-muted">Peak engagement terdeteksi di <strong class="font-medium text-foreground">00:45</strong> karena kontras adegan tinggi dan pattern interrupt.</p>
+      <div class="flex flex-col gap-2.5 border-t border-line pt-4">
+        <div class="flex items-center justify-between text-sm"><span class="text-muted">Skor tertinggi</span><span class="font-bold text-primary">92%</span></div>
+        <div class="flex items-center justify-between text-sm"><span class="text-muted">Rata-rata skor</span><span class="font-bold">84%</span></div>
+        <div class="flex items-center justify-between text-sm"><span class="text-muted">Total durasi</span><span class="font-bold">464s</span></div>
+      </div>
+      <div class="flex items-start gap-2.5 rounded-xl border border-primary/30 bg-primary/10 p-3.5 text-primary">
+        <svg class="mt-0.5 flex-none" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+        <p class="text-xs leading-relaxed">Klip 1 punya potensi viral tertinggi. Unggah antara pukul <strong>18.00&ndash;21.00</strong> untuk jangkauan maksimal.</p>
+      </div>
+    </aside>
+  </div>
+</main>
+
+<!-- Modal detail klip -->
+<div id="clip-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Detail klip">
+  <button type="button" id="modal-backdrop" class="absolute inset-0 bg-background/80" aria-label="Tutup detail klip"></button>
+  <div class="relative z-10 grid max-h-[90dvh] w-full max-w-3xl gap-6 overflow-y-auto rounded-2xl border border-line bg-card p-6 sm:grid-cols-[260px_1fr]">
+    <button type="button" id="modal-close" class="absolute right-4 top-4 z-10 flex size-9 items-center justify-center rounded-full border border-line bg-secondary text-muted transition-colors hover:text-foreground" aria-label="Tutup">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+    </button>
+    <div class="relative mx-auto aspect-[9/16] w-full max-w-[260px] overflow-hidden rounded-xl border border-line">
+      <img id="modal-image" src="/placeholder.svg" alt="" class="absolute inset-0 size-full object-cover" />
+      <span class="absolute left-2.5 top-2.5 flex items-center gap-1.5 rounded-full bg-primary px-2.5 py-1 text-xs font-bold text-primary-foreground">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
+        <span id="modal-virality"></span>
+      </span>
+      <button type="button" class="absolute inset-0 flex items-center justify-center transition-colors hover:bg-background/20" aria-label="Putar klip">
+        <span class="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg">
+          <svg class="ml-0.5" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+        </span>
+      </button>
+    </div>
+    <div class="flex flex-col gap-4">
+      <p id="modal-meta" class="text-sm text-muted"></p>
+      <h2 id="modal-title" class="pr-10 font-display text-2xl font-bold leading-snug"></h2>
+      <div class="flex flex-col gap-2">
+        <h3 class="text-sm font-bold">Description</h3>
+        <div class="flex flex-col gap-3 rounded-xl border border-line bg-secondary p-4 text-sm leading-relaxed text-muted">
+          <p id="modal-desc"></p>
+          <p>sc: @klipklop</p>
+        </div>
+      </div>
+      <div class="mt-auto flex flex-wrap gap-2.5 pt-2">
+        <button type="button" class="flex h-10 items-center gap-2 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground transition-opacity hover:opacity-90">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/></svg>
+          Simpan ke Gallery
+        </button>
+        <button type="button" class="flex h-10 items-center gap-2 rounded-xl border border-line bg-secondary px-4 text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+          Download
+        </button>
+        <button type="button" class="flex h-10 items-center gap-2 rounded-xl border border-line bg-secondary px-4 text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+          Upload
+        </button>
+        <button type="button" class="flex h-10 items-center gap-2 rounded-xl border border-destructive/40 bg-destructive/10 px-4 text-sm font-medium text-destructive transition-opacity hover:opacity-80">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+          Hapus
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ---------- Data klip ----------
+  var clips = [
+    {
+      id: 1,
+      title: 'Trauma Nyuntik Pasien: Pembuluh Darah Pecah!',
+      description: 'Tretan Muslim berbagi pengalaman horor saat masih jadi perawat, salah menyuntik pasien sampai pembuluh darahnya pecah.',
+      virality: 92,
+      duration: '112s',
+      date: '10 Jul 26, 00.34',
+      image: 'images/clip-vertical-1.png'
+    },
+    {
+      id: 2,
+      title: 'Dari Nebeng Kru sampai Kredit Mobil Sendiri',
+      description: 'Sintya cerita perjuangannya saat masih di FTV, dari harus berangkat jam 5 pagi sampai akhirnya bisa kredit mobil sendiri.',
+      virality: 84,
+      duration: '98s',
+      date: '10 Jul 26, 00.35',
+      image: 'images/clip-vertical-2.png'
+    },
+    {
+      id: 3,
+      title: 'Momen Clutch yang Bikin Satu Room Heboh!',
+      description: 'Reaksi spontan saat comeback di ronde terakhir, momen paling seru yang langsung jadi sorotan penonton.',
+      virality: 77,
+      duration: '64s',
+      date: '10 Jul 26, 00.36',
+      image: 'images/clip-vertical-3.png'
+    },
+    {
+      id: 4,
+      title: 'Ngakak! Salah Sebut Nama Sponsor Live di Acara TV',
+      description: 'Momen paling kocak sepanjang episode, salah sebut nama sponsor di depan kamera sampai satu studio tertawa lepas.',
+      virality: 88,
+      duration: '86s',
+      date: '10 Jul 26, 00.37',
+      image: 'images/clip-vertical-4.png'
+    },
+    {
+      id: 5,
+      title: 'Cerita Horor di Lokasi Syuting Jam 3 Pagi',
+      description: 'Pengalaman mistis saat syuting FTV di rumah kosong, dari suara misterius sampai kru yang tiba-tiba kesurupan.',
+      virality: 81,
+      duration: '104s',
+      date: '10 Jul 26, 00.38',
+      image: 'images/clip-vertical-5.png'
+    }
+  ];
+
+  // ---------- Render kartu klip ----------
+  var grid = document.getElementById('clips-grid');
+  var flameSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>';
+  var playSvg = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="ml-0.5"><polygon points="6 3 20 12 6 21 6 3"/></svg>';
+
+  clips.forEach(function (clip, index) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'group flex flex-col overflow-hidden rounded-2xl border border-line bg-card text-left transition-colors hover:border-primary/50';
+    btn.setAttribute('aria-label', 'Lihat detail klip: ' + clip.title);
+    btn.innerHTML =
+      '<div class="relative aspect-[9/16] overflow-hidden">' +
+        '<img src="' + clip.image + '" alt="Thumbnail klip ' + clip.title + '" class="absolute inset-0 size-full object-cover" />' +
+        '<span class="absolute left-2.5 top-2.5 z-[2] flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-xs font-bold text-primary-foreground">' + flameSvg + clip.virality + '%</span>' +
+        '<span class="absolute right-2.5 top-2.5 z-[2] rounded-full bg-background/80 px-2.5 py-1 text-xs font-medium backdrop-blur">' + clip.duration + '</span>' +
+        '<span class="absolute inset-0 z-[3] flex flex-col items-center justify-center gap-2.5 bg-background/60 opacity-0 transition-opacity group-hover:opacity-100">' +
+          '<span class="flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground">' + playSvg + '</span>' +
+          '<span class="rounded-full bg-primary px-3.5 py-1 text-xs font-bold text-primary-foreground">Lihat Detail</span>' +
+        '</span>' +
+      '</div>' +
+      '<div class="flex flex-1 flex-col gap-1.5 p-3.5">' +
+        '<span class="text-[0.6875rem] font-bold uppercase tracking-wider text-primary">Klip ' + (index + 1) + ' dari ' + clips.length + '</span>' +
+        '<h3 class="line-clamp-2 font-display text-sm font-bold leading-snug">' + clip.title + '</h3>' +
+        '<p class="mt-auto text-xs text-muted">Durasi: ' + clip.duration + '</p>' +
+      '</div>';
+    btn.addEventListener('click', function () { openModal(clip); });
+    grid.appendChild(btn);
+  });
+
+  // ---------- Wave chart ----------
+  var waveBars = [28, 42, 35, 88, 96, 52, 46, 78, 40, 90, 58, 72, 34, 26];
+  var wave = document.getElementById('wave');
+  waveBars.forEach(function (h) {
+    var bar = document.createElement('span');
+    bar.style.height = h + '%';
+    bar.className = 'flex-1 rounded-full ' + (h >= 70 ? 'bg-primary' : 'bg-secondary');
+    wave.appendChild(bar);
+  });
+
+  // ---------- Modal ----------
+  var modal = document.getElementById('clip-modal');
+  function openModal(clip) {
+    document.getElementById('modal-image').src = clip.image;
+    document.getElementById('modal-image').alt = 'Pratinjau klip ' + clip.title;
+    document.getElementById('modal-virality').textContent = clip.virality + '%';
+    document.getElementById('modal-meta').textContent = 'Durasi: ' + clip.duration + ' \u2022 Diunduh: ' + clip.date;
+    document.getElementById('modal-title').textContent = clip.title;
+    document.getElementById('modal-desc').textContent = clip.description;
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeModal() {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+    document.body.style.overflow = '';
+  }
+  document.getElementById('modal-close').addEventListener('click', closeModal);
+  document.getElementById('modal-backdrop').addEventListener('click', closeModal);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeModal();
+  });
+
+  // ---------- Form ----------
+  document.getElementById('toggle-directions').addEventListener('click', function () {
+    var ta = document.getElementById('directions');
+    ta.hidden = !ta.hidden;
+  });
+  document.getElementById('clip-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var url = document.getElementById('yt-url').value.trim();
+    if (!url) return;
+    var dot = document.getElementById('status-dot');
+    dot.classList.remove('bg-muted/40');
+    dot.classList.add('bg-primary', 'animate-pulse');
+    document.getElementById('status-text').textContent = 'Status: Memproses...';
+  });
+</script>
+</body>
+</html>

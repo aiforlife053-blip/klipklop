@@ -1,0 +1,13 @@
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8765
+	}
+
+	handle {
+		root * /opt/klipklop/frontend/dist
+		try_files {path} /index.html
+		file_server
+	}
+}

@@ -210,11 +210,11 @@ class PortraitMixin(ClipperBase):
         blur_filter = f"boxblur={blur_radius}:{blur_radius}," if blur_radius else ""
         return (
             f"[0:v]scale={blur_width}:{blur_height}:force_original_aspect_ratio=increase,"
-            f"{blur_filter}scale={bg_width}:{bg_height},colorchannelmixer=rr=0.6:gg=0.6:bb=0.6,"
-            f"crop={width}:{height}[bg];"
-            f"[0:v]scale={foreground_width}:{foreground_height}:force_original_aspect_ratio=increase,"
-            f"crop={foreground_width}:{foreground_height}[fg];"
-            f"[bg][fg]overlay=(W-w)/2:(H-h)/2"
+            f"{blur_filter}scale={bg_width}:{bg_height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},setsar=1,colorchannelmixer=rr=0.6:gg=0.6:bb=0.6[bg];"
+            f"[0:v]scale={foreground_width}:{foreground_height}:force_original_aspect_ratio=decrease,"
+            f"pad={foreground_width}:{foreground_height}:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1[fg];"
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1"
         )
 
     def convert_to_portrait_blur_with_progress(self, input_path: str, output_path: str, progress_callback):
@@ -239,7 +239,7 @@ class PortraitMixin(ClipperBase):
             self.ffmpeg_path,
             "-y",
             "-i", input_path,
-            "-vf", f"scale={getattr(self, 'output_resolution', '720:1280')}:force_original_aspect_ratio=increase,crop={getattr(self, 'output_resolution', '720:1280')}",
+            "-vf", f"scale={getattr(self, 'output_resolution', '720:1280')}:force_original_aspect_ratio=increase,crop={getattr(self, 'output_resolution', '720:1280')},setsar=1",
             *self.get_video_encoder_args(),
             "-an",
             "-progress", "pipe:1",
