@@ -212,8 +212,8 @@ class PortraitMixin(ClipperBase):
             f"[0:v]scale={blur_width}:{blur_height}:force_original_aspect_ratio=increase,"
             f"{blur_filter}scale={bg_width}:{bg_height}:force_original_aspect_ratio=increase,"
             f"crop={width}:{height},setsar=1,colorchannelmixer=rr=0.6:gg=0.6:bb=0.6[bg];"
-            f"[0:v]scale={foreground_width}:{foreground_height}:force_original_aspect_ratio=decrease,"
-            f"pad={foreground_width}:{foreground_height}:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1[fg];"
+            f"[0:v]scale={foreground_width}:{foreground_height}:force_original_aspect_ratio=increase,"
+            f"crop={foreground_width}:{foreground_height},setsar=1[fg];"
             f"[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1"
         )
 

@@ -4,6 +4,8 @@ import mimetypes
 import os
 import subprocess
 import sys
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -39,9 +41,30 @@ def _supabase_config():
 
 
 _USER_MANAGERS = {}
-_USER_MANAGERS_LOCK = __import__("threading").Lock()
+_USER_MANAGERS_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS = {}
-_LOGIN_LOCK = __import__("threading").Lock()
+_LOGIN_LOCK = threading.Lock()
+
+
+def _run_youtube_scheduler():
+    while True:
+        with _USER_MANAGERS_LOCK:
+            for folder in (ROOT / "data").iterdir() if (ROOT / "data").exists() else []:
+                if folder.is_dir():
+                    try:
+                        _USER_MANAGERS.setdefault(folder.name, WebJobManager(folder, user_id=folder.name))
+                    except ValueError:
+                        continue
+            managers = list(_USER_MANAGERS.values())
+        for manager in managers:
+            try:
+                manager.process_due_youtube_uploads()
+            except Exception:
+                pass
+        time.sleep(60)
+
+
+threading.Thread(target=_run_youtube_scheduler, daemon=True, name="klipklop-youtube-scheduler").start()
 
 
 def _public_mode():
@@ -170,6 +193,12 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._json({"status": "ok"})
         elif parsed.path == "/api/social/youtube/upload":
             self._upload_youtube(payload)
+        elif parsed.path == "/api/social/youtube/schedule":
+            result = self._manager().schedule_youtube_upload(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/social/youtube/schedule/cancel":
+            result = self._manager().cancel_youtube_upload(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/social/youtube/check":
             try:
                 self._json({"status": "ok", "existing": list_existing_youtube_videos(payload.get("video_ids") or [], self._current_user())})
@@ -599,28 +628,29 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         if not target.exists() or output_root not in target.parents or target.suffix.lower() not in allowed:
             self._json({"status": "error", "message": "File not found"}, 404)
             return
-        raw = target.read_bytes()
+        file_size = target.stat().st_size
         safe_name = quote(target.name.replace('"', '').replace('\r', '').replace('\n', ''))
-        # For images, serve inline so browser can display them directly
         img_exts = {".jpg", ".jpeg", ".png"}
         if target.suffix.lower() in img_exts:
             import mimetypes as _mt
-            ct = _mt.guess_type(str(target))[0] or "image/jpeg"
-            self.send_response(200)
-            self._add_security_headers()
-            self.send_header("Content-Type", ct)
-            self.send_header("Content-Length", str(len(raw)))
-            self.send_header("Cache-Control", "public, max-age=3600")
-            self.end_headers()
-            self.wfile.write(raw)
+            content_type = _mt.guess_type(str(target))[0] or "image/jpeg"
         else:
-            self.send_response(200)
-            self._add_security_headers()
-            self.send_header("Content-Type", "application/octet-stream")
+            content_type = "application/octet-stream"
+        self.send_response(200)
+        self._add_security_headers()
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(file_size))
+        if target.suffix.lower() in img_exts:
+            self.send_header("Cache-Control", "public, max-age=3600")
+        else:
             self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{safe_name}")
-            self.send_header("Content-Length", str(len(raw)))
-            self.end_headers()
-            self.wfile.write(raw)
+        self.end_headers()
+        try:
+            with open(target, "rb") as file:
+                while data := file.read(65536):
+                    self.wfile.write(data)
+        except (ConnectionAbortedError, BrokenPipeError, ConnectionResetError, OSError):
+            pass
 
 
 def _warmup_ffmpeg():

@@ -56,27 +56,36 @@ sudo apt install -y ffmpeg
 # Buat user khusus
 sudo useradd -m -s /bin/bash klipklop
 
-# Upload codebase (dari lokal)
-rsync -avz --exclude='node_modules' --exclude='output' --exclude='__pycache__' \
-  /path/to/web-klip/ user@VPS_IP:/tmp/klipklop-upload
+# Upload codebase (dari lokal; jalankan dari Git Bash/WSL)
+rsync -avz \
+  --exclude='.git' --exclude='.env' --exclude='config.json' \
+  --exclude='cookie.txt' --exclude='cookies.txt' \
+  --exclude='client_secret*.json' --exclude='token*.json' --exclude='tokens' \
+  --exclude='node_modules' --exclude='output' --exclude='cache' --exclude='out' \
+  --exclude='_temp' --exclude='__pycache__' --exclude='.pytest_cache' \
+  --exclude='bin' --exclude='ffmpeg' --exclude='error.log' --exclude='tickets.json' \
+  /path/to/web-klip/ ubuntu@VPS_IP:/tmp/klipklop-upload/
 
 # Di VPS, pindah ke direktori final
-sudo mv /tmp/klipklop-upload /opt/klipklop
+sudo mkdir -p /opt/klipklop
+sudo rsync -a --delete /tmp/klipklop-upload/ /opt/klipklop/
 sudo chown -R klipklop:klipklop /opt/klipklop
 
 # Setup Python venv
-sudo -u klipklop python3.12 -m venv /opt/klipklop/venv
-sudo -u klipklop /opt/klipklop/venv/bin/pip install -r /opt/klipklop/requirements.txt
+sudo -u klipklop python3 -m venv /opt/klipklop/.venv
+sudo -u klipklop /opt/klipklop/.venv/bin/pip install -r /opt/klipklop/requirements.txt
 9. Setup Environment
-# Buat file env (edit dengan nilai real)
-sudo nano /opt/klipklop/.env
+# Buat file env di lokasi yang dibaca systemd
+sudo install -d -m 750 -o root -g klipklop /etc/klipklop
+sudo nano /etc/klipklop/klipklop.env
 
 # Isi dengan nilai dari langkah 1-3:
-APP_DOMAIN=domain.anda.com
+APP_DOMAIN=app.klipklop.web.id
 KLIPKLOP_HOST=127.0.0.1
 KLIPKLOP_PORT=8765
+KLIPKLOP_PARALLEL_WORKERS=1
 SECURITY_MODE=public
-ALLOWED_ORIGINS=https://domain.anda.com
+ALLOWED_ORIGINS=https://app.klipklop.web.id
 SUPABASE_URL=https://PROJECT_REF.supabase.co
 SUPABASE_ANON_KEY=eyJ...
 SUPABASE_SERVICE_ROLE_KEY=eyJ...
@@ -84,29 +93,21 @@ KLIPKLOP_SECRET=hasil_generate_step3
 TOKEN_ENCRYPTION_KEY=hasil_generate_step3
 YOUTUBE_CLIENT_ID=xxx.apps.googleusercontent.com
 YOUTUBE_CLIENT_SECRET=GOCSPX-xxx
-YOUTUBE_REDIRECT_URI=https://domain.anda.com/api/youtube/callback
+YOUTUBE_REDIRECT_URI=https://app.klipklop.web.id/api/youtube/callback
 
 # Protect file
-sudo chmod 600 /opt/klipklop/.env
-sudo chown klipklop:klipklop /opt/klipklop/.env
+sudo chmod 640 /etc/klipklop/klipklop.env
+sudo chown root:klipklop /etc/klipklop/klipklop.env
 10. Apply Supabase Migration
-# Install Supabase CLI
-curl -sL https://github.com/supabase/cli/releases/latest/download/supabase_linux_amd64.tar.gz | tar xz
-sudo mv supabase /usr/local/bin/
-
-# Link project
-cd /opt/klipklop
-supabase login
-supabase link --project-ref PROJECT_REF
-
-# Apply migration
-supabase db push
+# Sudah dilakukan dari komputer lokal; jangan push ulang di VPS.
+# npx supabase link --project-ref PROJECT_REF
+# npx supabase db push
 11. Setup Systemd Service
 # Copy service file
 sudo cp /opt/klipklop/deploy/klipklop.service /etc/systemd/system/
 
-# Edit jika perlu (path venv, user, dll)
-sudo nano /etc/systemd/system/klipklop.service
+# Validasi service
+sudo systemd-analyze verify /etc/systemd/system/klipklop.service
 
 # Enable & start
 sudo systemctl daemon-reload
@@ -117,12 +118,11 @@ sudo systemctl status klipklop
 # Copy Caddyfile
 sudo cp /opt/klipklop/deploy/Caddyfile /etc/caddy/Caddyfile
 
-# Ganti {$APP_DOMAIN} dengan domain real atau edit:
-sudo nano /etc/caddy/Caddyfile
-# Ubah baris 1: {$APP_DOMAIN} → domain.anda.com
+# Domain sudah ditulis langsung di deploy/Caddyfile.
 
-# Reload Caddy
-sudo systemctl reload caddy
+# Validasi dan reload Caddy
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl restart caddy
 C. Verifikasi
 13. Health Checks
 # Check app logs
@@ -132,7 +132,7 @@ sudo journalctl -u klipklop -f
 sudo systemctl status caddy
 
 # Test HTTPS
-curl https://domain.anda.com/api/status
+curl https://app.klipklop.web.id/api/status
 14. Functional Tests (via browser)
 - Login dengan salah satu dari 5 user
 - Upload cookie YouTube

@@ -7,6 +7,7 @@ export default function Gallery() {
   const [clips, setClips] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
+  const [scheduleAt, setScheduleAt] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<any>(null);
 
   const fetchSaved = useCallback(async () => {
@@ -83,6 +84,31 @@ export default function Gallery() {
       alert('Upload gagal: ' + (e.message || ''));
     } finally {
       setUploadingId(null);
+    }
+  };
+
+  const handleSchedule = async (clip: any) => {
+    if (!scheduleAt) return;
+    try {
+      await api('/api/social/youtube/schedule', {
+        method: 'POST',
+        body: JSON.stringify({ path: clip.path, title: clip.title || clip.name, description: clip.description || '', scheduled_at: scheduleAt }),
+      });
+      setShowDetailModal((current: any) => current && current.path === clip.path ? { ...current, youtube_upload: { status: 'scheduled', scheduled_at: new Date(`${scheduleAt}:00+07:00`).toISOString() } } : current);
+      await fetchSaved();
+    } catch (e: any) {
+      alert('Gagal menjadwalkan: ' + (e.message || ''));
+    }
+  };
+
+  const handleCancelSchedule = async (clip: any) => {
+    try {
+      await api('/api/social/youtube/schedule/cancel', { method: 'POST', body: JSON.stringify({ path: clip.path }) });
+      setShowDetailModal((current: any) => current && current.path === clip.path ? { ...current, youtube_upload: null } : current);
+      setScheduleAt('');
+      await fetchSaved();
+    } catch (e: any) {
+      alert('Gagal membatalkan jadwal: ' + (e.message || ''));
     }
   };
 
@@ -191,8 +217,20 @@ export default function Gallery() {
                   <p>{showDetailModal.description}</p>
                 </div>
               </div>
-              <div className="mt-auto flex flex-wrap gap-3 pt-4">
-                <button type="button" onClick={() => window.open(`/api/download?path=${encodeURIComponent(showDetailModal.path)}`, '_blank')} className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 text-sm font-bold text-primary-foreground transition-opacity hover:opacity-90">
+               <div className="rounded-xl border border-line bg-secondary/50 p-4">
+                 <p className="mb-3 text-sm font-bold">Jadwalkan YouTube <span className="font-normal text-muted">(WIB, langsung public)</span></p>
+                 {showDetailModal.youtube_upload?.status === 'scheduled' ? (
+                   <div className="flex flex-wrap items-center gap-3 text-sm"><span className="text-primary">Dijadwalkan: {new Date(showDetailModal.youtube_upload.scheduled_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Jakarta' })} WIB</span><button type="button" onClick={() => handleCancelSchedule(showDetailModal)} className="font-medium text-destructive hover:underline">Batalkan</button></div>
+                 ) : showDetailModal.youtube_upload?.status === 'uploaded' ? (
+                   <a href={showDetailModal.youtube_upload.url} target="_blank" rel="noreferrer" className="text-sm font-medium text-emerald-500 hover:underline">Sudah diupload ke YouTube</a>
+                 ) : (
+                   <div className="flex flex-wrap gap-2"><input type="datetime-local" value={scheduleAt} onChange={e => setScheduleAt(e.target.value)} className="h-10 rounded-lg border border-field bg-card px-3 text-sm" /><button type="button" disabled={!scheduleAt} onClick={() => handleSchedule(showDetailModal)} className="h-10 rounded-lg bg-primary px-4 text-sm font-bold text-primary-foreground disabled:opacity-50">Jadwalkan</button></div>
+                 )}
+                 {showDetailModal.youtube_upload?.status === 'error' && <p className="mt-2 text-xs text-destructive">{showDetailModal.youtube_upload.error}</p>}
+               </div>
+               <div className="mt-auto flex flex-wrap gap-3 pt-4">
+                 <button type="button" onClick={() => { window.location.href = `/api/download?path=${encodeURIComponent(showDetailModal.path)}`; }} className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 text-sm font-bold text-primary-foreground transition-opacity hover:opacity-90">
+
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
                   Download
                 </button>

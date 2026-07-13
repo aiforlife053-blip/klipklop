@@ -32,6 +32,16 @@ class BackendSecurityTests(unittest.TestCase):
             self.assertEqual(a.delete_output({"path": str(foreign)})["status"], "error")
             self.assertTrue(foreign.exists())
 
+    def test_cookie_files_are_isolated_per_user(self):
+        with tempfile.TemporaryDirectory() as root:
+            a = WebJobManager(Path(root) / self.user_a, user_id=self.user_a)
+            b = WebJobManager(Path(root) / self.user_b, user_id=self.user_b)
+            result = a.save_cookies("SID=user-a")
+            self.assertEqual(result["status"], "saved")
+            self.assertTrue(a.core_cookie_file.exists())
+            self.assertFalse(b.core_cookie_file.exists())
+            self.assertFalse((Path(root) / "cookies.txt").exists())
+
     def test_provider_key_fails_closed_without_vault(self):
         with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {"SUPABASE_URL": "", "SUPABASE_SERVICE_ROLE_KEY": ""}, clear=False):
             manager = WebJobManager(Path(root) / self.user_a, user_id=self.user_a)
@@ -85,6 +95,19 @@ class BackendSecurityTests(unittest.TestCase):
             self.assertNotIn(b"access", encrypted)
             with self.assertRaises(ValueError):
                 social_auth.finish_youtube_oauth(state, "code")
+
+    def test_youtube_status_includes_channel_name(self):
+        credentials = MagicMock(refresh_token="refresh", expired=False)
+        response = {"items": [{"id": "channel-id", "snippet": {"title": "KlipKlop Channel"}}]}
+        api = MagicMock()
+        api.channels.return_value.list.return_value.execute.return_value = response
+        with patch.object(social_auth, "_load_credentials", return_value=credentials), patch.object(
+            social_auth, "get_youtube_credentials", return_value=credentials
+        ), patch("googleapiclient.discovery.build", return_value=api):
+            result = social_auth.is_youtube_connected(self.user_a)
+        self.assertTrue(result["connected"])
+        self.assertEqual(result["channel_id"], "channel-id")
+        self.assertEqual(result["channel_title"], "KlipKlop Channel")
 
     def test_oauth_requires_https_callback(self):
         with patch.dict(os.environ, {"YOUTUBE_CLIENT_ID": "client", "YOUTUBE_CLIENT_SECRET": "secret", "YOUTUBE_REDIRECT_URI": "http://example.test/callback"}, clear=False):

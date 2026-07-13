@@ -18,10 +18,12 @@ const settingsPayload = (settings: any) => ({
 export default function Settings() {
   const { settings, setSettings } = useOutletContext<any>();
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingCookies, setIsUploadingCookies] = useState(false);
   const [clearingProvider, setClearingProvider] = useState<ProviderName | null>(null);
   const [saveMessage, setSaveMessage] = useState('');
   const [saveError, setSaveError] = useState(false);
   const [youtubeConnected, setYoutubeConnected] = useState(false);
+  const [youtubeChannelTitle, setYoutubeChannelTitle] = useState('');
   const [geminiCheckState, setGeminiCheckState] = useState<ApiCheckState>('idle');
   const [geminiCheckMessage, setGeminiCheckMessage] = useState('');
   const [groqCheckState, setGroqCheckState] = useState<ApiCheckState>('idle');
@@ -30,6 +32,7 @@ export default function Settings() {
   useEffect(() => {
     api('/api/social/status').then((res: any) => {
       setYoutubeConnected(res.connected);
+      setYoutubeChannelTitle(res.channel_title || '');
     }).catch(() => {});
   }, []);
 
@@ -78,6 +81,7 @@ export default function Settings() {
     try {
       await api('/api/social/youtube/disconnect', { method: 'POST' });
       setYoutubeConnected(false);
+      setYoutubeChannelTitle('');
       alert('YouTube berhasil diputuskan.');
     } catch (e: any) {
       alert('Error: ' + e.message);
@@ -98,6 +102,28 @@ export default function Settings() {
       showSaveMessage('Gagal menyimpan konfigurasi.', true);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleCookiesUpload = async (file?: File) => {
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      showSaveMessage('File cookies.txt maksimal 10 MB.', true);
+      return;
+    }
+    setIsUploadingCookies(true);
+    try {
+      const res = await api('/api/cookies', {
+        method: 'POST',
+        body: JSON.stringify({ content: await file.text() }),
+      });
+      if (res.status !== 'saved') throw new Error(res.message || 'Upload gagal');
+      setSettings((prev: any) => ({ ...prev, cookie_exists: true, cookies: res.cookies }));
+      showSaveMessage('cookies.txt berhasil disimpan untuk akun ini.');
+    } catch (e: any) {
+      showSaveMessage(e.message || 'Gagal mengunggah cookies.txt.', true);
+    } finally {
+      setIsUploadingCookies(false);
     }
   };
 
@@ -282,23 +308,28 @@ export default function Settings() {
           </div>
         </section>
 
-        {/* Penyimpanan */}
         <section className="flex flex-col gap-5 rounded-2xl border border-line bg-card p-6">
-          <div className="flex items-center gap-3">
-            <span className="flex size-9 items-center justify-center rounded-lg bg-primary/15 text-primary">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>
-            </span>
-            <h2 className="font-display text-lg font-bold">Penyimpanan</h2>
-          </div>
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <label htmlFor="output-folder" className="text-sm font-medium">Folder Output</label>
-              <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs text-muted">Opsional</span>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="font-display text-lg font-bold">YouTube cookies.txt</h2>
+              <p className="mt-1 text-sm text-muted">{settings.cookie_exists ? 'Tersimpan khusus untuk akun ini.' : 'Opsional untuk video yang meminta login YouTube.'}</p>
             </div>
-            <input id="output-folder" type="text" placeholder="Contoh: /Downloads/KlipKlop-Output"
-              value={settings.output_dir} onChange={(e) => setSettings({ ...settings, output_dir: e.target.value })}
-              className="h-11 w-full rounded-xl border border-field bg-secondary px-4 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary" />
+            {settings.cookie_exists && <span className="shrink-0 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-500">Tersimpan</span>}
           </div>
+          <label className="flex cursor-pointer items-center justify-center rounded-xl border border-line bg-secondary px-5 py-3 text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">
+            {isUploadingCookies ? 'Mengunggah...' : 'Pilih cookies.txt'}
+            <input
+              type="file"
+              accept=".txt,text/plain"
+              disabled={isUploadingCookies}
+              onChange={(e) => {
+                void handleCookiesUpload(e.target.files?.[0]);
+                e.currentTarget.value = '';
+              }}
+              className="sr-only"
+            />
+          </label>
+          <p className="text-xs leading-relaxed text-muted">Cookie bersifat sensitif. Ekspor dari browser yang login ke YouTube; jangan bagikan file.</p>
         </section>
 
         {/* Koneksi Sosial Media */}
@@ -310,6 +341,13 @@ export default function Settings() {
             <h2 className="font-display text-lg font-bold">Koneksi Sosial Media</h2>
           </div>
           <p className="text-sm leading-relaxed text-muted">Hubungkan akun sosial media untuk mempublikasikan klip langsung dari dashboard.</p>
+          {youtubeConnected && (
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm">
+              <span className="size-2 rounded-full bg-emerald-500" />
+              <span className="text-muted">Terhubung ke</span>
+              <strong className="font-semibold text-foreground">{youtubeChannelTitle || 'Channel YouTube'}</strong>
+            </div>
+          )}
           <div className="flex flex-wrap gap-3">
             {youtubeConnected ? (
               <button type="button" onClick={handleDisconnectYoutube} className="rounded-xl border border-destructive/40 bg-destructive/10 px-5 py-2.5 text-sm font-medium text-destructive transition-colors hover:bg-destructive/20">Putuskan YouTube</button>

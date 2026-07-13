@@ -67,6 +67,7 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         landscape_blur: bool = False,
         screen_size: str = "9:16",
         subtitle_style: dict = None,
+        cookies_path: str = None,
         log_callback=None,
         progress_callback=None,
         token_callback=None,
@@ -107,6 +108,7 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         self.ffmpeg_path = ffmpeg_path
         self.ytdlp_path = ytdlp_path
         self.output_dir = Path(output_dir)
+        self.cookies_path = Path(cookies_path) if cookies_path else None
         self.temperature = temperature
         self.system_prompt = system_prompt or self.get_default_prompt()
         self.watermark_settings = watermark_settings or {"enabled": False}

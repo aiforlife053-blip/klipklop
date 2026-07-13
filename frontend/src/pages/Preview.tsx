@@ -353,10 +353,33 @@ export default function Preview() {
                 </button>
               </div>
               <div className={`flex flex-col gap-4 transition-opacity ${settings.watermark.enabled ? '' : 'opacity-40 pointer-events-none'}`}>
-                <button type="button" className="flex h-12 items-center justify-center gap-2 rounded-xl border border-dashed border-line bg-secondary/50 text-sm font-medium text-muted transition-colors hover:border-primary/40 hover:text-primary">
+                <label className="flex h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-line bg-secondary/50 text-sm font-medium text-muted transition-colors hover:border-primary/40 hover:text-primary">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
-                  Upload Image
-                </button>
+                  {settings.watermark.image_path ? 'Ganti Gambar' : 'Upload Image'}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="sr-only"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      e.currentTarget.value = '';
+                      if (!file) return;
+                      if (file.size > 400000) { alert('Gambar maksimal 400KB'); return; }
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        const b64 = (reader.result as string).split(',')[1];
+                        api('/api/watermark/upload', {
+                          method: 'POST',
+                          body: JSON.stringify({ name: file.name, content: b64 }),
+                        }).then((res: any) => {
+                          if (res.status !== 'ok') { alert(res.message || 'Gagal upload'); return; }
+                          setSettings((prev: any) => ({ ...prev, watermark: { ...prev.watermark, image_path: res.path } }));
+                        }).catch(() => alert('Gagal upload watermark'));
+                      };
+                      reader.readAsDataURL(file);
+                    }}
+                  />
+                </label>
                 <div className="flex flex-1 flex-col gap-2">
                   <div className="flex items-center justify-between text-xs"><span className="font-medium">Opacity</span><span className="text-muted">{Math.round(settings.watermark.opacity * 100)}%</span></div>
                   <input type="range" min="0" max="1" step="0.01" value={settings.watermark.opacity} onChange={(e) => setSettings({...settings, watermark: {...settings.watermark, opacity: parseFloat(e.target.value)}})} className="w-full accent-primary" />

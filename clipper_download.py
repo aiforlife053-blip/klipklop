@@ -25,8 +25,8 @@ class DownloadMixin(ClipperBase):
         return ['res', 'vcodec:h264', 'fps:30', 'br']
 
     def _cookies_path(self):
-        from utils.helpers import get_app_dir
-        return next((loc for loc in [Path("cookies.txt"), get_app_dir() / "cookies.txt"] if loc.exists()), None)
+        path = getattr(self, "cookies_path", None)
+        return Path(path) if path and Path(path).is_file() else None
 
     def _apply_common_ytdlp_options(self, ydl_opts: dict):
         deno_path = get_deno_path()
@@ -140,8 +140,7 @@ class DownloadMixin(ClipperBase):
             ydl_opts['remote_components'] = ['ejs:github']
         if ffmpeg_path and Path(ffmpeg_path).exists():
             ydl_opts['ffmpeg_location'] = str(Path(ffmpeg_path).parent)
-        from utils.helpers import get_app_dir
-        cookies_path = next((loc for loc in [Path("cookies.txt"), get_app_dir() / "cookies.txt"] if loc.exists()), None)
+        cookies_path = self._cookies_path()
         if cookies_path:
             ydl_opts['cookiefile'] = str(cookies_path)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -261,26 +260,10 @@ class DownloadMixin(ClipperBase):
         else:
             self.log(f"  WARNING: FFmpeg not found - subtitle conversion disabled")
         
-        # Add cookies (required)
-        from utils.helpers import get_app_dir
-        app_dir = get_app_dir()
-        cookies_locations = [
-            Path("cookies.txt"),  # Current directory
-            app_dir / "cookies.txt",  # App directory
-        ]
-        
-        cookies_path = None
-        for loc in cookies_locations:
-            self.log(f"  Checking cookies at: {loc} - exists: {loc.exists()}")
-            if loc.exists():
-                cookies_path = loc
-                break
-        
-        if not cookies_path:
-            raise Exception("cookies.txt not found!\n\nPlease upload cookies.txt file from home page.")
-        
-        ydl_opts['cookiefile'] = str(cookies_path)
-        self.log(f"  Using cookies from: {cookies_path}")
+        cookies_path = self._cookies_path()
+        if cookies_path:
+            ydl_opts['cookiefile'] = str(cookies_path)
+            self.log(f"  Using login file from: {cookies_path}")
         
         # Single download attempt (no browser cookies fallback)
         last_error = None
@@ -962,24 +945,9 @@ class DownloadMixin(ClipperBase):
                 'format': 'srt',
             }]
         
-        # Add cookies
-        from utils.helpers import get_app_dir
-        app_dir = get_app_dir()
-        cookies_locations = [
-            Path("cookies.txt"),
-            app_dir / "cookies.txt",
-        ]
-        
-        cookies_path = None
-        for loc in cookies_locations:
-            if loc.exists():
-                cookies_path = loc
-                break
-        
-        if not cookies_path:
-            raise Exception("cookies.txt not found!\n\nPlease upload cookies.txt file from home page.")
-        
-        ydl_opts['cookiefile'] = str(cookies_path)
+        cookies_path = self._cookies_path()
+        if cookies_path:
+            ydl_opts['cookiefile'] = str(cookies_path)
         
         try:
             self.log(f"  Downloading {self.subtitle_language} subtitle...")
@@ -1040,17 +1008,9 @@ class DownloadMixin(ClipperBase):
         self.log("  Fetching video info...")
         meta_cmd = [self.ytdlp_path, "--dump-json", "--no-download", url]
         
-        # Add cookies
-        from utils.helpers import get_app_dir
-        app_dir = get_app_dir()
-        cookies_path = None
-        for loc in [Path("cookies.txt"), app_dir / "cookies.txt"]:
-            if loc.exists():
-                cookies_path = str(loc)
-                break
-        
+        cookies_path = self._cookies_path()
         if cookies_path:
-            meta_cmd.extend(["--cookies", cookies_path])
+            meta_cmd.extend(["--cookies", str(cookies_path)])
         
         result = subprocess.run(
             meta_cmd, capture_output=True, text=True,
@@ -1082,7 +1042,7 @@ class DownloadMixin(ClipperBase):
         ]
         
         if cookies_path:
-            cmd.extend(["--cookies", cookies_path])
+            cmd.extend(["--cookies", str(cookies_path)])
         
         cmd.append(url)
         
@@ -1194,19 +1154,9 @@ class DownloadMixin(ClipperBase):
         if ffmpeg_path and Path(ffmpeg_path).exists():
             ydl_opts['ffmpeg_location'] = str(Path(ffmpeg_path).parent)
         
-        # Add cookies
-        from utils.helpers import get_app_dir
-        app_dir = get_app_dir()
-        cookies_path = None
-        for loc in [Path("cookies.txt"), app_dir / "cookies.txt"]:
-            if loc.exists():
-                cookies_path = loc
-                break
-        
-        if not cookies_path:
-            raise Exception("cookies.txt not found!")
-        
-        ydl_opts['cookiefile'] = str(cookies_path)
+        cookies_path = self._cookies_path()
+        if cookies_path:
+            ydl_opts['cookiefile'] = str(cookies_path)
         
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -1263,17 +1213,9 @@ class DownloadMixin(ClipperBase):
             "-o", output_path,
         ]
         
-        # Add cookies
-        from utils.helpers import get_app_dir
-        app_dir = get_app_dir()
-        cookies_path = None
-        for loc in [Path("cookies.txt"), app_dir / "cookies.txt"]:
-            if loc.exists():
-                cookies_path = str(loc)
-                break
-        
+        cookies_path = self._cookies_path()
         if cookies_path:
-            cmd.extend(["--cookies", cookies_path])
+            cmd.extend(["--cookies", str(cookies_path)])
         
         cmd.append(url)
         

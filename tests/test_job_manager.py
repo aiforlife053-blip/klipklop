@@ -19,6 +19,7 @@ from clipper_shared import slice_timed_transcript, timed_segments_to_prompt, val
 from clipper_download import DownloadMixin
 from clipper_export import ExportMixin
 from clipper_portrait import PortraitMixin
+from clipper_ffmpeg import FfmpegMixin
 
 
 def test_validate_timed_transcript_sorts_and_returns_json_safe_copy():
@@ -609,6 +610,19 @@ def test_cookie_status_detects_missing_and_present_file(tmp_path):
     assert manager.cookie_status() == {"exists": True, "path": str(tmp_path / "cookie.txt")}
 
 
+def test_download_mixin_does_not_fall_back_to_cwd_cookie(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path / "user")
+    (tmp_path / "cookies.txt").write_text("global", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    core = object.__new__(mod.AutoClipperCore)
+    core.cookies_path = None
+    assert core._cookies_path() is None
+    core.cookies_path = manager.core_cookie_file
+    assert core._cookies_path() is None
+    manager.save_cookies("SID=user")
+    assert core._cookies_path() == manager.core_cookie_file
+
+
 def test_blank_output_dir_falls_back_to_default(tmp_path):
     manager = mod.WebJobManager(app_dir=tmp_path)
     result = manager.save_settings({"output_dir": ""})
@@ -876,8 +890,8 @@ def test_blur_filter_matches_preview_geometry():
     harness = object.__new__(PortraitMixin)
     harness.blur_background_settings = {"zoom": 1.08, "strength": 3, "scale": 1.5}
     filter_graph = harness._preview_blur_filter(720, 1280)
-    assert "scale=1080:608:force_original_aspect_ratio=decrease" in filter_graph
-    assert "pad=1080:608:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1[fg]" in filter_graph
+    assert "scale=1080:608:force_original_aspect_ratio=increase" in filter_graph
+    assert "crop=1080:608,setsar=1[fg]" in filter_graph
     assert "boxblur=" in filter_graph
     assert "scale=320:569" in filter_graph
     assert "colorchannelmixer=rr=0.6:gg=0.6:bb=0.6" in filter_graph
@@ -891,6 +905,45 @@ def test_high_resolution_caps_parallel_cpu_workers():
     assert mod.WebJobManager._parallel_workers_for_quality(3, "1080") == 2
     assert mod.WebJobManager._parallel_workers_for_quality(3, "1440") == 1
     assert mod.WebJobManager._parallel_workers_for_quality(3, "2160") == 1
+
+
+def test_high_resolution_uses_ultrafast_cpu_encoder():
+    harness = object.__new__(FfmpegMixin)
+    harness.gpu_enabled = False
+    harness.gpu_encoder_args = []
+    harness.optimize_mode = "hosting_2cpu"
+    harness.video_quality = "1440"
+    assert harness.get_video_encoder_args() == ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28']
+    harness.video_quality = "720"
+    assert harness.get_video_encoder_args() == ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28']
+
+
+def test_schedule_youtube_upload_stores_wib_as_utc(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    video = clip_dir / "master.mp4"
+    video.write_bytes(b"x")
+    result = manager.schedule_youtube_upload({"path": str(video), "scheduled_at": "2030-01-02T10:30", "title": "Judul"})
+    assert result["status"] == "scheduled"
+    saved = json.loads((clip_dir / "data.json").read_text(encoding="utf-8"))["youtube_upload"]
+    assert saved["scheduled_at"] == "2030-01-02T03:30:00+00:00"
+    assert saved["privacy"] == "public"
+
+
+def test_due_youtube_upload_persists_public_result(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "master.mp4").write_bytes(b"x")
+    (clip_dir / "data.json").write_text(json.dumps({"youtube_upload": {"status": "scheduled", "scheduled_at": "2000-01-01T00:00:00+00:00", "title": "Judul", "description": ""}}), encoding="utf-8")
+    captured = {}
+    monkeypatch.setattr(mod, "upload_youtube_video", lambda path, title, description, privacy, user_id: captured.update(path=path, title=title, privacy=privacy, user_id=user_id) or {"video_id": "abc", "url": "https://youtube.test/watch?v=abc"})
+    manager.process_due_youtube_uploads()
+    upload = json.loads((clip_dir / "data.json").read_text(encoding="utf-8"))["youtube_upload"]
+    assert captured["privacy"] == "public"
+    assert upload["status"] == "uploaded"
+    assert upload["video_id"] == "abc"
 
 
 def test_section_format_has_hard_cap_and_fast_codec_sort():

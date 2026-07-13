@@ -130,6 +130,17 @@ def delete_youtube_token(user_id):
 def is_youtube_connected(user_id):
     try:
         creds = _load_credentials(user_id)
-        return {"connected": bool(creds and creds.refresh_token), "expired": bool(creds and creds.expired)}
+        connected = bool(creds and creds.refresh_token)
+        result = {"connected": connected, "expired": bool(creds and creds.expired)}
+        if connected:
+            try:
+                from googleapiclient.discovery import build
+                response = build("youtube", "v3", credentials=get_youtube_credentials(user_id), cache_discovery=False).channels().list(part="snippet", mine=True).execute()
+                channel = next(iter(response.get("items", [])), {})
+                result["channel_id"] = channel.get("id", "")
+                result["channel_title"] = channel.get("snippet", {}).get("title", "")
+            except Exception:
+                pass
+        return result
     except Exception:
         return {"connected": False}

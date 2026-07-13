@@ -20,6 +20,7 @@ export default function Dashboard() {
   const [showDetailModal, setShowDetailModal] = useState<any>(null);
   const [instruction, setInstruction] = useState('');
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
+  const [scheduleAt, setScheduleAt] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<any>(null);
   const [stopConfirm, setStopConfirm] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -145,6 +146,7 @@ export default function Dashboard() {
         } else if (data.status === 'error' || data.status === 'idle') {
           stopPolling();
           setIsProcessing(false);
+          await fetchOutputs();
           if (data.status === 'error') setError(data.error || data.message || 'Terjadi kesalahan');
         }
       } catch (e) {
@@ -159,7 +161,7 @@ export default function Dashboard() {
         const data = await api('/api/status');
         setJobStatus(data);
         if (data.url) setYoutubeUrl((current) => current || data.url);
-        if (data.status === 'running' || data.status === 'stopping') {
+        if (data.status === 'queued' || data.status === 'running' || data.status === 'stopping') {
           setIsProcessing(true);
           startPolling();
         } else {
@@ -180,18 +182,19 @@ export default function Dashboard() {
       return;
     }
     setError('');
-    setClips([]);
     setIsProcessing(true);
     try {
       const result = await api('/api/start', {
         method: 'POST',
         body: JSON.stringify(buildStartPayload()),
       });
-      if (result.status !== 'started') {
+      if (result.status !== 'queued' && result.status !== 'started') {
         setError(result.message || 'Gagal memulai proses.');
         setIsProcessing(false);
+        await fetchOutputs();
         return;
       }
+      setClips([]);
       startPolling();
     } catch (e: any) {
       setError(e.message || 'Gagal memulai proses.');
@@ -203,13 +206,21 @@ export default function Dashboard() {
 
   const confirmStop = async () => {
     setStopConfirm(false);
-    stopPolling();
-    setIsProcessing(false);
-    setJobStatus({ status: 'idle', message: 'Stopped', progress: 0 });
     try {
-      await api('/api/stop', { method: 'POST', body: JSON.stringify({}) });
+      const result = await api('/api/stop', { method: 'POST', body: JSON.stringify({}) });
+      if (result.status === 'stopping') {
+        setJobStatus(result);
+        startPolling();
+      } else {
+        stopPolling();
+        setIsProcessing(false);
+        setJobStatus(result);
+        await fetchOutputs();
+      }
     } catch (e) {
       console.error('Stop failed', e);
+      stopPolling();
+      setIsProcessing(false);
     }
   };
 
@@ -273,6 +284,31 @@ export default function Dashboard() {
     } catch (e: any) {
       alert('Upload gagal: ' + (e.message || ''));
       setUploadProgress(prev => { const n = { ...prev }; delete n[clipId]; return n; });
+    }
+  };
+
+  const handleSchedule = async (clip: any) => {
+    if (!scheduleAt) return;
+    try {
+      await api('/api/social/youtube/schedule', {
+        method: 'POST',
+        body: JSON.stringify({ path: clip.path, title: clip.title || clip.name, description: clip.description || '', scheduled_at: scheduleAt }),
+      });
+      setShowDetailModal((current: any) => current && current.path === clip.path ? { ...current, youtube_upload: { status: 'scheduled', scheduled_at: new Date(`${scheduleAt}:00+07:00`).toISOString() } } : current);
+      await fetchOutputs();
+    } catch (e: any) {
+      alert('Gagal menjadwalkan: ' + (e.message || ''));
+    }
+  };
+
+  const handleCancelSchedule = async (clip: any) => {
+    try {
+      await api('/api/social/youtube/schedule/cancel', { method: 'POST', body: JSON.stringify({ path: clip.path }) });
+      setShowDetailModal((current: any) => current && current.path === clip.path ? { ...current, youtube_upload: null } : current);
+      setScheduleAt('');
+      await fetchOutputs();
+    } catch (e: any) {
+      alert('Gagal membatalkan jadwal: ' + (e.message || ''));
     }
   };
 
@@ -360,6 +396,8 @@ export default function Dashboard() {
                 <option value="480">480p</option>
                 <option value="720">720p</option>
                 <option value="1080">1080p</option>
+                <option value="1440">1440p (2K)</option>
+                <option value="2160">2160p (4K)</option>
               </select>
               <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
             </div>
@@ -591,12 +629,24 @@ export default function Dashboard() {
                   <p>{showDetailModal.description}</p>
                 </div>
               </div>
-              <div className="mt-auto flex flex-wrap gap-2.5 pt-2">
-                <button type="button" onClick={() => handleSave(showDetailModal)} disabled={isSaving} className="flex h-10 items-center gap-2 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
+               <div className="rounded-xl border border-line bg-secondary/50 p-4">
+                 <p className="mb-3 text-sm font-bold">Jadwalkan YouTube <span className="font-normal text-muted">(WIB, langsung public)</span></p>
+                 {showDetailModal.youtube_upload?.status === 'scheduled' ? (
+                   <div className="flex flex-wrap items-center gap-3 text-sm"><span className="text-primary">Dijadwalkan: {new Date(showDetailModal.youtube_upload.scheduled_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Jakarta' })} WIB</span><button type="button" onClick={() => handleCancelSchedule(showDetailModal)} className="font-medium text-destructive hover:underline">Batalkan</button></div>
+                 ) : showDetailModal.youtube_upload?.status === 'uploaded' ? (
+                   <a href={showDetailModal.youtube_upload.url} target="_blank" rel="noreferrer" className="text-sm font-medium text-emerald-500 hover:underline">Sudah diupload ke YouTube</a>
+                 ) : (
+                   <div className="flex flex-wrap gap-2"><input type="datetime-local" value={scheduleAt} onChange={e => setScheduleAt(e.target.value)} className="h-10 rounded-lg border border-field bg-card px-3 text-sm" /><button type="button" disabled={!scheduleAt} onClick={() => handleSchedule(showDetailModal)} className="h-10 rounded-lg bg-primary px-4 text-sm font-bold text-primary-foreground disabled:opacity-50">Jadwalkan</button></div>
+                 )}
+                 {showDetailModal.youtube_upload?.status === 'error' && <p className="mt-2 text-xs text-destructive">{showDetailModal.youtube_upload.error}</p>}
+               </div>
+               <div className="mt-auto flex flex-wrap gap-2.5 pt-2">
+                 <button type="button" onClick={() => handleSave(showDetailModal)} disabled={isSaving} className="flex h-10 items-center gap-2 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
+
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/></svg>
                   {isSaving ? 'Menyimpan...' : 'Simpan ke Gallery'}
                 </button>
-                <button type="button" onClick={() => window.open(`/api/download?path=${encodeURIComponent(showDetailModal.path)}`, '_blank')} className="flex h-10 items-center gap-2 rounded-xl border border-line bg-secondary px-4 text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary">
+                <button type="button" onClick={() => { window.location.href = `/api/download?path=${encodeURIComponent(showDetailModal.path)}`; }} className="flex h-10 items-center gap-2 rounded-xl border border-line bg-secondary px-4 text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
                   Download
                 </button>

@@ -54,10 +54,11 @@ class FfmpegMixin(ClipperBase):
         """Get video encoder arguments based on GPU settings"""
         if self.gpu_enabled and self.gpu_encoder_args:
             return self.gpu_encoder_args
-        else:
-            if getattr(self, "optimize_mode", "local") in {"local", "hosting_2cpu", "fast_cpu"}:
-                return ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28']
-            return ['-c:v', 'libx264', '-preset', 'fast', '-crf', '18']
+        if str(getattr(self, "video_quality", "720")) in {"1440", "2160"}:
+            return ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28']
+        if getattr(self, "optimize_mode", "local") in {"local", "hosting_2cpu", "fast_cpu"}:
+            return ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28']
+        return ['-c:v', 'libx264', '-preset', 'fast', '-crf', '18']
 
     @classmethod
     def _is_gpu_encoder_error(cls, stderr: str) -> bool:

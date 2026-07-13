@@ -6,8 +6,9 @@ import uuid
 import shutil
 import sys
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, quote, urlparse
 from urllib.request import Request, urlopen
@@ -20,6 +21,7 @@ from openai import OpenAI
 
 from clipper_core import AutoClipperCore
 from config.config_manager import ConfigManager
+from youtube_uploader import upload_youtube_video
 from utils.helpers import get_app_dir, get_ffmpeg_path, get_ytdlp_path
 
 
@@ -79,6 +81,7 @@ class WebJobManager:
     def __init__(self, app_dir=None, user_id=None):
         self.user_id = str(uuid.UUID(str(user_id))) if user_id else None
         self.app_dir = Path(app_dir) if app_dir else get_app_dir()
+        self.app_dir.mkdir(parents=True, exist_ok=True)
         self.output_dir = self.app_dir / "output"
         self.config_file = self.app_dir / "config.json"
         self.cookie_file = self.app_dir / "cookie.txt"
@@ -180,19 +183,28 @@ class WebJobManager:
         return start_settings
 
     def status(self):
+        with self._lock:
+            st = self._status
+            if self.thread and self.thread.is_alive() and st not in {"queued", "running", "stopping"}:
+                st = "stopping"
         return {
-            "status": self._status,
+            "status": st,
             "message": self._public_text(self._message),
             "progress": self._progress,
             "error": self._public_text(self._error),
             "url": self._active_url,
-            "queue_position": _queue_position_for(self) if self._status == "queued" else None,
+            "queue_position": _queue_position_for(self) if st == "queued" else None,
             "logs": self._logs[-500:],
         }
 
     def stop(self):
         with self._lock:
             self._cancel_requested = True
+            if self.thread and self.thread.is_alive():
+                self._status = "stopping"
+                self._message = "Stopping"
+                self._add_log("Stop requested")
+                return {"status": "stopping", "message": "Stopping"}
             self._status = "idle"
             self._message = "Stopped"
             self._progress = 0.0
@@ -579,6 +591,7 @@ class WebJobManager:
                         virality_score=viral,
                         score=score_pct,
                         img=img_url,
+                        youtube_upload=cm.get("youtube_upload") if isinstance(cm.get("youtube_upload"), dict) else None,
                     ))
                 groups.append({
                     "name": folder.name,
@@ -641,6 +654,83 @@ class WebJobManager:
         self.log_activity({"action": "gallery_save", "detail": f"{len(valid_clips)} clip dari {target.name}"})
         return {"status": "saved"}
 
+    def schedule_youtube_upload(self, payload):
+        target = self._youtube_upload_target(payload)
+        if target is None:
+            return {"status": "error", "message": "File video tidak ditemukan"}
+        try:
+            scheduled_at = datetime.fromisoformat(str(payload.get("scheduled_at") or "").strip())
+        except ValueError:
+            return {"status": "error", "message": "Waktu upload tidak valid"}
+        if scheduled_at.tzinfo is not None:
+            scheduled_at = scheduled_at.astimezone(ZoneInfo("Asia/Jakarta")).replace(tzinfo=None)
+        scheduled_utc = scheduled_at.replace(tzinfo=ZoneInfo("Asia/Jakarta")).astimezone(timezone.utc)
+        if scheduled_utc <= datetime.now(timezone.utc):
+            return {"status": "error", "message": "Waktu upload harus setelah sekarang"}
+        meta_path = target.with_name("data.json")
+        meta = self._read_json(meta_path)
+        upload = {
+            "status": "scheduled",
+            "scheduled_at": scheduled_utc.isoformat(),
+            "title": str(payload.get("title") or meta.get("title") or target.stem).strip()[:100],
+            "description": str(payload.get("description") or meta.get("description") or "").strip(),
+            "privacy": "public",
+        }
+        meta["youtube_upload"] = upload
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.log_activity({"action": "youtube_schedule", "detail": f"{target.name} | {scheduled_at.strftime('%d-%m-%Y %H:%M')} WIB"})
+        return {"status": "scheduled", "youtube_upload": upload}
+
+    def cancel_youtube_upload(self, payload):
+        target = self._youtube_upload_target(payload)
+        if target is None:
+            return {"status": "error", "message": "File video tidak ditemukan"}
+        meta_path = target.with_name("data.json")
+        meta = self._read_json(meta_path)
+        upload = meta.get("youtube_upload") if isinstance(meta.get("youtube_upload"), dict) else {}
+        if upload.get("status") == "uploading":
+            return {"status": "error", "message": "Upload sedang berjalan"}
+        meta.pop("youtube_upload", None)
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.log_activity({"action": "youtube_schedule_cancel", "detail": target.name})
+        return {"status": "cancelled"}
+
+    def process_due_youtube_uploads(self):
+        for meta_path in self._output_root().glob("*/**/data.json"):
+            meta = self._read_json(meta_path)
+            upload = meta.get("youtube_upload") if isinstance(meta.get("youtube_upload"), dict) else {}
+            if upload.get("status") != "scheduled":
+                continue
+            try:
+                scheduled_at = datetime.fromisoformat(str(upload.get("scheduled_at") or ""))
+                if scheduled_at.tzinfo is None or scheduled_at > datetime.now(timezone.utc):
+                    continue
+            except ValueError:
+                upload.update(status="error", error="Waktu upload tidak valid")
+                meta["youtube_upload"] = upload
+                meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+                continue
+            upload["status"] = "uploading"
+            upload.pop("error", None)
+            meta["youtube_upload"] = upload
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+            try:
+                result = upload_youtube_video(meta_path.with_name("master.mp4"), upload.get("title"), upload.get("description"), "public", self.user_id)
+                upload.update(status="uploaded", video_id=result["video_id"], url=result["url"], uploaded_at=datetime.now(timezone.utc).isoformat())
+                self.log_activity({"action": "youtube_upload", "detail": result["video_id"]})
+            except Exception:
+                upload.update(status="error", error="Upload YouTube gagal. Periksa koneksi YouTube lalu jadwalkan ulang.")
+                self._add_log("Scheduled YouTube upload failed", "Error")
+            meta["youtube_upload"] = upload
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _youtube_upload_target(self, payload):
+        target = Path(str(payload.get("path", ""))).resolve()
+        output_root = self._output_root().resolve()
+        if not target.is_file() or target.name.lower() != "master.mp4" or output_root not in target.parents:
+            return None
+        return target
+
     def _run(self, url, num_clips, add_captions, add_hook, subtitle_language, instruction, landscape_blur, run_dir, screen_size="9:16", source_credit=True):
         try:
             self._sync_core_cookie_file()
@@ -685,6 +775,7 @@ class WebJobManager:
                 landscape_blur=landscape_blur,
                 screen_size=screen_size,
                 subtitle_style=subtitle_style,
+                cookies_path=str(self.core_cookie_file) if self.core_cookie_file.is_file() else None,
                 cancel_check=lambda: self._cancel_requested,
                 log_callback=self._set_message,
                 progress_callback=self._set_progress,

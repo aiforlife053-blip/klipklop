@@ -21,6 +21,7 @@ class ClipperBase:
     output_dir: Path
     temp_dir: Path
     cache_dir: Path
+    cookies_path: Optional[Path]
 
     # --- AI clients ---
     highlight_client: Any
