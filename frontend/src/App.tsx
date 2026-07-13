@@ -4,7 +4,6 @@ import Login from './pages/Login';
 import DashboardLayout from './components/layout/DashboardLayout';
 import Dashboard from './pages/Dashboard';
 
-const Gallery = lazy(() => import('./pages/Gallery'));
 const Console = lazy(() => import('./pages/Console'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Preview = lazy(() => import('./pages/Preview'));
@@ -17,7 +16,7 @@ const router = createBrowserRouter([
     element: <DashboardLayout />,
     children: [
       { path: '/', element: <Dashboard /> },
-      { path: '/gallery', element: deferred(<Gallery />) },
+      { path: '/gallery', element: <Navigate to="/preview" replace /> },
       { path: '/console', element: deferred(<Console />) },
       { path: '/settings', element: deferred(<Settings />) },
       { path: '/preview', element: deferred(<Preview />) },

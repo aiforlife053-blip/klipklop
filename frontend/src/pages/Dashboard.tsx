@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useNavigate, useOutletContext } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { api } from '@/lib/api';
 
@@ -13,6 +13,7 @@ const loadingPhrases = [
 
 export default function Dashboard() {
   const { status: globalStatus, settings } = useOutletContext<any>();
+  const navigate = useNavigate();
   const [youtubeUrl, setYoutubeUrl] = useState(() => sessionStorage.getItem('klipklop.youtubeUrl') || '');
   const [videoQuality, setVideoQuality] = useState('720');
   const [numClips, setNumClips] = useState(1);
@@ -55,7 +56,6 @@ export default function Dashboard() {
       settings: syncedSettings,
     };
   };
-  const [toastMessage, setToastMessage] = useState('');
 
   const [loadingPhraseIdx, setLoadingPhraseIdx] = useState(0);
 
@@ -232,8 +232,6 @@ export default function Dashboard() {
         body: JSON.stringify({ path: clip.groupPath, clips: [clip.path] }),
       });
       await new Promise(r => setTimeout(r, 600));
-      setToastMessage('Klip berhasil disimpan ke Galeri! 🎉');
-      setTimeout(() => setToastMessage(''), 3000);
       setShowDetailModal(null);
       setClips(prev => prev.filter(c => c.path !== clip.path));
     } catch (e: any) {
@@ -510,55 +508,12 @@ export default function Dashboard() {
 
       {/* Hasil Generasi Klip Section */}
       <div className="grid gap-6 xl:grid-cols-[1fr_320px]">
-        <section className="flex flex-col gap-6 rounded-2xl border border-line bg-card/50 p-6" aria-label="Hasil generasi klip">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="flex flex-col gap-1">
-                <h2 className="font-display text-xl font-bold tracking-tight">Hasil Generasi Klip</h2>
-                <p className="text-sm text-muted">{clips.length} klip berhasil dihasilkan dari video Anda. Klik klip untuk melihat detail.</p>
-              </div>
-            </div>
-
-            {clips.length === 0 ? (
-              <div className="flex flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-line bg-secondary/50 p-12 text-center text-muted">
-                <svg className="mb-4 text-muted/50" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><circle cx="12" cy="13" r="3"/><line x1="12" x2="12" y1="13" y2="15"/></svg>
-                <p className="text-sm font-medium">Belum ada klip yang dihasilkan.</p>
-                <p className="mt-1 text-xs text-muted/70">Masukkan link YouTube untuk mulai memproses.</p>
-              </div>
-            ) : (
-              <div className="grid flex-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-                {clips.map((clip, idx) => (
-                <button key={clip.path || idx} type="button" onClick={() => setShowDetailModal(clip)} className="group flex flex-col overflow-hidden rounded-2xl border border-line bg-card text-left transition-colors hover:border-primary/50">
-                  <div className="relative aspect-[9/16] overflow-hidden">
-                     {fmtImg(clip) ? <img src={fmtImg(clip)} alt="Thumbnail klip" loading="lazy" className="absolute inset-0 size-full object-cover" /> : <span className="absolute inset-0 bg-secondary" aria-hidden="true" />}
-                    <span className="absolute left-2.5 top-2.5 z-[2] flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-xs font-bold text-primary-foreground">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
-                      {fmtScore(clip)}
-                    </span>
-                    <span className="absolute right-2.5 top-2.5 z-[2] rounded-full bg-background/80 px-2.5 py-1 text-xs font-medium backdrop-blur">{fmtDuration(clip)}</span>
-                    <span className="absolute inset-0 z-[3] flex flex-col items-center justify-center gap-2.5 bg-background/60 opacity-0 transition-opacity group-hover:opacity-100">
-                      <span className="flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="ml-0.5"><polygon points="6 3 20 12 6 21 6 3"/></svg>
-                      </span>
-                      <span className="rounded-full bg-primary px-3.5 py-1 text-xs font-bold text-primary-foreground">Lihat Detail</span>
-                    </span>
-                    {uploadProgress[clip.path] === 100 && (
-                      <span className="absolute bottom-2.5 left-2.5 z-[2] rounded-full bg-emerald-500/90 px-2.5 py-1 text-[10px] font-bold text-white backdrop-blur">Uploaded</span>
-                    )}
-                  </div>
-                  <div className="flex flex-1 flex-col gap-1.5 p-3.5">
-                    <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-primary">Klip {idx + 1} dari {clips.length}</span>
-                    <h3 className="line-clamp-2 font-display text-sm font-bold leading-snug">{clip.title || clip.name}</h3>
-                    <p className="mt-auto text-xs text-muted">Durasi: {fmtDuration(clip)}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-            )}
-            
-            {toastMessage && <p className="text-sm font-medium text-emerald-500">{toastMessage}</p>}
-
-            <p className="border-t border-line pt-4 text-center text-xs text-muted">Butuh bantuan? Silakan kirim ke <a href="mailto:bfrotok@klipklop.id" className="font-medium text-primary hover:underline">bfrotok@klipklop.id</a></p>
+          <section className="flex flex-col items-center justify-center gap-4 rounded-2xl border border-line bg-card/50 p-10 text-center" aria-label="Klip siap diedit">
+            <h2 className="font-display text-xl font-bold">{clips.length ? `${clips.length} klip siap diedit` : 'Belum ada klip siap diedit'}</h2>
+            <p className="max-w-md text-sm text-muted">Generate hanya membuat reframe draft. Atur hook, subtitle, watermark, lalu render final dari Preview.</p>
+            <button type="button" onClick={() => navigate('/preview')} className="rounded-xl bg-primary px-5 py-3 text-sm font-bold text-primary-foreground">Buka Preview</button>
           </section>
+
 
           <aside className={`flex flex-col gap-5 rounded-2xl border border-line bg-card p-6 xl:sticky xl:top-24 ${clips.length === 0 ? 'h-full' : 'h-fit'}`} aria-label="Analisis viralitas">
             <div className="flex items-center gap-2">

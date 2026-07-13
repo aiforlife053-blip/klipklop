@@ -125,12 +125,6 @@ export default function DashboardLayout() {
               Dashboard
             </Link>
             <Link 
-              to="/gallery"
-              className={`rounded-full px-4 py-2 text-sm transition-colors ${activeTab === 'gallery' ? 'bg-primary/15 font-medium text-primary' : 'text-muted hover:bg-secondary hover:text-foreground'}`}
-            >
-              Galeri
-            </Link>
-            <Link 
               to="/console"
               className={`rounded-full px-4 py-2 text-sm transition-colors ${activeTab === 'console' ? 'bg-primary/15 font-medium text-primary' : 'text-muted hover:bg-secondary hover:text-foreground'}`}
             >
@@ -199,7 +193,6 @@ export default function DashboardLayout() {
         </div>
         <nav className="flex items-center gap-1 overflow-x-auto border-t border-line px-4 py-2 md:hidden" aria-label="Navigasi mobile">
           <Link to="/" className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm ${activeTab === 'home' || activeTab === '' ? 'bg-primary/15 font-medium text-primary' : 'text-muted'}`}>Dashboard</Link>
-          <Link to="/gallery" className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm ${activeTab === 'gallery' ? 'bg-primary/15 font-medium text-primary' : 'text-muted'}`}>Galeri</Link>
           <Link to="/console" className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm ${activeTab === 'console' ? 'bg-primary/15 font-medium text-primary' : 'text-muted'}`}>Konsol</Link>
           <Link to="/preview" className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm ${activeTab === 'preview' ? 'bg-primary/15 font-medium text-primary' : 'text-muted'}`}>Preview Editor</Link>
         </nav>

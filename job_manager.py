@@ -32,6 +32,7 @@ GROQ_MODEL = "whisper-large-v3-turbo"
 _GLOBAL_QUEUE = queue.Queue()
 _GLOBAL_QUEUE_LOCK = threading.Lock()
 _GLOBAL_PENDING = []
+_GLOBAL_RENDER_LOCK = threading.Lock()
 
 
 def _queue_position_for(manager):
@@ -99,6 +100,7 @@ class WebJobManager:
         self._cancel_requested = False
         self._active_url = ""
         self._queue_position = None
+        self._render_lock = threading.Lock()
 
     def start(self, payload):
         if not isinstance(payload, dict):
@@ -561,7 +563,7 @@ class WebJobManager:
         groups = []
         for folder in sorted((p for p in output_dir.iterdir() if p.is_dir() and p.name != "_temp"), key=lambda p: p.stat().st_mtime, reverse=True):
             group_files = [self._file_item(path) for path in sorted(folder.rglob("*"), key=lambda p: p.stat().st_mtime, reverse=True) if path.is_file() and path.suffix.lower() in allowed and "_temp" not in path.parts and not path.name.startswith("temp_")]
-            clips = [file for file in group_files if file["name"].lower() == "master.mp4"]
+            clips = [file for file in group_files if file["name"].lower() in {"master.mp4", "draft.mp4"}]
             meta = self._read_json(folder / "run.json")
             if not clips and meta.get("status") in {"deleted", "expired"}:
                 groups.append({"name": folder.name, "path": str(folder), "title": meta.get("title") or folder.name, "caption": "file expired/dihapus otomatis", "timestamp": meta.get("deleted_at") or meta.get("timestamp") or datetime.fromtimestamp(folder.stat().st_mtime).isoformat(timespec="seconds"), "video_quality": str(meta.get("video_quality", "720")), "landscape_blur": bool(meta.get("landscape_blur", False)), "thumbnail": "", "saved": bool(meta.get("saved")), "saved_clips": [], "clips": [], "files": [], "status": meta.get("status"), "file_exists": False})
@@ -731,6 +733,114 @@ class WebJobManager:
             return None
         return target
 
+    def list_clips(self):
+        clips = []
+        for meta_path in self._output_root().glob("*/**/data.json"):
+            meta = self._read_json(meta_path)
+            clip_id = str(meta.get("clip_id") or "")
+            if not clip_id:
+                continue
+            clip_dir = meta_path.parent
+            media = clip_dir / ("master.mp4" if (clip_dir / "master.mp4").is_file() else "draft.mp4")
+            if not media.is_file():
+                continue
+            upload = meta.get("youtube_upload") if isinstance(meta.get("youtube_upload"), dict) else {}
+            upload_state = {"scheduled": "scheduled", "uploading": "uploading", "uploaded": "uploaded", "error": "upload_error"}.get(upload.get("status"))
+            clips.append({
+                "clip_id": clip_id,
+                "status": upload_state or meta.get("status", "needs_edit"),
+                "title": meta.get("title", media.stem),
+                "description": meta.get("description", ""),
+                "duration_seconds": meta.get("duration_seconds"),
+                "virality_score": meta.get("virality_score", 5),
+                "youtube_upload": meta.get("youtube_upload"),
+                "render_error": meta.get("render_error", ""),
+                "render_revision": meta.get("render_revision", 0),
+                "stream_url": f"/api/stream?path={quote(str(media))}&v={meta.get('render_revision', 0)}",
+                "thumbnail_url": f"/api/download?path={quote(str(clip_dir / 'thumbnail.jpg'))}" if (clip_dir / "thumbnail.jpg").is_file() else "",
+            })
+        return {"status": "ok", "clips": sorted(clips, key=lambda item: item["clip_id"], reverse=True)}
+
+    def _clip_meta(self, clip_id):
+        for meta_path in self._output_root().glob("*/**/data.json"):
+            meta = self._read_json(meta_path)
+            if meta.get("clip_id") == clip_id:
+                return meta_path, meta
+        return None, None
+
+    def get_clip(self, clip_id):
+        meta_path, meta = self._clip_meta(str(clip_id or ""))
+        if not meta_path:
+            return {"status": "error", "message": "Klip tidak ditemukan"}
+        clip_dir = meta_path.parent
+        media = clip_dir / ("master.mp4" if (clip_dir / "master.mp4").is_file() else "draft.mp4")
+        return {"status": "ok", "clip": {**meta, "stream_url": f"/api/stream?path={quote(str(media))}&v={meta.get('render_revision', 0)}"}, "defaults": self._editor_defaults()}
+
+    def _editor_defaults(self):
+        settings = self.get_settings()
+        return {key: settings.get(key, {}) for key in ("watermark", "credit_watermark", "hook_style", "subtitle", "blur_background")}
+
+    def _render_settings(self, payload, metadata):
+        defaults = self._editor_defaults()
+        supplied = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
+        settings = {key: {**defaults.get(key, {}), **(supplied.get(key) if isinstance(supplied.get(key), dict) else {})} for key in defaults}
+        settings["hook_style"]["enabled"] = self._as_bool(settings["hook_style"].get("enabled"), False)
+        settings["subtitle"]["enabled"] = self._as_bool(settings["subtitle"].get("enabled"), False)
+        settings["watermark"]["enabled"] = self._as_bool(settings["watermark"].get("enabled"), False)
+        settings["credit_watermark"]["enabled"] = self._as_bool(settings["credit_watermark"].get("enabled"), False)
+        return settings
+
+    def render_clip(self, payload, preview=False):
+        meta_path, metadata = self._clip_meta(str(payload.get("clip_id") or ""))
+        if not meta_path:
+            return {"status": "error", "message": "Klip tidak ditemukan"}
+        if metadata.get("status") in {"rendering", "uploading"}:
+            return {"status": "error", "message": "Klip sedang diproses"}
+        settings = self._render_settings(payload, metadata)
+        if preview:
+            output = meta_path.parent / "preview.mp4"
+            self._render_clip_file(meta_path, metadata, settings, output, False)
+            return {"status": "ok", "stream_url": f"/api/stream?path={quote(str(output))}&v={int(output.stat().st_mtime)}"}
+        metadata.update(status="render_queued", render_settings=settings, render_error="")
+        self._write_json_atomic(meta_path, metadata)
+        threading.Thread(target=self._render_clip_file, args=(meta_path, metadata, settings, meta_path.parent / "master.tmp.mp4", True), daemon=True, name=f"clip-render-{metadata['clip_id'][:8]}").start()
+        return {"status": "queued"}
+
+    def _render_clip_file(self, meta_path, metadata, settings, output, commit):
+        with _GLOBAL_RENDER_LOCK:
+            try:
+                if commit:
+                    metadata["status"] = "rendering"
+                    self._write_json_atomic(meta_path, metadata)
+                cfg = self._config().config
+                core = AutoClipperCore(client=None, ffmpeg_path=get_ffmpeg_path(), ytdlp_path=get_ytdlp_path(), output_dir=str(meta_path.parent.parent), ai_providers={"parallel_workers": 1}, watermark_settings=settings["watermark"], credit_watermark_settings=settings["credit_watermark"], hook_style_settings={**settings["hook_style"], "blur_background": settings["blur_background"]}, subtitle_style=settings["subtitle"], video_quality=str(cfg.get("video_quality", "720")), landscape_blur=bool(cfg.get("landscape_blur", True)), screen_size="9:16", cancel_check=lambda: False)
+                core.render_existing_clip(meta_path.parent, metadata, settings, output)
+                if commit:
+                    final = meta_path.parent / "master.mp4"
+                    os.replace(output, final)
+                    metadata.update(status="ready_to_schedule", render_revision=int(metadata.get("render_revision", 0)) + 1, render_error="")
+                    self._write_json_atomic(meta_path, metadata)
+            except Exception as exc:
+                if commit:
+                    Path(output).unlink(missing_ok=True)
+                    metadata.update(status="render_error", render_error=self._public_text(str(exc))[:300])
+                    self._write_json_atomic(meta_path, metadata)
+                else:
+                    raise
+
+    def save_clip_defaults(self, payload):
+        meta_path, metadata = self._clip_meta(str(payload.get("clip_id") or ""))
+        if not meta_path:
+            return {"status": "error", "message": "Klip tidak ditemukan"}
+        settings = self._render_settings(payload, metadata)
+        result = self.save_settings(settings)
+        return {"status": result.get("status"), "settings": settings}
+
+    def _write_json_atomic(self, path, data):
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary, path)
+
     def _run(self, url, num_clips, add_captions, add_hook, subtitle_language, instruction, landscape_blur, run_dir, screen_size="9:16", source_credit=True):
         try:
             self._sync_core_cookie_file()
@@ -779,6 +889,7 @@ class WebJobManager:
                 cancel_check=lambda: self._cancel_requested,
                 log_callback=self._set_message,
                 progress_callback=self._set_progress,
+                draft_only=True,
             )
             if cfg.get("gpu_acceleration", {}).get("enabled", False):
                 self._add_log("GPU acceleration requested")

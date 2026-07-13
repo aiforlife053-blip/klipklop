@@ -946,6 +946,26 @@ def test_due_youtube_upload_persists_public_result(tmp_path, monkeypatch):
     assert upload["video_id"] == "abc"
 
 
+def test_list_clips_exposes_draft_workflow_state(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "draft.mp4").write_bytes(b"x")
+    (clip_dir / "data.json").write_text(json.dumps({"clip_id": "clip-1", "status": "needs_edit", "title": "Draft"}), encoding="utf-8")
+    result = manager.list_clips()
+    assert result["clips"][0]["clip_id"] == "clip-1"
+    assert result["clips"][0]["status"] == "needs_edit"
+    assert "draft.mp4" in result["clips"][0]["stream_url"]
+
+
+def test_render_settings_use_clip_input_without_mutating_defaults(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    settings = manager._render_settings({"settings": {"hook_style": {"enabled": True, "position_y": 0.3}}}, {})
+    assert settings["hook_style"]["enabled"] is True
+    assert settings["hook_style"]["position_y"] == 0.3
+    assert manager.get_settings()["hook_style"]["position_y"] != 0.3
+
+
 def test_section_format_has_hard_cap_and_fast_codec_sort():
     harness = object.__new__(DownloadMixin)
     harness.video_quality = "1080"

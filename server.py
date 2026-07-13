@@ -99,6 +99,11 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._json(self._manager().get_settings())
         elif parsed.path == "/api/outputs":
             self._json(self._manager().list_outputs())
+        elif parsed.path == "/api/clips":
+            self._json(self._manager().list_clips())
+        elif parsed.path == "/api/clip":
+            result = self._manager().get_clip(parse_qs(parsed.query).get("clip_id", [""])[0])
+            self._json(result, 404 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/download":
             self._download(parsed.query)
         elif parsed.path == "/api/stream":
@@ -160,6 +165,15 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._upload_watermark(payload)
         elif parsed.path == "/api/start":
             result = self._manager().start(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/clip/preview":
+            result = self._manager().render_clip(payload, preview=True)
+            self._json(result, 400 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/clip/render":
+            result = self._manager().render_clip(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/clip/defaults":
+            result = self._manager().save_clip_defaults(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/stop":
             self._json(self._manager().stop())

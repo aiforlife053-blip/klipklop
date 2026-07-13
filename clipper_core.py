@@ -72,6 +72,7 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         progress_callback=None,
         token_callback=None,
         cancel_check=None,
+        draft_only: bool = False,
     ):
         self.ai_providers = ai_providers or {}
         if self.ai_providers:
@@ -109,6 +110,7 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         self.ytdlp_path = ytdlp_path
         self.output_dir = Path(output_dir)
         self.cookies_path = Path(cookies_path) if cookies_path else None
+        self.draft_only = bool(draft_only)
         self.temperature = temperature
         self.system_prompt = system_prompt or self.get_default_prompt()
         self.watermark_settings = watermark_settings or {"enabled": False}

@@ -2,9 +2,11 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
+import uuid
 import time
 from datetime import datetime
 from pathlib import Path
@@ -315,6 +317,37 @@ class ExportMixin(ClipperBase):
             width, height, render_duration = self._probe_render_input(str(render_input))
             final_duration = min(duration, render_duration) if render_duration > 0 else duration
             audio_source = str(source_file) if self._has_audio_stream(str(source_file)) else None
+            if getattr(self, "draft_only", False):
+                source_output = clip_dir / "source.mp4"
+                draft_output = clip_dir / "draft.mp4"
+                shutil.copyfile(source_file, source_output)
+                shutil.copyfile(render_input, draft_output)
+                if caption_transcript is not None:
+                    (clip_dir / "transcript.json").write_text(json.dumps(caption_transcript, ensure_ascii=False), encoding="utf-8")
+                metadata = {
+                    "clip_id": uuid.uuid4().hex,
+                    "status": "needs_edit",
+                    "title": highlight["title"],
+                    "description": highlight.get("description", ""),
+                    "source_title": self.video_info.get("title", ""),
+                    "source_description": self.video_info.get("description", ""),
+                    "hook_text": highlight.get("hook_text", highlight["title"]),
+                    "start_time": highlight["start_time"],
+                    "end_time": highlight["end_time"],
+                    "duration_seconds": highlight["duration_seconds"],
+                    "channel_name": self.channel_name,
+                    "virality_score": int(highlight.get("virality_score", 5) or 5),
+                    "source_path": "source.mp4",
+                    "draft_path": "draft.mp4",
+                    "final_path": "master.mp4",
+                    "transcript_path": "transcript.json" if caption_transcript is not None else "",
+                    "render_revision": 0,
+                }
+                (clip_dir / "data.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+                thumbnail_path = clip_dir / "thumbnail.jpg"
+                subprocess.run([self.ffmpeg_path, "-y", "-ss", str(min(1.0, duration * 0.1)), "-i", str(draft_output), "-frames:v", "1", "-q:v", "3", str(thumbnail_path)], capture_output=True, timeout=30)
+                clip_progress("Siap diedit", 1.0)
+                return
             if actual_hook:
                 self._create_hook_overlay(highlight.get("hook_text", highlight["title"]), width, height, hook_overlay)
             if actual_credit:
@@ -368,6 +401,60 @@ class ExportMixin(ClipperBase):
                     Path(path).unlink(missing_ok=True)
                 except OSError:
                     pass
+
+    def render_existing_clip(self, clip_dir: Path, metadata: dict, settings: dict, output_path: Path, preview: bool = False):
+        self.watermark_settings = settings.get("watermark", {})
+        self.credit_watermark_settings = settings.get("credit_watermark", {})
+        self.hook_style_settings = settings.get("hook_style", {})
+        self.subtitle_style = settings.get("subtitle", {})
+        source_file = clip_dir / "source.mp4"
+        if not source_file.is_file():
+            raise ValueError("Source klip tidak tersedia")
+        transcript_path = clip_dir / str(metadata.get("transcript_path") or "")
+        transcript = json.loads(transcript_path.read_text(encoding="utf-8")) if transcript_path.is_file() else None
+        portrait_file = clip_dir / "render.portrait.mp4"
+        hook_overlay = clip_dir / "render.hook.png"
+        credit_overlay = clip_dir / "render.credit.png"
+        ass_file = None
+        temporary = [portrait_file, hook_overlay, credit_overlay]
+        try:
+            if getattr(self, "screen_size", "9:16") == "16:9":
+                render_input = source_file
+            else:
+                self.convert_to_portrait_with_progress(str(source_file), str(portrait_file), lambda _progress: None)
+                render_input = portrait_file
+            width, height, duration = self._probe_render_input(str(render_input))
+            audio_source = str(source_file) if self._has_audio_stream(str(source_file)) else None
+            hook = settings.get("hook_style", {})
+            if hook.get("enabled"):
+                self._create_hook_overlay(metadata.get("hook_text") or metadata.get("title", ""), width, height, hook_overlay)
+            subtitle = settings.get("subtitle", {})
+            if subtitle.get("enabled") and transcript:
+                ass_file = self._create_caption_ass(str(source_file), clip_dir, transcript)
+                temporary.append(ass_file)
+            credit = settings.get("credit_watermark", {})
+            if credit.get("enabled") and metadata.get("channel_name"):
+                self.channel_name = metadata["channel_name"]
+                self._create_credit_overlay(width, height, credit_overlay)
+            watermark = settings.get("watermark", {})
+            watermark_path = Path(str(watermark.get("image_path") or "")) if watermark.get("enabled") else None
+            if watermark_path and not watermark_path.is_file():
+                watermark_path = None
+            command = self._build_composite_command(
+                str(render_input), str(output_path), duration,
+                audio_source=audio_source,
+                hook_overlay=hook_overlay if hook.get("enabled") else None,
+                ass_file=ass_file,
+                watermark_path=watermark_path,
+                watermark_placeholder=bool(watermark.get("enabled") and not watermark_path),
+                credit_overlay=credit_overlay if credit.get("enabled") and metadata.get("channel_name") else None,
+            )
+            self.run_ffmpeg_with_progress(command, duration, lambda _progress: None)
+            if not output_path.is_file() or output_path.stat().st_size < 1000:
+                raise RuntimeError("Final render gagal")
+        finally:
+            for path in temporary:
+                Path(path).unlink(missing_ok=True)
 
     def create_ass_subtitle_capcut(self, transcript: TimedTranscript, output_path: str, time_offset: float = 0):
         """Create ASS subtitle file with CapCut-style word-by-word highlighting"""
