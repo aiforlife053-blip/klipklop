@@ -3,16 +3,19 @@ import { useOutletContext } from 'react-router-dom';
 import { api } from '@/lib/api';
 
 type ApiCheckState = 'idle' | 'checking' | 'ok' | 'error';
-type ProviderName = 'highlight_finder' | 'caption_maker';
+type ProviderName = 'highlight_finder' | 'caption_maker' | 'hook_maker';
 
 const settingsPayload = (settings: any) => ({
   base_url: settings.base_url,
   model: settings.model,
   caption_base_url: settings.caption_base_url,
   caption_model: settings.caption_model,
+  hook_model: settings.hook_model,
+  hook_voice: settings.hook_voice,
   output_dir: settings.output_dir,
   ...(settings.api_key ? { api_key: settings.api_key } : {}),
   ...(settings.caption_api_key ? { caption_api_key: settings.caption_api_key } : {}),
+  ...(settings.hook_api_key ? { hook_api_key: settings.hook_api_key } : {}),
 });
 
 export default function Settings() {
@@ -37,14 +40,16 @@ export default function Settings() {
   }, []);
 
   const applySavedSettings = (savedSettings: any) => {
-    const { api_key: _apiKey, caption_api_key: _captionApiKey, ...safeSettings } = savedSettings || {};
+    const { api_key: _apiKey, caption_api_key: _captionApiKey, hook_api_key: _hookApiKey, ...safeSettings } = savedSettings || {};
     void _apiKey;
     void _captionApiKey;
+    void _hookApiKey;
     setSettings((prev: any) => ({
       ...prev,
       ...safeSettings,
       api_key: '',
       caption_api_key: '',
+      hook_api_key: '',
     }));
   };
 
@@ -175,20 +180,24 @@ export default function Settings() {
     try {
       const clearSetting = providerName === 'highlight_finder'
         ? { clear_highlight_api_key: true }
-        : { clear_caption_api_key: true };
+        : providerName === 'caption_maker'
+          ? { clear_caption_api_key: true }
+          : { clear_hook_api_key: true };
       const res = await api('/api/settings', {
         method: 'POST',
-        body: JSON.stringify({ ...settingsPayload(settings), api_key: undefined, caption_api_key: undefined, ...clearSetting }),
+        body: JSON.stringify({ ...settingsPayload(settings), api_key: undefined, caption_api_key: undefined, hook_api_key: undefined, ...clearSetting }),
       });
       applySavedSettings(res.settings);
       if (providerName === 'highlight_finder') {
         setGeminiCheckState('idle');
         setGeminiCheckMessage('');
         showSaveMessage('Gemini API key berhasil dihapus.');
-      } else {
+      } else if (providerName === 'caption_maker') {
         setGroqCheckState('idle');
         setGroqCheckMessage('');
         showSaveMessage('Groq API key berhasil dihapus.');
+      } else {
+        showSaveMessage('Gemini TTS API key berhasil dihapus.');
       }
     } catch {
       showSaveMessage('Gagal menghapus API key.', true);
@@ -249,10 +258,33 @@ export default function Settings() {
               value={settings.model} onChange={(e) => { setGeminiCheckState('idle'); setGeminiCheckMessage(''); setSettings({ ...settings, model: e.target.value }); }}
               className="h-11 w-full rounded-xl border border-field bg-secondary px-4 font-mono text-sm text-foreground placeholder:font-sans placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary" />
           </div>
+          <div className="border-t border-line pt-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div><h3 className="text-sm font-bold">Hook TTS (Gemini)</h3><p className="mt-1 text-xs text-muted">API key terpisah dari Highlight Finder.</p></div>
+              {settings.hook_key_saved && <span className="shrink-0 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-500">Tersimpan</span>}
+            </div>
+            <label htmlFor="hook-api-key" className="mb-2 block text-sm font-medium">Gemini TTS API Key</label>
+            <input id="hook-api-key" type="password" autoComplete="new-password" placeholder={settings.hook_key_saved ? 'Kosongkan untuk mempertahankan key TTS tersimpan' : 'Gemini API key khusus TTS'} value={settings.hook_api_key || ''} onChange={(e) => setSettings({ ...settings, hook_api_key: e.target.value })} className="h-11 w-full rounded-xl border border-field bg-secondary px-4 font-mono text-sm text-foreground placeholder:font-sans placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary" />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="flex flex-col gap-2">
+              <label htmlFor="hook-model" className="text-sm font-medium">Model suara hook</label>
+              <input id="hook-model" type="text" value={settings.hook_model || 'gemini-3.1-flash-tts-preview'} onChange={(e) => setSettings({ ...settings, hook_model: e.target.value })} className="h-11 w-full rounded-xl border border-field bg-secondary px-4 font-mono text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
+            </div>
+            <div className="flex flex-col gap-2">
+              <label htmlFor="hook-voice" className="text-sm font-medium">Suara hook</label>
+              <select id="hook-voice" value={settings.hook_voice || 'Fenrir'} onChange={(e) => setSettings({ ...settings, hook_voice: e.target.value })} className="h-11 w-full rounded-xl border border-field bg-secondary px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary">
+                <option value="Fenrir">Fenrir — pria energik</option>
+                <option value="Puck">Puck — pria upbeat</option>
+                <option value="Charon">Charon — pria tegas</option>
+                <option value="Orus">Orus — pria formal</option>
+              </select>
+            </div>
+          </div>
+          <p className="text-xs leading-relaxed text-muted">Video dibekukan sampai narasi TTS selesai.</p>
           <div className="flex justify-end pt-2">
-            <button type="button" onClick={() => handleClearProvider('highlight_finder')} disabled={!settings.api_key_saved || clearingProvider !== null}
-              className="text-xs font-medium text-destructive transition-colors hover:text-destructive/80 disabled:opacity-50">
-              {clearingProvider === 'highlight_finder' ? 'Menghapus...' : 'Hapus API Key'}
+            <button type="button" onClick={() => handleClearProvider('hook_maker')} disabled={!settings.hook_key_saved || clearingProvider !== null} className="text-xs font-medium text-destructive transition-colors hover:text-destructive/80 disabled:opacity-50">
+              {clearingProvider === 'hook_maker' ? 'Menghapus...' : 'Hapus TTS API Key'}
             </button>
           </div>
         </section>

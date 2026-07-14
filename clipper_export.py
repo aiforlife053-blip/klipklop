@@ -1,4 +1,7 @@
+import base64
+import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -7,6 +10,7 @@ import tempfile
 import threading
 import uuid
 import time
+import wave
 from datetime import datetime
 from pathlib import Path
 
@@ -78,6 +82,52 @@ class ExportMixin(ClipperBase):
             creationflags=SUBPROCESS_FLAGS,
         )
         return "Audio:" in (result.stderr or "")
+
+    def _probe_media_duration(self, input_path: str) -> float:
+        probe = Path(self.ffmpeg_path).with_name("ffprobe.exe" if os.name == "nt" else "ffprobe")
+        result = self._run_probe_subprocess([str(probe), "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(input_path)], capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
+        try:
+            duration = float((result.stdout or "").strip())
+        except ValueError as exc:
+            raise RuntimeError("Durasi audio hook tidak valid") from exc
+        if result.returncode != 0 or not math.isfinite(duration) or duration <= 0:
+            raise RuntimeError("Durasi audio hook tidak valid")
+        return duration
+
+    @staticmethod
+    def _tts_text(hook_text: str) -> str:
+        text = re.sub(r"[^\w\s.,!?;:'\"()\-]", "", str(hook_text), flags=re.UNICODE)
+        return re.sub(r"\s+", " ", text).strip()
+
+    def _generate_hook_tts(self, hook_text: str, clip_dir: Path) -> tuple[Path, float]:
+        import requests
+        api_key = str(getattr(self, "tts_api_key", "") or "")
+        if not api_key:
+            raise ValueError("Gemini API key diperlukan untuk suara hook")
+        model = str(getattr(self, "tts_model", "") or "gemini-3.1-flash-tts-preview")
+        voice = str(getattr(self, "tts_voice", "") or "Fenrir")
+        base_url = str(getattr(self, "tts_base_url", "") or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
+        spoken_text = self._tts_text(hook_text)
+        digest = hashlib.sha256(f"{model}|{voice}|{spoken_text}".encode("utf-8")).hexdigest()[:20]
+        cache_dir = Path(getattr(self, "output_dir", clip_dir)) / ".hook-tts-cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        output = cache_dir / f"{digest}.wav"
+        if not output.is_file():
+            payload = {"model": model, "input": f"Ucapkan hanya teks berikut dalam bahasa Indonesia. Suara pria energik, tegas, cepat, natural, penuh rasa penasaran, tanpa membacakan instruksi.\n\n{spoken_text}", "response_format": {"type": "audio"}, "generation_config": {"speech_config": [{"voice": voice}]}}
+            response = requests.post(f"{base_url}/interactions", headers={"x-goog-api-key": api_key, "Content-Type": "application/json"}, json=payload, timeout=90)
+            response.raise_for_status()
+            encoded = ((response.json().get("output_audio") or {}).get("data") or "")
+            if not encoded:
+                raise RuntimeError("Gemini TTS tidak menghasilkan audio")
+            pcm = base64.b64decode(encoded)
+            temporary = output.with_suffix(".tmp.wav")
+            with wave.open(str(temporary), "wb") as handle:
+                handle.setnchannels(1)
+                handle.setsampwidth(2)
+                handle.setframerate(24000)
+                handle.writeframes(pcm)
+            os.replace(temporary, output)
+        return output, self._probe_media_duration(str(output))
 
     def _create_hook_overlay(self, hook_text: str, width: int, height: int, output_path: Path):
         from PIL import Image, ImageDraw, ImageFont
@@ -155,6 +205,7 @@ class ExportMixin(ClipperBase):
         input_path: str,
         clip_dir: Path,
         transcript: TimedTranscript | None = None,
+        time_offset: float = 0.0,
     ) -> Path | None:
         if transcript is not None:
             transcript = validate_timed_transcript(transcript)
@@ -191,7 +242,7 @@ class ExportMixin(ClipperBase):
             finally:
                 audio_file.unlink(missing_ok=True)
         ass_file = clip_dir / "captions.ass"
-        event_count = self.create_ass_subtitle_capcut(transcript, str(ass_file), 0)
+        event_count = self.create_ass_subtitle_capcut(transcript, str(ass_file), time_offset)
         if event_count <= 0:
             ass_file.unlink(missing_ok=True)
             raise Exception("Subtitle transcription produced 0 ASS events")
@@ -201,20 +252,29 @@ class ExportMixin(ClipperBase):
     def _escape_filter_path(self, path: Path):
         return str(path).replace('\\', '/').replace(':', '\\:').replace("'", "\\'")
 
-    def _build_composite_command(self, input_path: str, output_path: str, duration: float, audio_source=None, hook_overlay=None, ass_file=None, watermark_path=None, watermark_placeholder=False, credit_overlay=None, portrait_filters=None, output_size=None, profile="final"):
+    def _build_composite_command(self, input_path: str, output_path: str, duration: float, audio_source=None, hook_overlay=None, ass_file=None, watermark_path=None, watermark_placeholder=False, credit_overlay=None, portrait_filters=None, output_size=None, profile="final", tts_source=None, intro_duration=0.0):
         inputs = [input_path]
         audio_index = 0
         if audio_source and Path(audio_source).resolve() != Path(input_path).resolve():
             audio_index = len(inputs)
             inputs.append(str(audio_source))
+        tts_index = None
+        if tts_source:
+            tts_index = len(inputs)
+            inputs.append(str(tts_source))
         filters = list(portrait_filters or ["[0:v]setpts=PTS-STARTPTS[v0]"])
         current = "v0"
         layer = 1
+        intro_duration = max(0.0, float(intro_duration or 0.0))
+        if tts_index is not None and intro_duration > 0:
+            filters.extend([f"[{current}]split=2[vholdsrc][vmain]", f"[vholdsrc]trim=start_frame=0:end_frame=1,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration={intro_duration:.3f},trim=duration={intro_duration:.3f}[vfreeze]", "[vmain]setpts=PTS-STARTPTS[vplay]", "[vfreeze][vplay]concat=n=2:v=1:a=0[vintro]"])
+            current = "vintro"
         if hook_overlay:
             input_index = len(inputs)
             inputs.append(str(hook_overlay))
             filters.append(f"[{input_index}:v]format=rgba[hook]")
-            filters.append(f"[{current}][hook]overlay=0:0:enable='between(t,0,{max(1.0, min(10.0, float((self.hook_style_settings or {}).get('duration', 5.0)))):.3f})'[v{layer}]")
+            hook_duration = intro_duration if intro_duration > 0 else max(1.0, min(10.0, float((self.hook_style_settings or {}).get("duration", 5.0))))
+            filters.append(f"[{current}][hook]overlay=0:0:enable='between(t,0,{hook_duration:.3f})'[v{layer}]")
             current = f"v{layer}"
             layer += 1
         if ass_file:
@@ -255,18 +315,26 @@ class ExportMixin(ClipperBase):
             filters.append(f"[{current}]scale={output_size[0]}:{output_size[1]}[vscaled]")
             current = "vscaled"
         filters.append(f"[{current}]format=yuv420p[vout]")
-        if audio_source:
+        if tts_index is not None and intro_duration > 0:
+            filters.append(f"[{tts_index}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,atrim=duration={intro_duration:.3f},asetpts=PTS-STARTPTS[atts]")
+            if audio_source:
+                filters.append(f"[{audio_index}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[aoriginal]")
+            else:
+                filters.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={duration:.3f},asetpts=PTS-STARTPTS[aoriginal]")
+            filters.append("[atts][aoriginal]concat=n=2:v=0:a=1[aout]")
+        elif audio_source:
             filters.append(f"[{audio_index}:a]asetpts=PTS-STARTPTS[aout]")
         cmd = [self.ffmpeg_path, "-y"]
         for media_input in inputs:
             cmd.extend(["-i", media_input])
         cmd.extend(["-filter_complex", ";".join(filters), "-map", "[vout]"])
-        if audio_source:
+        has_output_audio = bool(audio_source or tts_index is not None)
+        if has_output_audio:
             cmd.extend(["-map", "[aout]"])
         cmd.extend([*self.get_video_encoder_args(), "-pix_fmt", "yuv420p"])
-        if audio_source:
+        if has_output_audio:
             cmd.extend(["-c:a", "aac", "-b:a", "192k"])
-        cmd.extend(["-t", f"{duration:.3f}", "-movflags", "+faststart", "-progress", "pipe:1", output_path])
+        cmd.extend(["-t", f"{duration + intro_duration:.3f}", "-movflags", "+faststart", "-progress", "pipe:1", output_path])
         return cmd
 
     def process_clip(
@@ -447,6 +515,10 @@ class ExportMixin(ClipperBase):
             source_width, source_height, duration = self._probe_render_input(str(source_file))
             width, height = self._render_size()
             portrait_filters = None
+            hook = settings.get("hook_style", {})
+            tts_source, intro_duration = None, 0.0
+            if hook.get("enabled"):
+                tts_source, intro_duration = self._generate_hook_tts(metadata.get("hook_text") or metadata.get("title", ""), clip_dir)
             if getattr(self, "screen_size", "9:16") != "16:9":
                 blur = bool(settings.get("blur_background", {}).get("enabled")) and source_width > source_height
                 portrait_filters, _ = self._portrait_filter(width, height, blur)
@@ -460,7 +532,7 @@ class ExportMixin(ClipperBase):
                 if not transcript:
                     raise ValueError("Transcript subtitle tidak tersedia")
                 ass_file = clip_dir / f"render-{operation_id}.captions.ass"
-                generated_ass = self._create_caption_ass(str(source_file), clip_dir, transcript)
+                generated_ass = self._create_caption_ass(str(source_file), clip_dir, transcript, intro_duration)
                 os.replace(generated_ass, ass_file)
                 temporary.append(ass_file)
             credit = settings.get("credit_watermark", {})
@@ -472,8 +544,8 @@ class ExportMixin(ClipperBase):
             if watermark.get("enabled") and (not watermark_path or not watermark_path.is_file()):
                 raise ValueError("Watermark belum tersedia")
             preview_size = (540, 960) if getattr(self, "screen_size", "9:16") != "16:9" else (854, 480)
-            command = self._build_composite_command(str(source_file), str(output_path), duration, audio_source=str(source_file) if self._has_audio_stream(str(source_file)) else None, hook_overlay=hook_overlay if hook.get("enabled") else None, ass_file=ass_file, watermark_path=watermark_path, credit_overlay=credit_overlay if credit.get("enabled") else None, portrait_filters=portrait_filters, output_size=preview_size if preview else None, profile="preview_fast" if preview else "final")
-            self.run_ffmpeg_with_progress(command, duration, lambda progress: self.set_progress("Menyusun video", progress), timeout=getattr(self, "render_timeout", 900))
+            command = self._build_composite_command(str(source_file), str(output_path), duration, audio_source=str(source_file) if self._has_audio_stream(str(source_file)) else None, hook_overlay=hook_overlay if hook.get("enabled") else None, ass_file=ass_file, watermark_path=watermark_path, credit_overlay=credit_overlay if credit.get("enabled") else None, portrait_filters=portrait_filters, output_size=preview_size if preview else None, profile="preview_fast" if preview else "final", tts_source=tts_source, intro_duration=intro_duration)
+            self.run_ffmpeg_with_progress(command, duration + intro_duration, lambda progress: self.set_progress("Menyusun video", progress), timeout=getattr(self, "render_timeout", 900))
             if not output_path.is_file() or output_path.stat().st_size < 1000:
                 raise RuntimeError("Final render gagal")
         finally:

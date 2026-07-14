@@ -43,12 +43,24 @@ class BackendSecurityTests(unittest.TestCase):
             manager = WebJobManager(Path(root) / self.user_a, user_id=self.user_a)
             manager._vault_write_key = MagicMock()
             manager._vault_key_exists = MagicMock(return_value=True)
-            result = manager.save_settings({"api_key": "highlight-secret", "caption_api_key": "caption-secret"})
+            result = manager.save_settings({"api_key": "highlight-secret", "caption_api_key": "caption-secret", "hook_api_key": "hook-secret"})
             self.assertEqual(result["status"], "saved")
-            self.assertEqual(manager._vault_write_key.call_count, 2)
+            self.assertEqual(manager._vault_write_key.call_count, 3)
+            manager._vault_write_key.assert_any_call("highlight", "highlight-secret")
+            manager._vault_write_key.assert_any_call("caption", "caption-secret")
+            manager._vault_write_key.assert_any_call("hook", "hook-secret")
             local = manager.config_file.read_text(encoding="utf-8")
             self.assertNotIn("highlight-secret", local)
             self.assertNotIn("caption-secret", local)
+            self.assertNotIn("hook-secret", local)
+
+    def test_hook_tts_runtime_reads_only_hook_provider_key(self):
+        with tempfile.TemporaryDirectory() as root:
+            manager = WebJobManager(Path(root) / self.user_a, user_id=self.user_a)
+            manager._vault_read_key = MagicMock(side_effect=lambda provider: {"highlight": "highlight-secret", "hook": "hook-secret"}[provider])
+            config = manager._hook_tts_config()
+            self.assertEqual(config["tts_api_key"], "hook-secret")
+            manager._vault_read_key.assert_called_once_with("hook")
 
     def test_watermark_client_path_is_ignored(self):
         with tempfile.TemporaryDirectory() as root:

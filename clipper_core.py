@@ -61,6 +61,10 @@ class LocalClipRenderer(FfmpegMixin, PortraitMixin, ExportMixin):
         progress_callback=None,
         cancel_check=None,
         log_callback=None,
+        tts_api_key: str = "",
+        tts_base_url: str = "https://generativelanguage.googleapis.com/v1beta",
+        tts_model: str = "gemini-3.1-flash-tts-preview",
+        tts_voice: str = "Fenrir",
     ):
         self.ffmpeg_path = ffmpeg_path
         self.output_dir = Path(output_dir)
@@ -82,6 +86,10 @@ class LocalClipRenderer(FfmpegMixin, PortraitMixin, ExportMixin):
         self.gpu_enabled = False
         self.gpu_encoder_args = []
         self.channel_name = ""
+        self.tts_api_key = str(tts_api_key or "")
+        self.tts_base_url = str(tts_base_url or "https://generativelanguage.googleapis.com/v1beta")
+        self.tts_model = str(tts_model or "gemini-3.1-flash-tts-preview")
+        self.tts_voice = str(tts_voice or "Fenrir")
         self.render_timeout = 900
         self.is_cancelled = cancel_check or (lambda: False)
         self.log = log_callback or print
@@ -134,17 +142,19 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
             self.whisper_model = cm_config.get("model", "whisper-large-v3-turbo")
             tts_config = self.ai_providers.get("hook_maker", {})
             self.tts_client = None
-            self.tts_api_key = ""
-            self.tts_model = ""
-            self.tts_voice = tts_config.get("voice", "id-ID-ArdiNeural")
+            self.tts_api_key = str(tts_config.get("api_key") or "")
+            self.tts_base_url = str(tts_config.get("base_url") or "https://generativelanguage.googleapis.com/v1beta")
+            self.tts_model = str(tts_config.get("model") or "gemini-3.1-flash-tts-preview")
+            self.tts_voice = str(tts_config.get("voice") or "Fenrir")
         else:
             self.highlight_client = client
             self.caption_client = client
             self.tts_client = None
             self.tts_api_key = ""
+            self.tts_base_url = "https://generativelanguage.googleapis.com/v1beta"
             self.model = model
-            self.tts_model = ""
-            self.tts_voice = "id-ID-ArdiNeural"
+            self.tts_model = "gemini-3.1-flash-tts-preview"
+            self.tts_voice = "Fenrir"
             self.whisper_model = "whisper-1"
 
         self.client = client

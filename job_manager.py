@@ -309,6 +309,13 @@ class WebJobManager:
     def _vault_delete_key(self, provider):
         self._vault_rpc("klipklop_delete_provider_key", {"p_provider": provider})
 
+    def _hook_tts_config(self):
+        cfg = self._config().config
+        providers = cfg.get("ai_providers", {})
+        hook = providers.get("hook_maker", {})
+        api_key = self._vault_read_key("hook") if self._vault_enabled else hook.get("api_key", "")
+        return {"tts_api_key": str(api_key or ""), "tts_base_url": str(hook.get("base_url") or "https://generativelanguage.googleapis.com/v1beta"), "tts_model": str(hook.get("model") or "gemini-3.1-flash-tts-preview"), "tts_voice": str(hook.get("voice") or "Fenrir")}
+
     def get_settings(self):
         cfg = self._config().config
         provider = cfg.get("ai_providers", {}).get("highlight_finder", {})
@@ -319,7 +326,7 @@ class WebJobManager:
         cookies = self.cookie_status()
         caption_provider = cfg.get("ai_providers", {}).get("caption_maker", {})
         hook_provider = cfg.get("ai_providers", {}).get("hook_maker", {})
-        hook_key_saved = key_saved if self._vault_enabled else bool(hook_provider.get("api_key") or provider.get("api_key") or cfg.get("api_key"))
+        hook_key_saved = self._vault_key_exists("hook") if self._vault_enabled else bool(hook_provider.get("api_key"))
         return {
             "base_url": base_url,
             "api_key": "",
@@ -329,6 +336,9 @@ class WebJobManager:
             "caption_base_url": caption_provider.get("base_url", GROQ_BASE_URL),
             "caption_model": caption_provider.get("model", GROQ_MODEL),
             "hook_key_saved": hook_key_saved,
+            "hook_api_key": "",
+            "hook_model": str(hook_provider.get("model") or "gemini-3.1-flash-tts-preview"),
+            "hook_voice": str(hook_provider.get("voice") or "Fenrir"),
             "model": model,
             "provider": {"base_url": base_url, "api_key": "", "model": model},
             "subtitle_language": str(cfg.get("subtitle_language", "id")),
@@ -418,12 +428,14 @@ class WebJobManager:
         clear_api_key = bool(payload.get("clear_api_key", False))
         clear_highlight_api_key = bool(payload.get("clear_highlight_api_key", False))
         clear_caption_api_key = bool(payload.get("clear_caption_api_key", False))
+        clear_hook_api_key = bool(payload.get("clear_hook_api_key", False))
         model = str(payload.get("model", provider_payload.get("model", GEMINI_MODEL))).strip() or GEMINI_MODEL
         caption_base_url = str(payload.get("caption_base_url", cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("base_url", GROQ_BASE_URL))).strip() or GROQ_BASE_URL
         caption_api_key = str(payload.get("caption_api_key", "")).strip()
         caption_model = str(payload.get("caption_model", cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("model", GROQ_MODEL))).strip() or GROQ_MODEL
-        hook_model = str(payload.get("hook_model", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("model", ""))).strip()
-        hook_voice = str(payload.get("hook_voice", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("voice", "id-ID-ArdiNeural"))).strip() or "id-ID-ArdiNeural"
+        hook_api_key = str(payload.get("hook_api_key", "")).strip()
+        hook_model = str(payload.get("hook_model", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("model", "gemini-3.1-flash-tts-preview"))).strip() or "gemini-3.1-flash-tts-preview"
+        hook_voice = str(payload.get("hook_voice", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("voice", "Fenrir"))).strip() or "Fenrir"
         output_dir = str(self.output_dir)
         subtitle_language = str(payload.get("subtitle_language", cfg_mgr.config.get("subtitle_language", "id")) or "id")[:10]
         video_quality = str(payload.get("video_quality", cfg_mgr.config.get("video_quality", "720")) or "720")
@@ -505,6 +517,10 @@ class WebJobManager:
                     self._vault_delete_key("caption")
                 elif caption_api_key:
                     self._vault_write_key("caption", caption_api_key)
+                if clear_api_key or clear_hook_api_key:
+                    self._vault_delete_key("hook")
+                elif hook_api_key:
+                    self._vault_write_key("hook", hook_api_key)
             except RuntimeError as exc:
                 return {"status": "error", "message": str(exc)}
         providers = cfg_mgr.config.setdefault("ai_providers", {})
@@ -524,9 +540,13 @@ class WebJobManager:
         elif caption_api_key:
             caption_current["api_key"] = caption_api_key
         hook_current = providers.setdefault("hook_maker", {})
+        hook_current["base_url"] = "https://generativelanguage.googleapis.com/v1beta"
         hook_current["model"] = hook_model
         hook_current["voice"] = hook_voice
-        hook_current["api_key"] = ""
+        if clear_api_key or clear_hook_api_key or self._vault_enabled:
+            hook_current["api_key"] = ""
+        elif hook_api_key:
+            hook_current["api_key"] = hook_api_key
         cfg_mgr.config["base_url"] = base_url
         cfg_mgr.config["model"] = model
         if clear_api_key or clear_highlight_api_key or self._vault_enabled:
@@ -896,7 +916,8 @@ class WebJobManager:
                 metadata["hook_text"] = str(payload.get("hook_text") or "").strip()[:180]
             if preview:
                 revision = int(metadata.get("render_revision", 0))
-                snapshot = {"settings": settings, "hook_text": metadata.get("hook_text", ""), "revision": revision, "source": self._file_identity(meta_path.parent / "source.mp4"), "transcript": self._file_identity(meta_path.parent / "transcript.json"), "versions": [SCENE_BUILDER_VERSION, CUE_BUILDER_VERSION, PREVIEW_PROFILE_VERSION]}
+                tts_config = self._hook_tts_config()
+                snapshot = {"settings": settings, "hook_text": metadata.get("hook_text", ""), "tts": {"model": tts_config["tts_model"], "voice": tts_config["tts_voice"]}, "revision": revision, "source": self._file_identity(meta_path.parent / "source.mp4"), "transcript": self._file_identity(meta_path.parent / "transcript.json"), "versions": [SCENE_BUILDER_VERSION, CUE_BUILDER_VERSION, PREVIEW_PROFILE_VERSION]}
                 digest = hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode("utf-8")).hexdigest()[:12]
                 output = meta_path.parent / f"preview-{digest}.mp4"
                 if output.is_file():
@@ -954,7 +975,7 @@ class WebJobManager:
         if cancelled.is_set():
             raise InterruptedError()
         progress("Menyiapkan video", 0.1)
-        core = LocalClipRenderer(ffmpeg_path=get_ffmpeg_path(), output_dir=str(meta_path.parent.parent), watermark_settings=settings["watermark"], credit_watermark_settings=settings["credit_watermark"], hook_style_settings={**settings["hook_style"], "blur_background": settings["blur_background"]}, subtitle_style=settings["subtitle"], video_quality=settings["video_quality"], landscape_blur=settings["landscape_blur"], screen_size=settings["screen_size"], progress_callback=lambda stage, value=None: progress(str(stage), 0.1 + max(0.0, min(1.0, self._as_float(value, 0.0))) * 0.85), cancel_check=cancelled.is_set)
+        core = LocalClipRenderer(ffmpeg_path=get_ffmpeg_path(), output_dir=str(meta_path.parent.parent), watermark_settings=settings["watermark"], credit_watermark_settings=settings["credit_watermark"], hook_style_settings={**settings["hook_style"], "blur_background": settings["blur_background"]}, subtitle_style=settings["subtitle"], video_quality=settings["video_quality"], landscape_blur=settings["landscape_blur"], screen_size=settings["screen_size"], progress_callback=lambda stage, value=None: progress(str(stage), 0.1 + max(0.0, min(1.0, self._as_float(value, 0.0))) * 0.85), cancel_check=cancelled.is_set, **self._hook_tts_config())
         core.render_existing_clip(meta_path.parent, metadata, settings, output, preview=True)
         if cancelled.is_set():
             Path(output).unlink(missing_ok=True)
@@ -989,7 +1010,7 @@ class WebJobManager:
             claimed = update_render({"needs_edit", "render_error", "render_queued", "rendering"}, lambda current: current.update(status="rendering", render_progress=0.0, render_stage="Memulai render", render_started_at=started_at, render_elapsed_seconds=0.0))
             if claimed is None:
                 return
-            core = LocalClipRenderer(ffmpeg_path=get_ffmpeg_path(), output_dir=str(meta_path.parent.parent), watermark_settings=settings["watermark"], credit_watermark_settings=settings["credit_watermark"], hook_style_settings={**settings["hook_style"], "blur_background": settings["blur_background"]}, subtitle_style=settings["subtitle"], video_quality=settings["video_quality"], landscape_blur=settings["landscape_blur"], screen_size=settings["screen_size"], progress_callback=persist_progress, cancel_check=lambda: False)
+            core = LocalClipRenderer(ffmpeg_path=get_ffmpeg_path(), output_dir=str(meta_path.parent.parent), watermark_settings=settings["watermark"], credit_watermark_settings=settings["credit_watermark"], hook_style_settings={**settings["hook_style"], "blur_background": settings["blur_background"]}, subtitle_style=settings["subtitle"], video_quality=settings["video_quality"], landscape_blur=settings["landscape_blur"], screen_size=settings["screen_size"], progress_callback=persist_progress, cancel_check=lambda: False, **self._hook_tts_config())
             if hasattr(core, "convert_to_portrait_with_progress"):
                 convert_portrait = core.convert_to_portrait_with_progress
                 core.convert_to_portrait_with_progress = lambda input_path, output_path, callback: convert_portrait(input_path, output_path, lambda value: (persist_progress("Menyiapkan video", value * 0.45), callback(value)))
@@ -1227,8 +1248,10 @@ class WebJobManager:
             if self._vault_enabled:
                 highlight_key = self._vault_read_key("highlight")
                 caption_key = self._vault_read_key("caption")
-                for name in ("highlight_finder", "youtube_title_maker", "hook_maker"):
+                hook_key = self._vault_read_key("hook")
+                for name in ("highlight_finder", "youtube_title_maker"):
                     ai_providers.setdefault(name, {})["api_key"] = highlight_key
+                ai_providers.setdefault("hook_maker", {})["api_key"] = hook_key
                 ai_providers.setdefault("caption_maker", {})["api_key"] = caption_key
             quality = str(cfg.get("video_quality", "720"))
             ai_providers["parallel_workers"] = self._parallel_workers_for_quality(cfg.get("parallel_workers", 1), quality)

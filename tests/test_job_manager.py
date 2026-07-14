@@ -1421,6 +1421,34 @@ def test_final_composite_uses_one_encode_and_separate_audio_source(tmp_path):
     assert filter_graph.index("overlay=0:0:enable") < filter_graph.index("ass=") < filter_graph.rindex("overlay=0:0")
 
 
+def test_hook_tts_freezes_video_and_plays_before_original_audio(tmp_path):
+    harness = object.__new__(SubtitleHarness)
+    harness.ffmpeg_path = "ffmpeg"
+    harness.output_resolution = "720:1280"
+    harness.hook_style_settings = {"duration": 5.0}
+    harness.watermark_settings = {"enabled": False}
+    harness.get_video_encoder_args = lambda: ["-c:v", "libx264"]
+    command = harness._build_composite_command(
+        "portrait.mp4",
+        "master.mp4",
+        10.0,
+        audio_source="section.mp4",
+        hook_overlay=tmp_path / "hook.png",
+        tts_source=tmp_path / "hook.wav",
+        intro_duration=2.75,
+    )
+    graph = command[command.index("-filter_complex") + 1]
+    assert "trim=start_frame=0:end_frame=1" in graph
+    assert "tpad=stop_mode=clone:stop_duration=2.750" in graph
+    assert "concat=n=2:v=1:a=0" in graph
+    assert "[2:a]aresample=48000" in graph
+    assert "[1:a]aresample=48000" in graph
+    assert "concat=n=2:v=0:a=1[aout]" in graph
+    assert "amix" not in graph
+    assert "enable='between(t,0,2.750)'" in graph
+    assert command[command.index("-t") + 1] == "12.750"
+
+
 def test_prefilter_transcript_keeps_viral_signals(tmp_path):
 
     core = object.__new__(AutoClipperCore)

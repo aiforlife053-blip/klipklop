@@ -77,15 +77,11 @@ class ConfigManager:
                     config[key] = value
                     dirty = True
             hook_maker = config.setdefault("ai_providers", {}).setdefault("hook_maker", {})
-            if hook_maker.get("voice") in {None, "", "Fenrir"}:
-                hook_maker["voice"] = "id-ID-ArdiNeural"
-                dirty = True
-            if hook_maker.get("model") == "gemini-3.1-flash-tts-preview":
-                hook_maker["model"] = ""
-                dirty = True
-            if hook_maker.get("api_key"):
-                hook_maker["api_key"] = ""
-                dirty = True
+            hook_defaults = {"base_url": "https://generativelanguage.googleapis.com/v1beta", "model": "gemini-3.1-flash-tts-preview", "voice": "Fenrir"}
+            for key, value in hook_defaults.items():
+                if not hook_maker.get(key) or hook_maker.get(key) in {"id-ID-ArdiNeural", "tts-1"}:
+                    hook_maker[key] = value
+                    dirty = True
             canonical_editor_defaults = editor_defaults()
             for section, section_defaults in canonical_editor_defaults.items():
                 current_section = config.setdefault(section, {})
@@ -192,9 +188,10 @@ class ConfigManager:
                 "model": "gemini-2.5-flash"
             },
             "hook_maker": {
+                "base_url": "https://generativelanguage.googleapis.com/v1beta",
                 "api_key": "",
-                "model": "",
-                "voice": "id-ID-ArdiNeural"
+                "model": "gemini-3.1-flash-tts-preview",
+                "voice": "Fenrir"
             }
         }
     
@@ -221,9 +218,10 @@ class ConfigManager:
                 "model": model
             },
             "hook_maker": {
+                "base_url": "https://generativelanguage.googleapis.com/v1beta",
                 "api_key": "",
-                "model": "",
-                "voice": "id-ID-ArdiNeural"
+                "model": "gemini-3.1-flash-tts-preview",
+                "voice": "Fenrir"
             }
         }
         

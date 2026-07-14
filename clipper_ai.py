@@ -163,7 +163,7 @@ WAJIB:
 
 * Maksimal 15 kata
 * Bahasa Indonesia casual
-* TANPA emoji
+* Maksimal 1 emoji yang relevan, idealnya di akhir; tanpa emoji jika tidak cocok
 * WAJIB menyebut NAMA ORANG yang berbicara
 * Harus berupa kutipan, statement tajam, atau punchline
 
