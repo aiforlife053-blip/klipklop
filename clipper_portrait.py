@@ -25,100 +25,6 @@ class PortraitMixin(ClipperBase):
         crop_w = int(orig_h * (9 / 16))
         return crop_w, orig_h
 
-    def convert_to_portrait(self, input_path: str, output_path: str):
-        """Convert landscape to 9:16 portrait with speaker tracking (router method)"""
-        if self.face_tracking_mode == "center":
-            self.log("  Using fast center crop")
-            return self.convert_to_portrait_center(input_path, output_path, lambda _: None)
-        self.log("  Using OpenCV (Fast Mode)")
-        return self.convert_to_portrait_opencv(input_path, output_path)
-
-    def convert_to_portrait_opencv(self, input_path: str, output_path: str):
-        """Convert landscape to 9:16 portrait with speaker tracking (OpenCV Haar Cascade)"""
-
-        cap = cv2.VideoCapture(input_path)
-        orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-        # Calculate crop dimensions
-        target_ratio = 9 / 16
-        crop_w = int(orig_h * target_ratio)
-        crop_h = orig_h
-        out_w, out_h = self._get_target_portrait_dims(orig_w, orig_h)
-
-        # Face detector
-        face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-        )
-        use_faces = not face_cascade.empty()
-
-        try:
-            # First pass: analyze frames
-            crop_positions = []
-            current_target = orig_w / 2
-
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-
-                if use_faces:
-                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                    faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(50, 50))
-
-                    if len(faces) > 0:
-                        # Find largest face
-                        largest = max(faces, key=lambda f: f[2] * f[3])
-                        current_target = largest[0] + largest[2] / 2
-
-                crop_x = int(current_target - crop_w / 2)
-                crop_x = max(0, min(crop_x, orig_w - crop_w))
-                crop_positions.append(crop_x)
-
-            # Stabilize positions
-            crop_positions = self.stabilize_positions(crop_positions)
-
-            # Second pass: create video
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            temp_video = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
-
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            out = cv2.VideoWriter(temp_video, fourcc, fps, (out_w, out_h))
-
-            frame_idx = 0
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-
-                crop_x = crop_positions[frame_idx] if frame_idx < len(crop_positions) else crop_positions[-1]
-                cropped = frame[0:crop_h, crop_x:crop_x+crop_w]
-                resized = cv2.resize(cropped, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
-                out.write(resized)
-                frame_idx += 1
-        finally:
-            cap.release()
-            if 'out' in locals():
-                out.release()
-
-        # Merge with audio using GPU/CPU encoder
-        encoder_args = self.get_video_encoder_args()
-        cmd = [
-            self.ffmpeg_path, "-y",
-            "-i", temp_video,
-            "-i", input_path,
-            *encoder_args,
-            "-c:a", "aac", "-b:a", "192k",
-            "-map", "0:v:0", "-map", "1:a:0",
-            "-shortest",
-            output_path
-        ]
-        self.log_ffmpeg_command(cmd, "Portrait Merge Audio (OpenCV)")
-        self._run_ffmpeg_subprocess(cmd)
-        os.unlink(temp_video)
-
     def stabilize_positions(self, positions: list) -> list:
         """Stabilize crop positions - reduce jitter and sudden movements"""
         if not positions:
@@ -173,7 +79,7 @@ class PortraitMixin(ClipperBase):
             self.log("  Using moving blur background")
             return self.convert_to_portrait_blur_with_progress(input_path, output_path, progress_callback)
         if self.face_tracking_mode == "center":
-            self.log("  Using fast center crop")
+            self.log("  Using explicit black background")
             return self.convert_to_portrait_center(input_path, output_path, progress_callback)
         self.log("  Using OpenCV (Fast Mode)")
         return self.convert_to_portrait_opencv_with_progress(input_path, output_path, progress_callback)
@@ -194,11 +100,23 @@ class PortraitMixin(ClipperBase):
         finally:
             cap.release()
 
+    def _portrait_filter(self, width: int, height: int, blur_enabled: bool) -> tuple[list[str], str]:
+        if not blur_enabled:
+            return ([f"color=c=black:s={width}x{height}[bg]", f"[0:v]scale={width}:{height}:force_original_aspect_ratio=decrease,setsar=1[fg]", "[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v0]"], "v0")
+        blur_settings = getattr(self, "blur_background_settings", {}) or {}
+        zoom = max(1.0, min(3.0, float(blur_settings.get("zoom", 1.08) or 1.08)))
+        strength = max(0, min(100, int(blur_settings.get("strength", 30))))
+        scale = max(1.0, min(2.0, float(blur_settings.get("scale", 1.6) or 1.6)))
+        foreground_width, foreground_height = int(round(width * scale)), int(round(width * 9 / 16 * scale))
+        blur_radius = int(round((strength / 340 * width) * 0.75))
+        blur_filter = f"boxblur={blur_radius}:{blur_radius}," if blur_radius else ""
+        return ([f"[0:v]scale=320:{int(round(320 * height / width))}:force_original_aspect_ratio=increase,{blur_filter}scale={int(round(width * zoom))}:{int(round(height * zoom))}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1,colorchannelmixer=rr=0.6:gg=0.6:bb=0.6[bg]", f"[0:v]scale={foreground_width}:{foreground_height}:force_original_aspect_ratio=increase,crop={foreground_width}:{foreground_height},setsar=1[fg]", "[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v0]"], "v0")
+
     def _preview_blur_filter(self, width: int, height: int) -> str:
         blur_settings = getattr(self, "blur_background_settings", {}) or {}
         zoom = max(1.0, min(3.0, float(blur_settings.get("zoom", 1.08) or 1.08)))
         strength = max(0, min(100, int(blur_settings.get("strength", 30))))
-        scale = max(0.5, min(1.5, float(blur_settings.get("scale", 1.0) or 1.0)))
+        scale = max(1.0, min(2.0, float(blur_settings.get("scale", 1.6) or 1.6)))
         foreground_width = int(round(width * scale))
         foreground_height = int(round(width * 9 / 16 * scale))
         bg_width = int(round(width * zoom))
@@ -226,28 +144,38 @@ class PortraitMixin(ClipperBase):
             "-i", input_path,
             "-filter_complex", filter_complex,
             *self.get_video_encoder_args(),
-            "-an",
+            "-c:a", "aac",
+            "-b:a", "192k",
             "-progress", "pipe:1",
             output_path,
         ]
-        self.run_ffmpeg_with_progress(cmd, self._video_duration(input_path), progress_callback)
+        self.log(f"  Reframe filter [blur=on]: {filter_complex}")
+        self.run_ffmpeg_with_progress(cmd, self._video_duration(input_path), progress_callback, timeout=getattr(self, "render_timeout", None))
         if not os.path.exists(output_path):
             raise Exception("Blur portrait failed: output file not found")
 
     def convert_to_portrait_center(self, input_path: str, output_path: str, progress_callback):
+        width, height = (int(part) for part in getattr(self, "output_resolution", "720:1280").split(":"))
+        filter_complex = (
+            f"color=c=black:s={width}x{height}[bg];"
+            f"[0:v]scale={width}:{height}:force_original_aspect_ratio=decrease,setsar=1[fg];"
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1"
+        )
         cmd = [
             self.ffmpeg_path,
             "-y",
             "-i", input_path,
-            "-vf", f"scale={getattr(self, 'output_resolution', '720:1280')}:force_original_aspect_ratio=increase,crop={getattr(self, 'output_resolution', '720:1280')},setsar=1",
+            "-filter_complex", filter_complex,
             *self.get_video_encoder_args(),
-            "-an",
+            "-c:a", "aac",
+            "-b:a", "192k",
             "-progress", "pipe:1",
             output_path,
         ]
-        self.run_ffmpeg_with_progress(cmd, self._video_duration(input_path), progress_callback)
+        self.log(f"  Reframe filter [blur=off]: {filter_complex}")
+        self.run_ffmpeg_with_progress(cmd, self._video_duration(input_path), progress_callback, timeout=getattr(self, "render_timeout", None))
         if not os.path.exists(output_path):
-            raise Exception("Center crop failed: output file not found")
+            raise Exception("Black background portrait failed: output file not found")
 
     def convert_to_portrait_opencv_with_progress(self, input_path: str, output_path: str, progress_callback):
         """Convert landscape to 9:16 portrait with speaker tracking and progress (OpenCV)"""

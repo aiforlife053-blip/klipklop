@@ -1,8 +1,12 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap');
+@font-face { font-family: 'Plus Jakarta Sans'; src: url('/fonts/PlusJakartaSans.ttf') format('truetype'); font-weight: 200 800; font-display: swap; }
+@font-face { font-family: 'Poppins'; src: url('/fonts/Poppins-Regular.ttf') format('truetype'); font-weight: 400 500; font-display: swap; }
+@font-face { font-family: 'Poppins'; src: url('/fonts/Poppins-Bold.ttf') format('truetype'); font-weight: 600 800; font-display: swap; }
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+.font-renderer { font-family: 'Plus Jakarta Sans', sans-serif; }
 
 @keyframes shimmer {
   0% { background-position: 200% 0; }

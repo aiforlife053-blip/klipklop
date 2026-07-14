@@ -1,6 +1,9 @@
 import importlib.util
 import json
 import sys
+import threading
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,12 +17,72 @@ sys.modules[spec.name] = mod
 spec.loader.exec_module(mod)
 import clipper_ai
 import clipper_export
-from clipper_core import AutoClipperCore
+from clipper_core import AutoClipperCore, LocalClipRenderer
 from clipper_shared import slice_timed_transcript, timed_segments_to_prompt, validate_timed_transcript
 from clipper_download import DownloadMixin
 from clipper_export import ExportMixin
 from clipper_portrait import PortraitMixin
 from clipper_ffmpeg import FfmpegMixin
+from config.config_manager import ConfigManager
+from subtitle_cues import build_subtitle_cues
+
+
+def test_static_subtitle_cues_remove_rolling_caption_overlap():
+    cues = build_subtitle_cues({"duration": 8.0, "words": [], "segments": [{"text": "lama", "start": 0.0, "end": 4.0}, {"text": "baru", "start": 2.0, "end": 6.0}, {"text": "terbaru", "start": 4.0, "end": 8.0}]})
+    assert [(cue["text"], cue["start"], cue["end"]) for cue in cues] == [("lama", 0.0, 2.0), ("baru", 2.0, 4.0), ("terbaru", 4.0, 8.0)]
+
+
+def test_new_config_enables_subtitles_by_default(tmp_path):
+    manager = ConfigManager(tmp_path / "config.json", tmp_path / "output")
+    assert manager.config["subtitle"]["enabled"] is True
+
+
+def test_existing_config_migrates_subtitle_default_to_enabled(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"subtitle": {"enabled": False}, "_preview_defaults_v2_migrated": True}), encoding="utf-8")
+    manager = ConfigManager(config_path, tmp_path / "output")
+    assert manager.config["subtitle"]["enabled"] is True
+    assert manager.config["_subtitle_default_enabled_migrated"] is True
+
+
+def test_atomic_metadata_write_retries_transient_permission_error(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    path = tmp_path / "data.json"
+    path.write_text(json.dumps({"status": "old"}), encoding="utf-8")
+    real_replace = mod.os.replace
+    attempts = []
+
+    def replace(source, target):
+        attempts.append((source, target))
+        if len(attempts) < 3:
+            raise PermissionError(5, "Access is denied")
+        real_replace(source, target)
+
+    monkeypatch.setattr(mod.os, "replace", replace)
+    monkeypatch.setattr(mod.time, "sleep", lambda _delay: None)
+    manager._write_json_atomic(path, {"status": "new"})
+    assert json.loads(path.read_text(encoding="utf-8")) == {"status": "new"}
+    assert len(attempts) == 3
+    assert list(tmp_path.glob("data.*.tmp")) == []
+
+
+def test_atomic_metadata_write_preserves_target_after_retry_exhaustion(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    path = tmp_path / "data.json"
+    path.write_text(json.dumps({"status": "old"}), encoding="utf-8")
+    attempts = []
+
+    def replace(_source, _target):
+        attempts.append(1)
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr(mod.os, "replace", replace)
+    monkeypatch.setattr(mod.time, "sleep", lambda _delay: None)
+    with pytest.raises(PermissionError):
+        manager._write_json_atomic(path, {"status": "new"})
+    assert json.loads(path.read_text(encoding="utf-8")) == {"status": "old"}
+    assert len(attempts) == 5
+    assert list(tmp_path.glob("data.*.tmp")) == []
 
 
 def test_validate_timed_transcript_sorts_and_returns_json_safe_copy():
@@ -70,6 +133,21 @@ def test_validate_timed_transcript_sorts_and_returns_json_safe_copy():
 def test_validate_timed_transcript_rejects_invalid_values(source, require_words):
     with pytest.raises(ValueError):
         validate_timed_transcript(source, require_words=require_words)
+
+
+def test_parse_srt_timed_supports_bom_crlf_multiline_and_dot_milliseconds(tmp_path):
+    path = tmp_path / "native.srt"
+    path.write_bytes("\ufeff1\r\n00:00:09,000 --> 00:00:12,000\r\nbaris satu\r\nbaris dua\r\n\r\n00:01:09.000 --> 00:01:12.000\r\nkedua".encode("utf-8"))
+    harness = object.__new__(DownloadMixin)
+    transcript = harness.parse_srt_timed(str(path))
+    assert transcript == {
+        "duration": 72.0,
+        "words": [],
+        "segments": [
+            {"text": "baris satu baris dua", "start": 9.0, "end": 12.0},
+            {"text": "kedua", "start": 69.0, "end": 72.0},
+        ],
+    }
 
 
 def test_timed_segments_to_prompt_formats_gemini_timestamps():
@@ -568,33 +646,6 @@ def test_save_settings_updates_title_provider_too(tmp_path):
     assert cfg["ai_providers"]["caption_maker"]["model"] == "whisper-large-v3-turbo"
 
 
-def test_output_listing_is_limited_to_known_file_types(tmp_path):
-    output = tmp_path / "output"
-    output.mkdir()
-    (output / "clip.mp4").write_bytes(b"x")
-    (output / "secret.key").write_text("nope")
-    manager = mod.WebJobManager(app_dir=tmp_path)
-    names = [item["name"] for item in manager.list_outputs()["files"]]
-    assert names == ["clip.mp4"]
-
-
-def test_output_listing_groups_run_folders(tmp_path):
-    run = tmp_path / "output" / "20260706-video"
-    clip = run / "20260706-120000-01"
-    clip.mkdir(parents=True)
-    (run / "run.json").write_text(json.dumps({"title": "Judul", "caption": "2 klip", "timestamp": "2026-07-06T12:00:00"}))
-    (clip / "master.mp4").write_bytes(b"x")
-    (clip / "data.json").write_text(json.dumps({"start_time": "00:01:02,000", "end_time": "00:01:12,000", "duration_seconds": 10, "virality_score": 9}), encoding="utf-8")
-    manager = mod.WebJobManager(app_dir=tmp_path)
-    result = manager.list_outputs()
-    groups = result["groups"]
-    assert groups[0]["title"] == "Judul"
-    assert groups[0]["thumbnail"].endswith("master.mp4")
-    assert groups[0]["clips"][0]["start_time"] == "00:01:02,000"
-    assert groups[0]["clips"][0]["end_time"] == "00:01:12,000"
-    assert result["outputs"] == result["files"]
-
-
 def test_indonesian_instruction_adds_viral_criteria(tmp_path):
     manager = mod.WebJobManager(app_dir=tmp_path)
     prompt = manager._with_indonesian_instruction("base", "fokus lucu")
@@ -661,18 +712,6 @@ def test_status_sanitizes_login_file_errors(tmp_path):
     raw = json.dumps(manager.status()).lower()
     assert "cookie" not in raw
     assert "login file" in raw
-
-
-def test_any_staged_output_blocks_new_generation(tmp_path):
-    manager = mod.WebJobManager(app_dir=tmp_path)
-    run = tmp_path / "output" / "run"
-    clip = run / "clip"
-    clip.mkdir(parents=True)
-    (clip / "master.mp4").write_bytes(b"x")
-    (run / "run.json").write_text(json.dumps({"url": "https://www.youtube.com/watch?v=aaaaaaaaaaa", "status": "staged", "file_exists": True}), encoding="utf-8")
-    assert manager._has_staged_outputs() is True
-    result = manager.start({"url": "https://www.youtube.com/watch?v=bbbbbbbbbbb"})
-    assert result == {"status": "busy", "message": "Simpan atau hapus semua klip di Beranda sebelum generate baru"}
 
 
 class InstantJobManager(mod.WebJobManager):
@@ -790,27 +829,6 @@ def test_cookie_exists_top_level_flag(tmp_path):
     assert manager.get_settings()["cookie_exists"] is True
 
 
-def test_save_output_accepts_empty_clips_payload(tmp_path):
-    manager = mod.WebJobManager(app_dir=tmp_path)
-    run = tmp_path / "output" / "run"
-    run.mkdir(parents=True)
-    result = manager.save_output({"path": str(run), "clips": None})
-    assert result["status"] == "saved"
-
-
-def test_save_output_ignores_clips_outside_session(tmp_path):
-    manager = mod.WebJobManager(app_dir=tmp_path)
-    run = tmp_path / "output" / "run"
-    run.mkdir(parents=True)
-    outside = tmp_path / "output" / "other" / "master.mp4"
-    outside.parent.mkdir()
-    outside.write_bytes(b"x")
-    result = manager.save_output({"path": str(run), "clips": [str(outside)]})
-    meta = json.loads((run / "run.json").read_text(encoding="utf-8"))
-    assert result["status"] == "saved"
-    assert meta["saved_clips"] == []
-
-
 class SubtitleHarness(ExportMixin):
     subtitle_style = {
         "font_family": "Poppins",
@@ -850,7 +868,7 @@ def test_ass_subtitle_groups_words_in_dynamic_chunks(tmp_path):
     assert "Fontname, Fontsize" in text
     assert "Style: Default,Poppins,40,&H0022AA11,&H0022AA11,&H00214365" in text
     assert ",0,0,0,0,100,100,0,0,1,4,0,5," in text
-    assert "{\\pos(288,1024)}" in text
+    assert "{\\pos(288,1024)\\b400}" in text
     assert "{\\c&H00563412}" in text
     assert "w0" in text and "w1" in text
 
@@ -900,6 +918,38 @@ def test_blur_filter_matches_preview_geometry():
     assert "boxblur=" not in harness._preview_blur_filter(720, 1280)
 
 
+def test_blur_off_uses_explicit_black_background(tmp_path):
+    harness = object.__new__(PortraitMixin)
+    harness.ffmpeg_path = "ffmpeg"
+    harness.output_resolution = "720:1280"
+    harness.log = lambda *_args: None
+    harness._video_duration = lambda _path: 1.0
+    harness.get_video_encoder_args = lambda: ["-c:v", "libx264"]
+    captured = {}
+    harness.run_ffmpeg_with_progress = lambda command, *_args, **_kwargs: captured.update(command=command) or Path(command[-1]).write_bytes(b"x")
+    harness.convert_to_portrait_center("source.mp4", str(tmp_path / "draft.mp4"), lambda _progress: None)
+    graph = captured["command"][captured["command"].index("-filter_complex") + 1]
+    assert "color=c=black:s=720x1280[bg]" in graph
+    assert "force_original_aspect_ratio=decrease" in graph
+    assert "-an" not in captured["command"]
+    assert captured["command"][captured["command"].index("-c:a") + 1] == "aac"
+
+
+def test_blur_portrait_preserves_audio(tmp_path):
+    harness = object.__new__(PortraitMixin)
+    harness.ffmpeg_path = "ffmpeg"
+    harness.output_resolution = "720:1280"
+    harness.blur_background_settings = {"enabled": True, "strength": 30}
+    harness.log = lambda *_args: None
+    harness._video_duration = lambda _path: 1.0
+    harness.get_video_encoder_args = lambda: ["-c:v", "libx264"]
+    captured = {}
+    harness.run_ffmpeg_with_progress = lambda command, *_args, **_kwargs: captured.update(command=command) or Path(command[-1]).write_bytes(b"x")
+    harness.convert_to_portrait_blur_with_progress("source.mp4", str(tmp_path / "draft.mp4"), lambda _progress: None)
+    assert "-an" not in captured["command"]
+    assert captured["command"][captured["command"].index("-c:a") + 1] == "aac"
+
+
 def test_high_resolution_caps_parallel_cpu_workers():
     assert mod.WebJobManager._parallel_workers_for_quality(3, "720") == 3
     assert mod.WebJobManager._parallel_workers_for_quality(3, "1080") == 2
@@ -916,19 +966,6 @@ def test_high_resolution_uses_ultrafast_cpu_encoder():
     assert harness.get_video_encoder_args() == ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28']
     harness.video_quality = "720"
     assert harness.get_video_encoder_args() == ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28']
-
-
-def test_schedule_youtube_upload_stores_wib_as_utc(tmp_path):
-    manager = mod.WebJobManager(app_dir=tmp_path)
-    clip_dir = tmp_path / "output" / "run" / "clip"
-    clip_dir.mkdir(parents=True)
-    video = clip_dir / "master.mp4"
-    video.write_bytes(b"x")
-    result = manager.schedule_youtube_upload({"path": str(video), "scheduled_at": "2030-01-02T10:30", "title": "Judul"})
-    assert result["status"] == "scheduled"
-    saved = json.loads((clip_dir / "data.json").read_text(encoding="utf-8"))["youtube_upload"]
-    assert saved["scheduled_at"] == "2030-01-02T03:30:00+00:00"
-    assert saved["privacy"] == "public"
 
 
 def test_due_youtube_upload_persists_public_result(tmp_path, monkeypatch):
@@ -955,7 +992,17 @@ def test_list_clips_exposes_draft_workflow_state(tmp_path):
     result = manager.list_clips()
     assert result["clips"][0]["clip_id"] == "clip-1"
     assert result["clips"][0]["status"] == "needs_edit"
-    assert "draft.mp4" in result["clips"][0]["stream_url"]
+    assert "clip_id=clip-1&artifact=draft" in result["clips"][0]["stream_url"]
+    assert "draft.mp4" not in result["clips"][0]["stream_url"]
+
+
+def test_editor_defaults_enable_subtitles_and_use_larger_foreground(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    defaults = manager._editor_defaults_local()
+    assert defaults["subtitle"]["enabled"] is True
+    assert defaults["subtitle"]["text_transform"] == "none"
+    assert defaults["blur_background"]["scale"] == 1.6
+    assert defaults["blur_background"]["strength"] == 10
 
 
 def test_render_settings_use_clip_input_without_mutating_defaults(tmp_path):
@@ -964,6 +1011,374 @@ def test_render_settings_use_clip_input_without_mutating_defaults(tmp_path):
     assert settings["hook_style"]["enabled"] is True
     assert settings["hook_style"]["position_y"] == 0.3
     assert manager.get_settings()["hook_style"]["position_y"] != 0.3
+
+
+def test_render_settings_use_draft_snapshot_after_defaults_change(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    manager.save_settings({"video_quality": "480", "blur_background": {"enabled": False, "strength": 1}})
+    metadata = {"draft_settings": {"landscape_blur": True, "blur_background": {"enabled": True, "strength": 30}, "video_quality": "1080", "screen_size": "9:16"}}
+    settings = manager._render_settings({}, metadata)
+    assert settings["landscape_blur"] is True
+    assert settings["blur_background"]["strength"] == 30
+    assert settings["video_quality"] == "1080"
+
+
+def test_local_renderer_accepts_progress_callback():
+    stages = []
+    renderer = LocalClipRenderer(progress_callback=lambda stage, progress=None: stages.append((stage, progress)))
+    renderer.set_progress("Menyiapkan video", 0.25)
+    assert stages == [("Menyiapkan video", 0.25)]
+
+
+def test_legacy_clip_view_probes_and_persists_source_geometry(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "source.mp4").write_bytes(b"source")
+    meta_path = clip_dir / "data.json"
+    metadata = {"clip_id": "geometry", "status": "needs_edit"}
+    meta_path.write_text(json.dumps(metadata), encoding="utf-8")
+    monkeypatch.setattr(manager, "_source_geometry", lambda _path: {"width": 820, "height": 480, "is_landscape": True})
+    view = manager._clip_view(meta_path, metadata)
+    assert view["source_geometry"]["is_landscape"] is True
+    assert json.loads(meta_path.read_text(encoding="utf-8"))["source_geometry"]["width"] == 820
+
+
+def test_preview_uses_local_renderer_without_ai_provider(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "source.mp4").write_bytes(b"source")
+    (clip_dir / "data.json").write_text(json.dumps({"clip_id": "preview", "status": "needs_edit", "render_revision": 0, "draft_settings": {"landscape_blur": True, "blur_background": {"enabled": True}, "video_quality": "1080", "screen_size": "9:16"}}), encoding="utf-8")
+    captured = {}
+
+    class Renderer:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def render_existing_clip(self, _clip_dir, _metadata, _settings, output, preview=False):
+            captured["preview"] = preview
+            output.write_bytes(b"x" * 1000)
+
+    monkeypatch.setattr(mod, "LocalClipRenderer", Renderer)
+    result = manager.render_clip({"clip_id": "preview", "settings": {"subtitle": {"enabled": False}}}, preview=True)
+    assert result["status"] == "queued"
+    assert result["preview_id"]
+    for _ in range(100):
+        status = manager.preview_status("preview", result["preview_id"])
+        if status.get("state") in {"ready", "error", "cancelled"}:
+            break
+        time.sleep(0.01)
+    assert status["state"] == "ready"
+    assert "artifact=preview" in status["stream_url"]
+    assert "preview_id=" in status["stream_url"]
+    assert captured["preview"] is True
+    assert captured["video_quality"] == "1080"
+    assert "ai_providers" not in captured
+
+
+def test_failed_final_render_preserves_existing_master(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    master = clip_dir / "master.mp4"
+    master.write_bytes(b"old-master")
+    meta_path = clip_dir / "data.json"
+    metadata = {"clip_id": "final", "status": "needs_edit", "render_revision": 2, "draft_settings": {"landscape_blur": False, "blur_background": {"enabled": False}, "video_quality": "720", "screen_size": "9:16"}}
+    meta_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    class Renderer:
+        def __init__(self, **_kwargs):
+            pass
+
+        def render_existing_clip(self, *_args, **_kwargs):
+            raise RuntimeError("technical details")
+
+    monkeypatch.setattr(mod, "LocalClipRenderer", Renderer)
+    assert mod._GLOBAL_FINAL_RENDER_LOCK.acquire(blocking=False)
+    manager._render_clip_file(meta_path, metadata, manager._render_settings({}, metadata), clip_dir / "master.tmp.mp4", True)
+    saved = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert master.read_bytes() == b"old-master"
+    assert saved["status"] == "render_error"
+    assert saved["render_error"] == "Render gagal. Periksa source klip lalu coba lagi."
+
+
+def test_clip_upload_lifecycle_uses_clip_id_without_client_path(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "master.mp4").write_bytes(b"x")
+    (clip_dir / "data.json").write_text(json.dumps({"clip_id": "ready", "status": "ready_to_schedule", "title": "Judul"}), encoding="utf-8")
+    monkeypatch.setattr(mod, "upload_youtube_video", lambda *_args: {"video_id": "id", "url": "https://youtube.test/id"})
+    result = manager.upload_clip_now({"clip_id": "ready", "title": "Judul baru", "description": "Deskripsi"})
+    assert result["status"] == "ok"
+    metadata = json.loads((clip_dir / "data.json").read_text(encoding="utf-8"))
+    assert metadata["status"] == "uploaded"
+    assert metadata["title"] == "Judul baru"
+    assert metadata["description"] == "Deskripsi"
+    assert metadata["youtube_upload"]["video_id"] == "id"
+
+
+def test_render_settings_normalize_untrusted_editor_values(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    metadata = {"draft_settings": {"landscape_blur": True, "blur_background": {"enabled": True}, "video_quality": "1080"}}
+    settings = manager._render_settings({"settings": {"hook_style": {"font_family": "Invalid", "font_weight": 999, "font_size": 99, "text_color": "bad", "position_x": -2}, "blur_background": {"zoom": 99, "strength": -1}}}, metadata)
+    assert settings["hook_style"]["font_family"] == "Plus Jakarta Sans"
+    assert settings["hook_style"]["font_weight"] == 800
+    assert settings["hook_style"]["font_size"] == 0.1
+    assert settings["hook_style"]["position_x"] == 0
+    assert settings["hook_style"]["text_color"].startswith("#")
+    assert settings["blur_background"]["zoom"] == 3
+    assert settings["blur_background"]["strength"] == 0
+
+
+def test_upload_error_retry_can_upload_immediately(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "master.mp4").write_bytes(b"final")
+    metadata = {"clip_id": "retry", "status": "upload_error", "title": "Judul", "youtube_upload": {"status": "error", "title": "Judul retry", "description": "Desc"}}
+    (clip_dir / "data.json").write_text(json.dumps(metadata), encoding="utf-8")
+    monkeypatch.setattr(mod, "upload_youtube_video", lambda *_args: {"video_id": "retried", "url": "https://youtube.test/retried"})
+    result = manager.retry_clip_upload({"clip_id": "retry", "upload_now": True})
+    saved = json.loads((clip_dir / "data.json").read_text(encoding="utf-8"))
+    assert result["status"] == "ok"
+    assert saved["status"] == "uploaded"
+    assert saved["youtube_upload"]["title"] == "Judul retry"
+    assert saved["youtube_upload"]["video_id"] == "retried"
+
+
+def test_clip_views_expose_separate_files_render_and_upload_details(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "draft.mp4").write_bytes(b"draft")
+    (clip_dir / "master.mp4").write_bytes(b"final")
+    metadata = {
+        "clip_id": "details",
+        "status": "uploaded",
+        "render_progress": 1.0,
+        "render_stage": "Selesai",
+        "render_started_at": "2026-07-13T00:00:00+00:00",
+        "render_elapsed_seconds": 12.5,
+        "youtube_upload": {"status": "uploaded", "video_id": "new"},
+        "youtube_upload_history": [{"status": "uploaded", "video_id": "old"}],
+    }
+    (clip_dir / "data.json").write_text(json.dumps(metadata), encoding="utf-8")
+    listed = manager.list_clips()["clips"][0]
+    fetched = manager.get_clip("details")["clip"]
+    for clip in (listed, fetched):
+        assert "artifact=draft" in clip["draft_url"]
+        assert "artifact=final" in clip["final_url"]
+        assert "artifact=final&download=1" in clip["final_download_url"]
+        assert "draft.mp4" not in clip["draft_url"]
+        assert "master.mp4" not in clip["final_url"]
+        assert clip["final_file"] == {"exists": True, "size": 5}
+        assert clip["render"]["progress"] == 1.0
+        assert clip["render"]["stage"] == "Selesai"
+        assert clip["render"]["started_at"] == "2026-07-13T00:00:00+00:00"
+        assert clip["render"]["elapsed_seconds"] == 12.5
+        assert clip["youtube_upload"]["video_id"] == "new"
+        assert clip["youtube_upload_history"][0]["video_id"] == "old"
+
+
+def test_clip_views_allowlist_metadata_and_hide_secrets_and_paths(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "draft.mp4").write_bytes(b"draft")
+    metadata = {"clip_id": "safe-view", "status": "needs_edit", "title": "Safe", "api_key": "secret", "token": "bearer", "cookie": "private", "source_path": "C:/private/source.mp4"}
+    (clip_dir / "data.json").write_text(json.dumps(metadata), encoding="utf-8")
+    clip = manager.list_clips()["clips"][0]
+    assert not {"api_key", "token", "cookie", "source_path"}.intersection(clip)
+    assert "C:/private" not in json.dumps(clip)
+    assert manager.clip_artifact("safe-view", "draft") == clip_dir / "draft.mp4"
+    assert manager.clip_artifact("missing", "draft") is None
+
+
+def test_render_rejects_non_editable_state_and_persists_callback_progress(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    meta_path = clip_dir / "data.json"
+    metadata = {"clip_id": "strict-render", "status": "ready_to_schedule", "draft_settings": {}}
+    meta_path.write_text(json.dumps(metadata), encoding="utf-8")
+    assert manager.render_clip({"clip_id": "strict-render"})["status"] == "error"
+    metadata["status"] = "render_error"
+    meta_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    class Renderer:
+        def __init__(self, progress_callback=None, **_kwargs):
+            self.progress_callback = progress_callback
+
+        def render_existing_clip(self, _clip_dir, _metadata, _settings, output, preview=False):
+            self.progress_callback("Menyusun video", 0.6)
+            output.write_bytes(b"x" * 1000)
+
+    monkeypatch.setattr(mod, "LocalClipRenderer", Renderer)
+    assert mod._GLOBAL_FINAL_RENDER_LOCK.acquire(blocking=False)
+    manager._render_clip_file(meta_path, metadata, manager._render_settings({}, metadata), clip_dir / "master.tmp.mp4", True)
+    saved = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert saved["status"] == "ready_to_schedule"
+    assert saved["render_progress"] == 1.0
+    assert saved["render_stage"] == "Selesai"
+    assert saved["render_started_at"]
+    assert saved["render_elapsed_seconds"] >= 0
+
+
+def test_cancel_retry_edit_and_delete_follow_strict_lifecycle(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "master.mp4").write_bytes(b"final")
+    meta_path = clip_dir / "data.json"
+    meta_path.write_text(json.dumps({"clip_id": "lifecycle", "status": "ready_to_schedule"}), encoding="utf-8")
+    scheduled = manager.schedule_clip_upload({"clip_id": "lifecycle", "scheduled_at": "2030-01-02T10:30", "title": "Judul jadwal", "description": "Deskripsi jadwal"})
+    assert scheduled["status"] == "scheduled"
+    scheduled_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert scheduled_meta["title"] == "Judul jadwal"
+    assert scheduled_meta["description"] == "Deskripsi jadwal"
+    assert manager.cancel_clip_upload({"clip_id": "lifecycle"})["status"] == "cancelled"
+    assert json.loads(meta_path.read_text(encoding="utf-8"))["status"] == "ready_to_schedule"
+    meta_path.write_text(json.dumps({"clip_id": "lifecycle", "status": "upload_error", "youtube_upload": {"status": "error"}}), encoding="utf-8")
+    assert manager.retry_clip_upload({"clip_id": "lifecycle"})["status"] == "ready"
+    meta_path.write_text(json.dumps({"clip_id": "lifecycle", "status": "uploaded", "youtube_upload": {"status": "uploaded", "video_id": "old"}}), encoding="utf-8")
+    assert manager.edit_clip_again({"clip_id": "lifecycle"})["status"] == "ok"
+    edited = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert edited["status"] == "needs_edit"
+    assert edited["youtube_upload_history"][0]["video_id"] == "old"
+    for state in ("rendering", "render_queued", "scheduled", "uploading"):
+        meta_path.write_text(json.dumps({"clip_id": "lifecycle", "status": state}), encoding="utf-8")
+        assert manager.delete_clip({"clip_id": "lifecycle"})["status"] == "error"
+        assert clip_dir.exists()
+    meta_path.write_text(json.dumps({"clip_id": "lifecycle", "status": "needs_edit"}), encoding="utf-8")
+    monkeypatch.setattr(mod.shutil, "rmtree", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("private path")))
+    result = manager.delete_clip({"clip_id": "lifecycle"})
+    assert result == {"status": "error", "message": "Klip gagal dihapus"}
+
+
+def test_concurrent_upload_claim_allows_one_attempt(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "master.mp4").write_bytes(b"final")
+    meta_path = clip_dir / "data.json"
+    meta_path.write_text(json.dumps({"clip_id": "claim", "status": "ready_to_schedule", "render_revision": 3}), encoding="utf-8")
+    entered = threading.Event()
+    release = threading.Event()
+    uploads = []
+
+    def upload(*_args):
+        uploads.append(1)
+        entered.set()
+        release.wait(2)
+        return {"video_id": "one", "url": "https://youtube.test/one"}
+
+    monkeypatch.setattr(mod, "upload_youtube_video", upload)
+    results = []
+    first = threading.Thread(target=lambda: results.append(manager.upload_clip_now({"clip_id": "claim"})))
+    first.start()
+    assert entered.wait(1)
+    second = threading.Thread(target=lambda: results.append(manager.upload_clip_now({"clip_id": "claim"})))
+    second.start()
+    second.join(1)
+    release.set()
+    first.join(1)
+    assert len(uploads) == 1
+    assert sorted(result["status"] for result in results) == ["error", "ok"]
+
+
+def test_stale_render_completion_cannot_replace_newer_attempt(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    master = clip_dir / "master.mp4"
+    master.write_bytes(b"current")
+    meta_path = clip_dir / "data.json"
+    metadata = {"clip_id": "cas-render", "status": "rendering", "attempt_id": "old", "render_base_revision": 1, "render_revision": 1, "draft_settings": {}}
+    meta_path.write_text(json.dumps({**metadata, "attempt_id": "new", "render_base_revision": 1}), encoding="utf-8")
+
+    class Renderer:
+        def __init__(self, **_kwargs):
+            pass
+
+        def render_existing_clip(self, _clip_dir, _metadata, _settings, output, preview=False):
+            output.write_bytes(b"stale" * 300)
+
+    monkeypatch.setattr(mod, "LocalClipRenderer", Renderer)
+    assert mod._GLOBAL_FINAL_RENDER_LOCK.acquire(blocking=False)
+    manager._render_clip_file(meta_path, metadata, manager._render_settings({}, metadata), clip_dir / "master.old.tmp.mp4", True)
+    assert master.read_bytes() == b"current"
+    assert json.loads(meta_path.read_text(encoding="utf-8"))["attempt_id"] == "new"
+
+
+def test_recovery_marks_stale_upload_and_render_states(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    stale = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    states = [("uploading", {"youtube_upload": {"status": "uploading", "attempt_id": "u", "uploading_at": stale}}), ("rendering", {"attempt_id": "r", "render_started_at": stale}), ("render_queued", {"attempt_id": "q", "render_queued_at": stale})]
+    paths = []
+    for index, (status, extra) in enumerate(states):
+        clip_dir = tmp_path / "output" / "run" / f"clip-{index}"
+        clip_dir.mkdir(parents=True)
+        path = clip_dir / "data.json"
+        path.write_text(json.dumps({"clip_id": f"stale-{index}", "status": status, **extra}), encoding="utf-8")
+        paths.append(path)
+    manager.recover_stale_clip_operations()
+    assert [json.loads(path.read_text(encoding="utf-8"))["status"] for path in paths] == ["upload_error", "render_error", "render_error"]
+
+
+def test_scheduled_edit_preserves_schedule_and_uploads_latest_revision(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "master.mp4").write_bytes(b"final")
+    meta_path = clip_dir / "data.json"
+    scheduled = {"status": "scheduled", "scheduled_at": "2000-01-01T00:00:00+00:00", "title": "Pending", "description": "Text", "privacy": "public", "render_revision": 1}
+    meta_path.write_text(json.dumps({"clip_id": "scheduled-edit", "status": "scheduled", "render_revision": 1, "youtube_upload": scheduled}), encoding="utf-8")
+    assert manager.edit_clip_again({"clip_id": "scheduled-edit"})["status"] == "ok"
+    pending = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert pending["pending_youtube_upload"] == scheduled
+    pending.update(status="ready_to_schedule", render_revision=2)
+    meta_path.write_text(json.dumps(pending), encoding="utf-8")
+    revisions = []
+    monkeypatch.setattr(mod, "upload_youtube_video", lambda *_args: revisions.append(json.loads(meta_path.read_text(encoding="utf-8"))["youtube_upload"]["render_revision"]) or {"video_id": "latest", "url": "https://youtube.test/latest"})
+    manager.process_due_youtube_uploads()
+    saved = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert revisions == [2]
+    assert saved["youtube_upload"]["title"] == "Pending"
+
+
+def test_upload_history_is_append_only_across_edits(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "master.mp4").write_bytes(b"final")
+    meta_path = clip_dir / "data.json"
+    old = {"status": "uploaded", "video_id": "old", "render_revision": 1}
+    meta_path.write_text(json.dumps({"clip_id": "history", "status": "uploaded", "render_revision": 1, "youtube_upload": old, "youtube_upload_history": [{"status": "uploaded", "video_id": "older", "render_revision": 0}]}), encoding="utf-8")
+    manager.edit_clip_again({"clip_id": "history"})
+    edited = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert [item["video_id"] for item in edited["youtube_upload_history"]] == ["older", "old"]
+    edited.update(status="ready_to_schedule", render_revision=2)
+    meta_path.write_text(json.dumps(edited), encoding="utf-8")
+    monkeypatch.setattr(mod, "upload_youtube_video", lambda *_args: {"video_id": "new", "url": "https://youtube.test/new"})
+    manager.upload_clip_now({"clip_id": "history"})
+    saved = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert [item["video_id"] for item in saved["youtube_upload_history"]] == ["older", "old"]
+    assert saved["youtube_upload"]["video_id"] == "new"
+
+
+def test_retention_skips_active_clip_sessions(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    for index, status in enumerate(("render_queued", "rendering", "scheduled", "uploading")):
+        run = tmp_path / "output" / f"run-{index}"
+        clip = run / "clip"
+        clip.mkdir(parents=True)
+        (run / "run.json").write_text(json.dumps({"status": "staged", "file_exists": True}), encoding="utf-8")
+        (clip / "data.json").write_text(json.dumps({"clip_id": str(index), "status": status}), encoding="utf-8")
+        (clip / "draft.mp4").write_bytes(b"active")
+    manager._enforce_retention(max_active=0)
+    assert all((tmp_path / "output" / f"run-{index}" / "clip" / "draft.mp4").exists() for index in range(4))
 
 
 def test_section_format_has_hard_cap_and_fast_codec_sort():
@@ -1074,8 +1489,18 @@ class PipelineCore(AutoClipperCore):
         path.write_text("srt", encoding="utf-8")
         return str(path), {"title": "video"}
 
+    def parse_srt_timed(self, _path):
+        return {
+            "duration": 72.0,
+            "words": [],
+            "segments": [
+                {"text": "pertama", "start": 9.0, "end": 12.0},
+                {"text": "kedua", "start": 69.0, "end": 72.0},
+            ],
+        }
+
     def parse_srt(self, _path):
-        return "[00:00:01,000 - 00:00:02,000] transcript SRT"
+        return timed_segments_to_prompt(self.parse_srt_timed(_path))
 
     def download_audio_only(self, _url):
         self.downloaded_audio += 1
@@ -1084,7 +1509,15 @@ class PipelineCore(AutoClipperCore):
         return str(path)
 
     def transcribe_audio_with_timestamps(self, audio_path, require_words=False):
-        self.transcription_calls.append((Path(audio_path).name, require_words))
+        name = Path(audio_path).name
+        self.transcription_calls.append((name, require_words))
+        if name.startswith("section_"):
+            word = "pertama" if name == "section_001.mp4" else "kedua"
+            return {
+                "duration": 3.0,
+                "words": [{"word": word, "start": 0.2, "end": 0.7}],
+                "segments": [{"text": word, "start": 0.1, "end": 0.9}],
+            }
         return {
             "duration": 90.0,
             "words": [
@@ -1155,19 +1588,25 @@ def test_missing_srt_transcribes_once_and_reuses_words_for_caption(tmp_path):
     assert core.caption_transcripts[2]["words"] == [{"word": "kedua", "start": 1.0, "end": 1.5}]
 
 
-def test_missing_srt_captions_off_transcribes_once_without_passing_words(tmp_path):
+def test_missing_srt_captions_off_transcribes_once_and_retains_timed_content(tmp_path):
     core = PipelineCore(tmp_path)
     core.process("https://www.youtube.com/watch?v=abc", num_clips=2, add_captions=False)
     assert core.transcription_calls == [("source_audio.mp3", False)]
-    assert core.caption_transcripts == {1: None, 2: None}
+    assert core.caption_transcripts[1]["segments"][0]["text"] == "pertama"
+    assert core.caption_transcripts[2]["segments"][0]["text"] == "kedua"
 
 
-def test_srt_captions_on_uses_srt_and_transcribes_each_selected_clip(tmp_path):
+def test_srt_finds_highlights_then_transcribes_selected_sections_for_word_timing(tmp_path):
     core = PipelineCore(tmp_path, has_srt=True)
     core.process("https://www.youtube.com/watch?v=abc", num_clips=2, add_captions=True)
-    assert core.highlight_transcript == "[00:00:01,000 - 00:00:02,000] transcript SRT"
+    assert core.highlight_transcript == (
+        "[00:00:09,000 - 00:00:12,000] pertama\n"
+        "[00:01:09,000 - 00:01:12,000] kedua"
+    )
     assert core.downloaded_audio == 0
     assert core.transcription_calls == [("section_001.mp4", True), ("section_002.mp4", True)]
+    assert core.caption_transcripts[1]["words"] == [{"word": "pertama", "start": 0.2, "end": 0.7}]
+    assert core.caption_transcripts[2]["words"] == [{"word": "kedua", "start": 0.2, "end": 0.7}]
 
 
 def test_srt_captions_off_never_calls_groq(tmp_path):
@@ -1235,14 +1674,26 @@ def test_caption_without_supplied_transcript_extracts_mp3_and_requires_words(tmp
     assert calls[1] == ("caption_audio.mp3", True)
 
 
-def test_supplied_zero_word_transcript_is_fatal_without_extraction(tmp_path, monkeypatch):
+def test_supplied_segment_transcript_creates_ass_without_extraction(tmp_path, monkeypatch):
+    harness = SubtitleHarness()
+    harness.log = lambda *_args: None
+    monkeypatch.setattr(clipper_export.subprocess, "run", lambda *_args, **_kwargs: pytest.fail("extracted"))
+    ass_file = harness._create_caption_ass(
+        "section.mp4",
+        tmp_path,
+        {"duration": 1.0, "words": [], "segments": [{"text": "halo", "start": 0.0, "end": 1.0}]},
+    )
+    assert "Dialogue:" in ass_file.read_text(encoding="utf-8")
+
+
+def test_supplied_empty_transcript_is_fatal_without_extraction(tmp_path, monkeypatch):
     harness = SubtitleHarness()
     monkeypatch.setattr(clipper_export.subprocess, "run", lambda *_args, **_kwargs: pytest.fail("extracted"))
-    with pytest.raises(ValueError, match="word timestamps"):
+    with pytest.raises(ValueError, match="timestamped content"):
         harness._create_caption_ass(
             "section.mp4",
             tmp_path,
-            {"duration": 1.0, "words": [], "segments": [{"text": "halo", "start": 0.0, "end": 1.0}]},
+            {"duration": 1.0, "words": [], "segments": []},
         )
 
 
@@ -1276,6 +1727,10 @@ class ProcessClipHarness(SubtitleHarness):
         self.hook_style_settings = {}
         self.channel_name = ""
         self.video_info = {}
+        self.video_quality = "1080"
+        self.landscape_blur = True
+        self.blur_background_settings = {"enabled": True, "strength": 30}
+        self.draft_only = False
         self.events = []
 
     def is_cancelled(self):
@@ -1316,13 +1771,85 @@ class ProcessClipHarness(SubtitleHarness):
     def run_ffmpeg_with_progress(self, command, _duration, _progress):
         Path(command[-1]).write_bytes(b"x" * 1000)
 
+    def _run_probe_subprocess(self, command, **_kwargs):
+        Path(command[-1]).write_bytes(b"thumbnail")
+        return SimpleNamespace(returncode=0)
 
-def test_process_clip_prepares_captions_before_portrait_conversion(tmp_path, monkeypatch):
+
+def test_draft_writes_required_artifacts_without_ass_or_overlays(tmp_path):
+    source = tmp_path / "section.mp4"
+    source.write_bytes(b"x" * 1000)
+    harness = ProcessClipHarness(tmp_path / "out")
+    harness.draft_only = True
+    transcript = timed_words(("halo", 0.0, 0.5))
+    harness.process_clip(
+        str(source),
+        {
+            "start_time": "00:00:00,000",
+            "end_time": "00:00:03,000",
+            "duration_seconds": 3.0,
+            "title": "clip",
+        },
+        1,
+        add_captions=True,
+        add_hook=True,
+        pre_cut=True,
+        caption_transcript=transcript,
+    )
+    clip_dir = next(path for path in harness.output_dir.iterdir() if path.is_dir())
+    assert {path.name for path in clip_dir.iterdir()} == {"source.mp4", "draft.mp4", "transcript.json", "data.json", "thumbnail.jpg"}
+    metadata = json.loads((clip_dir / "data.json").read_text(encoding="utf-8"))
+    assert metadata["status"] == "needs_edit"
+    assert metadata["generation_id"] == harness.output_dir.name
+    assert metadata["created_at"]
+    assert metadata["draft_settings"] == {"landscape_blur": True, "blur_background": {"enabled": True, "strength": 30}, "video_quality": "1080", "screen_size": "9:16"}
+    assert harness.events == [("portrait", None)]
+
+
+def test_draft_without_caption_overlay_retains_usable_transcript(tmp_path):
+    source = tmp_path / "section.mp4"
+    source.write_bytes(b"x" * 1000)
+    harness = ProcessClipHarness(tmp_path / "out")
+    harness.draft_only = True
+    transcript = timed_words(("halo", 0.0, 0.5))
+    harness.process_clip(str(source), {"start_time": "00:00:00,000", "end_time": "00:00:03,000", "duration_seconds": 3.0, "title": "clip"}, 1, add_captions=False, add_hook=False, pre_cut=True, caption_transcript=transcript)
+    clip_dir = next(path for path in harness.output_dir.iterdir() if path.is_dir())
+    saved = json.loads((clip_dir / "transcript.json").read_text(encoding="utf-8"))
+    metadata = json.loads((clip_dir / "data.json").read_text(encoding="utf-8"))
+    assert saved["words"][0]["word"] == "halo"
+    assert metadata["transcript_path"] == "transcript.json"
+
+
+def test_draft_without_captions_still_writes_transcript_artifact(tmp_path):
+    source = tmp_path / "section.mp4"
+    source.write_bytes(b"x" * 1000)
+    harness = ProcessClipHarness(tmp_path / "out")
+    harness.draft_only = True
+    harness.process_clip(
+        str(source),
+        {
+            "start_time": "00:00:00,000",
+            "end_time": "00:00:03,000",
+            "duration_seconds": 3.0,
+            "title": "clip",
+        },
+        1,
+        add_captions=False,
+        add_hook=False,
+        pre_cut=True,
+    )
+    clip_dir = next(path for path in harness.output_dir.iterdir() if path.is_dir())
+    transcript = json.loads((clip_dir / "transcript.json").read_text(encoding="utf-8"))
+    metadata = json.loads((clip_dir / "data.json").read_text(encoding="utf-8"))
+    assert transcript == {"duration": 3.0, "words": [], "segments": []}
+    assert metadata["transcript_path"] == ""
+
+
+def test_process_clip_prepares_portrait_before_captions(tmp_path):
     source = tmp_path / "section.mp4"
     source.write_bytes(b"x" * 1000)
     harness = ProcessClipHarness(tmp_path / "out")
     transcript = timed_words(("halo", 0.0, 0.5))
-    monkeypatch.setattr(clipper_export.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(returncode=0))
     harness.process_clip(
         str(source),
         {
@@ -1337,7 +1864,7 @@ def test_process_clip_prepares_captions_before_portrait_conversion(tmp_path, mon
         pre_cut=True,
         caption_transcript=transcript,
     )
-    assert harness.events[:2] == [("caption", transcript), ("portrait", None)]
+    assert harness.events[:2] == [("portrait", None), ("caption", transcript)]
 
 
 if __name__ == "__main__":

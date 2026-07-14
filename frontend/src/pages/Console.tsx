@@ -1,39 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
+import { useOutletContext } from 'react-router-dom';
+import type { DashboardOutletContext } from '@/components/layout/DashboardLayout';
 import { api } from '@/lib/api';
 
 export default function Console() {
-  const [logs, setLogs] = useState<string[]>([]);
-  const [isPolling, setIsPolling] = useState(true);
+  const { status, refreshStatus } = useOutletContext<DashboardOutletContext>();
+  const logs = Array.isArray(status?.logs) ? status.logs.slice(-200) : [];
   const logsEndRef = useRef<HTMLDivElement>(null);
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const fetchLogs = useCallback(async () => {
-    try {
-      const data = await api('/api/status');
-      if (data.logs && Array.isArray(data.logs)) {
-        setLogs(data.logs.slice(-200));
-      }
-    } catch (e) {
-      console.error('Failed to fetch logs', e);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchLogs();
-  }, [fetchLogs]);
-
-  useEffect(() => {
-    if (isPolling) {
-      pollingRef.current = setInterval(fetchLogs, 2000);
-    } else {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    }
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
-  }, [isPolling, fetchLogs]);
-
-  // Auto-scroll to bottom when logs update
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
@@ -41,29 +15,23 @@ export default function Console() {
   const handleClear = async () => {
     try {
       await api('/api/logs/clear', { method: 'POST', body: JSON.stringify({}) });
-      setLogs([]);
-    } catch (e) {
-      console.error('Failed to clear logs', e);
+      await refreshStatus();
+    } catch (error) {
+      console.error('Failed to clear logs', error);
     }
   };
 
   return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-8 px-6 py-10 w-full h-full min-h-[calc(100vh-53px)]">
+    <main className="mx-auto flex h-full min-h-[calc(100vh-53px)] w-full max-w-5xl flex-col gap-8 px-6 py-10">
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-2">
           <p className="text-sm font-medium uppercase tracking-widest text-primary">Konsol</p>
           <h1 className="font-display text-3xl font-bold tracking-tight md:text-4xl">Log Pemrosesan</h1>
           <p className="leading-relaxed text-muted">Pantau aktivitas pipeline KlipKlop secara real-time.</p>
         </div>
-        <div className="flex items-center gap-2 mt-2">
-          <button
-            type="button"
-            onClick={() => setIsPolling(p => !p)}
-            className={`rounded-xl border px-4 py-2 text-sm font-bold transition-colors ${isPolling ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/20' : 'border-line bg-secondary text-muted hover:text-foreground'}`}
-          >
-            {isPolling ? 'Live Polling Aktif' : 'Polling Berhenti'}
-          </button>
-          <button type="button" onClick={handleClear} className="rounded-xl border border-line px-4 py-2 text-sm font-medium text-muted hover:bg-secondary hover:text-foreground transition-colors">
+        <div className="mt-2 flex items-center gap-2">
+          <span className="rounded-xl border border-primary/40 bg-primary/10 px-4 py-2 text-sm font-bold text-primary">Live</span>
+          <button type="button" onClick={handleClear} className="rounded-xl border border-line px-4 py-2 text-sm font-medium text-muted transition-colors hover:bg-secondary hover:text-foreground">
             Clear
           </button>
         </div>
@@ -77,26 +45,17 @@ export default function Console() {
         <div className="min-h-0 flex-1 overflow-auto overscroll-contain p-5">
           <ul className="flex list-none flex-col gap-1 font-mono text-sm">
             {logs.length === 0 ? (
-              <li className="text-muted italic">Menunggu log pemrosesan...</li>
+              <li className="italic text-muted">Menunggu log pemrosesan...</li>
             ) : (
-              logs.map((log, i) => {
+              logs.map((log, index) => {
                 const isError = log.includes('[Error]') || log.includes('❌') || log.toLowerCase().includes('error');
                 const isSuccess = log.includes('[Done]') || log.includes('✅') || log.includes('Complete');
-                
-                let level = 'info';
-                let levelClass = 'text-muted';
-                
-                if (isError) {
-                  level = 'error';
-                  levelClass = 'text-destructive font-bold';
-                } else if (isSuccess) {
-                  level = 'success';
-                  levelClass = 'text-primary font-bold';
-                }
+                const level = isError ? 'error' : isSuccess ? 'success' : 'info';
+                const levelClass = isError ? 'text-destructive font-bold' : isSuccess ? 'text-primary font-bold' : 'text-muted';
 
                 return (
-                  <li key={i} className="flex flex-col sm:flex-row gap-2 sm:gap-4 rounded-lg px-2 py-1.5 hover:bg-secondary/50">
-                    <span className={`shrink-0 uppercase ${levelClass} min-w-[70px]`}>{level}</span>
+                  <li key={`${index}-${log}`} className="flex flex-col gap-2 rounded-lg px-2 py-1.5 hover:bg-secondary/50 sm:flex-row sm:gap-4">
+                    <span className={`min-w-[70px] shrink-0 uppercase ${levelClass}`}>{level}</span>
                     <span className="min-w-0 flex-1 whitespace-pre-wrap break-all leading-relaxed text-foreground/90">{log}</span>
                   </li>
                 );

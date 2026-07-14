@@ -8,6 +8,8 @@ import tempfile
 import uuid
 from pathlib import Path
 
+from config.editor_defaults import editor_defaults
+
 
 class ConfigManager:
     """Manages application configuration"""
@@ -51,7 +53,8 @@ class ConfigManager:
                 "video_quality": "720",
                 "landscape_blur": False,
                 "subtitle_style": {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360},
-                "subtitle": {"enabled": False, "color": "#00BFFF", "text_color": "#FFFFFF", "size": 0.04, "position_x": 0.5, "position_y": 0.85, "text_transform": "uppercase", "bg_color": "#000000", "bg_opacity": 0.0, "font_family": "Plus Jakarta Sans", "font_weight": 800, "outline_color": "#000000", "outline_thickness": 1.0},
+            "subtitle": {"enabled": True, "color": "#00BFFF", "text_color": "#FFFFFF", "size": 0.04, "position_x": 0.5, "position_y": 0.85, "text_transform": "none", "bg_color": "#000000", "bg_opacity": 0.0, "font_family": "Plus Jakarta Sans", "font_weight": 800, "outline_color": "#000000", "outline_thickness": 1.0},
+
                 "subtitle_position": "auto",
                 "repliz": {"access_key": "", "secret_key": ""},
                 "gpu_acceleration": {"enabled": False},
@@ -65,7 +68,8 @@ class ConfigManager:
                 },
                 "credit_watermark": {"enabled": False, "text": "sc : {channel}", "color": "#FFFFFF", "size": 0.032, "opacity": 0.55, "position_x": 0.06, "position_y": 0.23},
                 "hook_style": {"enabled": False, "font_size": 0.054, "font_family": "Plus Jakarta Sans", "font_weight": 800, "text_color": "#FFD700", "outline_color": "#000000", "outline_thickness": 1.5, "duration": 5.0, "position_x": 0.5, "position_y": 0.2},
-                "blur_background": {"enabled": False, "zoom": 1.08, "strength": 30},
+            "blur_background": {"enabled": True, "scale": 1.6, "zoom": 1.08, "strength": 10},
+
                 "ai_providers": self._get_default_ai_providers(),
             }
             for key, value in defaults.items():
@@ -82,15 +86,32 @@ class ConfigManager:
             if hook_maker.get("api_key"):
                 hook_maker["api_key"] = ""
                 dirty = True
+            canonical_editor_defaults = editor_defaults()
+            for section, section_defaults in canonical_editor_defaults.items():
+                current_section = config.setdefault(section, {})
+                for key, value in section_defaults.items():
+                    if key not in current_section:
+                        current_section[key] = value
+                        dirty = True
+            if not config.get("_natural_text_defaults_migrated"):
+                if config.setdefault("subtitle", {}).get("text_transform") == "uppercase":
+                    config["subtitle"]["text_transform"] = "none"
+                config["_natural_text_defaults_migrated"] = True
+                dirty = True
+            if not config.get("_preview_defaults_v2_migrated"):
+                config.setdefault("subtitle", {})["enabled"] = True
+                config.setdefault("blur_background", {}).update({"enabled": True, "scale": 1.6, "strength": 10})
+                config["_preview_defaults_v2_migrated"] = True
+                dirty = True
+            if not config.get("_subtitle_default_enabled_migrated"):
+                config.setdefault("subtitle", {})["enabled"] = True
+                config["_subtitle_default_enabled_migrated"] = True
+                dirty = True
+            config["landscape_blur"] = bool(config.get("blur_background", {}).get("enabled", False))
             if not config.get("_blur_default_migrated"):
-                config["landscape_blur"] = True
                 config["_blur_default_migrated"] = True
                 dirty = True
             if not config.get("_text_style_controls_migrated"):
-                hook_style = config.setdefault("hook_style", {})
-                hook_style.update({"font_family": "Plus Jakarta Sans", "font_weight": 800, "text_color": "#FFD700", "font_color": "#FFD700", "outline_color": "#000000", "outline_thickness": 1.5})
-                subtitle = config.setdefault("subtitle", {})
-                subtitle.update({"font_family": "Plus Jakarta Sans", "font_weight": 800, "text_color": "#FFFFFF", "color": "#00BFFF", "outline_color": "#000000", "outline_thickness": 1.0})
                 config["_text_style_controls_migrated"] = True
                 dirty = True
             for obsolete_key in ("subtitle_engine", "local_whisper", "mediapipe_settings"):
@@ -139,7 +160,7 @@ class ConfigManager:
             "video_quality": "720",
             "landscape_blur": False,
             "subtitle_style": {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360},
-            "subtitle": {"enabled": False, "color": "#00BFFF", "text_color": "#FFFFFF", "size": 0.04, "position_x": 0.5, "position_y": 0.85, "text_transform": "uppercase", "bg_color": "#000000", "bg_opacity": 0.0, "font_family": "Plus Jakarta Sans", "font_weight": 800, "outline_color": "#000000", "outline_thickness": 1.0},
+            "subtitle": {"enabled": True, "color": "#00BFFF", "text_color": "#FFFFFF", "size": 0.04, "position_x": 0.5, "position_y": 0.85, "text_transform": "none", "bg_color": "#000000", "bg_opacity": 0.0, "font_family": "Plus Jakarta Sans", "font_weight": 800, "outline_color": "#000000", "outline_thickness": 1.0},
             "subtitle_position": "auto",
             "repliz": {
                 "access_key": "",

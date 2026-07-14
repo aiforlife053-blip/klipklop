@@ -1,8 +1,8 @@
 import json
 import os
+import queue
 import re
 import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -20,8 +20,12 @@ from utils.helpers import get_deno_path, get_ffmpeg_path, is_ytdlp_module_availa
 from utils.logger import debug_log
 
 
+_FFMPEG_PROCESS_LOCK = threading.Lock()
+
+
 class FfmpegMixin(ClipperBase):
     _CPU_FALLBACK_ARGS = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23']
+    _PROBE_TIMEOUT = 30
     _GPU_ENCODER_NAMES = (
         'h264_nvenc', 'hevc_nvenc',
         'h264_qsv', 'hevc_qsv',
@@ -141,29 +145,50 @@ class FfmpegMixin(ClipperBase):
         self.log(msg)
         self.log("  💻 Continuing with CPU encoding (libx264)")
 
-    def _run_cancelable_subprocess(self, cmd: list, **kwargs):
+    def _stop_subprocess(self, proc):
+        if proc.poll() is not None:
+            return proc.communicate()
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+        try:
+            return proc.communicate(timeout=3)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            return proc.communicate()
+
+    def _run_cancelable_subprocess(self, cmd: list, deadline=None, **kwargs):
         capture_output = kwargs.pop('capture_output', False)
         text = kwargs.pop('text', False)
+        timeout = kwargs.pop('timeout', None)
+        if timeout is not None:
+            timeout_deadline = time.monotonic() + timeout
+            deadline = min(deadline, timeout_deadline) if deadline is not None else timeout_deadline
         if capture_output:
             kwargs.setdefault('stdout', subprocess.PIPE)
             kwargs.setdefault('stderr', subprocess.PIPE)
-        proc = subprocess.Popen(cmd, **kwargs)
+        proc = subprocess.Popen(cmd, text=text, **kwargs)
         try:
-            while proc.poll() is None:
+            while True:
                 if self.is_cancelled():
-                    proc.terminate()
-                    try:
-                        stdout, stderr = proc.communicate(timeout=3)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        stdout, stderr = proc.communicate()
+                    self._stop_subprocess(proc)
                     raise InterruptedError("Stopped")
-                time.sleep(0.25)
-            stdout, stderr = proc.communicate()
-            return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+                remaining = None if deadline is None else deadline - time.monotonic()
+                if remaining is not None and remaining <= 0:
+                    self._stop_subprocess(proc)
+                    raise TimeoutError(f"Command timed out: {cmd[0]}")
+                try:
+                    stdout, stderr = proc.communicate(timeout=min(0.25, remaining) if remaining is not None else 0.25)
+                    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+                except subprocess.TimeoutExpired:
+                    continue
         except Exception:
             if proc.poll() is None:
-                proc.kill()
+                self._stop_subprocess(proc)
             raise
 
     def _run_ffmpeg_subprocess(self, cmd: list, **kwargs):
@@ -176,8 +201,13 @@ class FfmpegMixin(ClipperBase):
         kwargs.setdefault('capture_output', True)
         kwargs.setdefault('text', True)
         kwargs.setdefault('creationflags', SUBPROCESS_FLAGS)
+        deadline = kwargs.pop('deadline', None)
+        timeout = kwargs.pop('timeout', None)
+        if timeout is not None:
+            timeout_deadline = time.monotonic() + timeout
+            deadline = min(deadline, timeout_deadline) if deadline is not None else timeout_deadline
 
-        result = self._run_cancelable_subprocess(cmd, **kwargs)
+        result = self._run_cancelable_subprocess(cmd, deadline=deadline, **kwargs)
         if result.returncode == 0:
             return result
 
@@ -200,8 +230,13 @@ class FfmpegMixin(ClipperBase):
         )
         self._disable_gpu_acceleration_runtime(reason_line[:120])
 
-        retry = self._run_cancelable_subprocess(fallback_cmd, **kwargs)
+        retry = self._run_cancelable_subprocess(fallback_cmd, deadline=deadline, **kwargs)
         return retry
+
+    def _run_probe_subprocess(self, cmd: list, **kwargs):
+        kwargs.setdefault('timeout', self._PROBE_TIMEOUT)
+        with _FFMPEG_PROCESS_LOCK:
+            return self._run_cancelable_subprocess(cmd, **kwargs)
 
     def log_ffmpeg_command(self, cmd: list, description: str = "FFmpeg"):
         """Log FFmpeg command for debugging"""
@@ -210,61 +245,38 @@ class FfmpegMixin(ClipperBase):
         self.log(f"  🎬 {description} Command:")
         self.log(f"     {cmd_str}")
 
-    def _find_system_font_bold(self) -> str:
-        """Find a bold system font across platforms"""
-        if sys.platform == "win32":
-            candidates = [
-                "C:/Windows/Fonts/arialbd.ttf",
-                "C:/Windows/Fonts/arial.ttf",
-                "C:/Windows/Fonts/segoeui.ttf",
-            ]
-        elif sys.platform == "darwin":
-            candidates = [
-                "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-                "/System/Library/Fonts/Supplemental/Arial.ttf",
-                "/Library/Fonts/Arial Bold.ttf",
-                "/Library/Fonts/Arial.ttf",
-                "/System/Library/Fonts/Helvetica.ttc",
-                "/System/Library/Fonts/SFNS.ttf",
-            ]
-        else:
-            candidates = [
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-                "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-                "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
-            ]
-        
-        for font in candidates:
-            if os.path.exists(font):
-                return font
-        return None
-
-    def _get_ffmpeg_font_path(self) -> str:
-        """Get fontfile argument for FFmpeg drawtext filter, platform-aware"""
-        font = self._find_system_font_bold()
-        if font:
-            if sys.platform == "win32":
-                # Escape colon for FFmpeg filter on Windows
-                escaped = font.replace("\\", "/").replace(":", "\\:")
-                return f"fontfile='{escaped}':"
-            else:
-                return f"fontfile='{font}':"
-        # Fallback: let FFmpeg use fontconfig default
-        return "font='Arial':"
-
-    def _run_ffmpeg_progress_once(self, cmd: list, duration: float, progress_callback):
+    def _run_ffmpeg_progress_once(self, cmd: list, duration: float, progress_callback, deadline=None):
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, creationflags=SUBPROCESS_FLAGS)
         output = deque(maxlen=200)
+        lines = queue.Queue()
+
+        def read_output():
+            try:
+                for line in proc.stdout or []:
+                    lines.put(line)
+            finally:
+                lines.put(None)
+
+        reader = threading.Thread(target=read_output, daemon=True)
+        reader.start()
         try:
-            for line in proc.stdout or []:
-                output.append(line)
+            while True:
                 if self.is_cancelled():
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=3)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
+                    self._stop_subprocess(proc)
                     raise InterruptedError("Stopped")
+                remaining = None if deadline is None else deadline - time.monotonic()
+                if remaining is not None and remaining <= 0:
+                    self._stop_subprocess(proc)
+                    raise TimeoutError(f"Command timed out: {cmd[0]}")
+                try:
+                    line = lines.get(timeout=min(0.25, remaining) if remaining is not None else 0.25)
+                except queue.Empty:
+                    if proc.poll() is not None and not reader.is_alive():
+                        break
+                    continue
+                if line is None:
+                    break
+                output.append(line)
                 text = line.strip()
                 value = None
                 if text.startswith("out_time_ms="):
@@ -279,27 +291,31 @@ class FfmpegMixin(ClipperBase):
                         value = int(h) * 3600 + int(m) * 60 + float(s)
                 if value is not None and duration > 0:
                     progress_callback(max(0.0, min(0.99, value / duration)))
-            return subprocess.CompletedProcess(cmd, proc.wait(), "".join(output), "".join(output))
+            proc.wait()
+            combined_output = "".join(output)
+            return subprocess.CompletedProcess(cmd, proc.returncode, combined_output, combined_output)
         except Exception:
             if proc.poll() is None:
-                proc.kill()
+                self._stop_subprocess(proc)
             raise
 
-    def run_ffmpeg_with_progress(self, cmd: list, duration: float, progress_callback):
+    def run_ffmpeg_with_progress(self, cmd: list, duration: float, progress_callback, timeout=None, deadline=None):
         """Run ffmpeg command and parse progress"""
         debug_log(f"Running ffmpeg command: {' '.join(cmd[:5])}...")
         debug_log(f"Expected duration: {duration}s")
-        
-        if "-progress" in cmd and "pipe:1" in cmd:
-            result = self._run_ffmpeg_progress_once(cmd, duration, progress_callback)
-            if result.returncode != 0 and self._is_gpu_encoder_error(result.stderr or result.stdout or ""):
-                fallback_cmd = self._swap_cmd_to_cpu_encoder(cmd)
-                if fallback_cmd != list(cmd):
-                    self._disable_gpu_acceleration_runtime("FFmpeg GPU progress command failed")
-                    result = self._run_ffmpeg_progress_once(fallback_cmd, duration, progress_callback)
-        else:
-            result = self._run_ffmpeg_subprocess(cmd)
-        
+        if timeout is not None:
+            timeout_deadline = time.monotonic() + timeout
+            deadline = min(deadline, timeout_deadline) if deadline is not None else timeout_deadline
+        with _FFMPEG_PROCESS_LOCK:
+            if "-progress" in cmd and "pipe:1" in cmd:
+                result = self._run_ffmpeg_progress_once(cmd, duration, progress_callback, deadline=deadline)
+                if result.returncode != 0 and self._is_gpu_encoder_error(result.stderr or result.stdout or ""):
+                    fallback_cmd = self._swap_cmd_to_cpu_encoder(cmd)
+                    if fallback_cmd != list(cmd):
+                        self._disable_gpu_acceleration_runtime("FFmpeg GPU progress command failed")
+                        result = self._run_ffmpeg_progress_once(fallback_cmd, duration, progress_callback, deadline=deadline)
+            else:
+                result = self._run_ffmpeg_subprocess(cmd, deadline=deadline)
         progress_callback(1.0)
         debug_log(f"FFmpeg completed with return code: {result.returncode}")
         

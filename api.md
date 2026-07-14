@@ -1,0 +1,2 @@
+gemini: AQ.Ab8RN6K8uV7j_6H-m8tcNwpXDYN-m638lDf6pbdz8QaV0cR-bQ
+groq: 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

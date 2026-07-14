@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import secrets
 import threading
@@ -19,6 +20,9 @@ TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 _STATE_TTL = 600
 _states = {}
 _auth_lock = threading.Lock()
+_channel_cache = {}
+_CHANNEL_CACHE_SECONDS = 300
+_LOGGER = logging.getLogger("web_klip.youtube_auth")
 
 
 def _require_user(user_id):
@@ -30,8 +34,11 @@ def _client_config():
     client_id = os.environ.get("YOUTUBE_CLIENT_ID", "").strip()
     client_secret = os.environ.get("YOUTUBE_CLIENT_SECRET", "").strip()
     callback = os.environ.get("YOUTUBE_REDIRECT_URI", "").strip()
-    if not client_id or not client_secret or not callback.startswith("https://"):
-        raise RuntimeError("YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, and HTTPS YOUTUBE_REDIRECT_URI are required")
+    parsed = urllib.parse.urlparse(callback)
+    secure_callback = parsed.scheme == "https"
+    local_callback = parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost"}
+    if not client_id or not client_secret or not (secure_callback or local_callback):
+        raise RuntimeError("YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, dan YOUTUBE_REDIRECT_URI HTTPS atau localhost wajib diisi")
     return client_id, client_secret, callback
 
 
@@ -128,6 +135,10 @@ def delete_youtube_token(user_id):
 
 
 def is_youtube_connected(user_id):
+    user_id = _require_user(user_id)
+    cached = _channel_cache.get(user_id)
+    if cached and cached[0] > time.monotonic():
+        return dict(cached[1])
     try:
         creds = _load_credentials(user_id)
         connected = bool(creds and creds.refresh_token)
@@ -135,12 +146,17 @@ def is_youtube_connected(user_id):
         if connected:
             try:
                 from googleapiclient.discovery import build
-                response = build("youtube", "v3", credentials=get_youtube_credentials(user_id), cache_discovery=False).channels().list(part="snippet", mine=True).execute()
+                youtube = build("youtube", "v3", credentials=get_youtube_credentials(user_id), cache_discovery=False)
+                if hasattr(youtube, "_http"):
+                    youtube._http.timeout = 15
+                response = youtube.channels().list(part="snippet", mine=True).execute(num_retries=1)
                 channel = next(iter(response.get("items", [])), {})
                 result["channel_id"] = channel.get("id", "")
                 result["channel_title"] = channel.get("snippet", {}).get("title", "")
-            except Exception:
-                pass
+            except Exception as exc:
+                _LOGGER.warning("youtube channel lookup failed user=%s error=%s", user_id[:12], type(exc).__name__)
+        _channel_cache[user_id] = (time.monotonic() + _CHANNEL_CACHE_SECONDS, dict(result))
         return result
-    except Exception:
+    except Exception as exc:
+        _LOGGER.warning("youtube connection check failed user=%s error=%s", user_id[:12], type(exc).__name__)
         return {"connected": False}

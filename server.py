@@ -1,5 +1,8 @@
 import base64
+import hashlib
+import hmac
 import json
+import logging
 import mimetypes
 import os
 import subprocess
@@ -25,12 +28,15 @@ if sys.version_info < (3, 11) and os.name == "nt" and os.environ.get("KLIPKLOP_P
 
 from job_manager import WebJobManager
 from social_auth import delete_youtube_token, finish_youtube_oauth, is_youtube_connected, start_youtube_oauth, check_youtube_oauth_status
-from youtube_uploader import delete_youtube_video, list_existing_youtube_videos, upload_youtube_video
+from youtube_uploader import delete_youtube_video, list_existing_youtube_videos
 
 
 MANAGER = WebJobManager()
 SESSION_COOKIE = "klipklop_session"
 SESSION_TTL = 86400
+_LOCAL_USER_ID = "00000000-0000-4000-8000-000000000001"
+_LOCAL_PASSWORD = os.environ.get("KLIPKLOP_LOCAL_PASSWORD", "admin123")
+_SCHEDULER_LOGGER = logging.getLogger("web_klip.scheduler")
 
 
 def _supabase_config():
@@ -41,6 +47,8 @@ def _supabase_config():
 
 
 _USER_MANAGERS = {}
+_USER_MANAGER_LAST_USED = {}
+_USER_MANAGER_IDLE_SECONDS = 1800
 _USER_MANAGERS_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS = {}
 _LOGIN_LOCK = threading.Lock()
@@ -48,19 +56,39 @@ _LOGIN_LOCK = threading.Lock()
 
 def _run_youtube_scheduler():
     while True:
+        now = time.monotonic()
         with _USER_MANAGERS_LOCK:
-            for folder in (ROOT / "data").iterdir() if (ROOT / "data").exists() else []:
-                if folder.is_dir():
-                    try:
-                        _USER_MANAGERS.setdefault(folder.name, WebJobManager(folder, user_id=folder.name))
-                    except ValueError:
-                        continue
-            managers = list(_USER_MANAGERS.values())
+            stale_users = [user_id for user_id, last_used in _USER_MANAGER_LAST_USED.items() if now - last_used > _USER_MANAGER_IDLE_SECONDS and not (_USER_MANAGERS[user_id].thread and _USER_MANAGERS[user_id].thread.is_alive())]
+            for user_id in stale_users:
+                _USER_MANAGERS.pop(user_id, None)
+                _USER_MANAGER_LAST_USED.pop(user_id, None)
+            cached = dict(_USER_MANAGERS)
+        managers = list(cached.values())
+        for folder in (ROOT / "data").iterdir() if (ROOT / "data").exists() else []:
+            if not folder.is_dir() or folder.name in cached:
+                continue
+            needs_scheduler = False
+            for meta_path in folder.glob("output/*/**/data.json"):
+                try:
+                    metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if metadata.get("status") in {"scheduled", "uploading", "rendering", "render_queued"} or metadata.get("pending_youtube_upload"):
+                    needs_scheduler = True
+                    break
+            if not needs_scheduler:
+                continue
+            try:
+                managers.append(WebJobManager(folder, user_id=folder.name))
+            except ValueError:
+                continue
         for manager in managers:
             try:
                 manager.process_due_youtube_uploads()
-            except Exception:
-                pass
+            except Exception as exc:
+                user_label = (manager.user_id or "local")[:12]
+                safe_error = manager._public_text(type(exc).__name__)[:80]
+                _SCHEDULER_LOGGER.error("scheduler failed user=%s error=%s", user_label, safe_error)
         time.sleep(60)
 
 
@@ -97,13 +125,17 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._json(self._manager().status())
         elif parsed.path == "/api/settings":
             self._json(self._manager().get_settings())
-        elif parsed.path == "/api/outputs":
-            self._json(self._manager().list_outputs())
         elif parsed.path == "/api/clips":
             self._json(self._manager().list_clips())
         elif parsed.path == "/api/clip":
             result = self._manager().get_clip(parse_qs(parsed.query).get("clip_id", [""])[0])
             self._json(result, 404 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/clip/preview/status":
+            params = parse_qs(parsed.query)
+            result = self._manager().preview_status(params.get("clip_id", [""])[0], params.get("preview_id", [""])[0])
+            self._json(result, 404 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/clip/media":
+            self._serve_clip_media(parsed.query)
         elif parsed.path == "/api/download":
             self._download(parsed.query)
         elif parsed.path == "/api/stream":
@@ -146,7 +178,7 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             payload, err = self._payload(max_size=65536)  # 64KB
         elif parsed.path in {"/api/cookies", "/api/watermark/upload"}:
             payload, err = self._payload(max_size=10485760)  # 10MB
-        elif parsed.path in ["/api/start", "/api/delete", "/api/save"]:
+        elif parsed.path == "/api/start":
             payload, err = self._payload(max_size=16384)  # 16KB
         else:
             payload, err = self._payload(max_size=65536)  # 64KB default
@@ -169,20 +201,35 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/clip/preview":
             result = self._manager().render_clip(payload, preview=True)
             self._json(result, 400 if result.get("status") == "error" else 200)
-        elif parsed.path == "/api/clip/render":
+        elif parsed.path == "/api/clip/preview/cancel":
+            result = self._manager().cancel_preview(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
+        elif parsed.path in {"/api/clip/render", "/api/clip/render/retry"}:
             result = self._manager().render_clip(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/clip/defaults":
             result = self._manager().save_clip_defaults(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/clip/schedule":
+            result = self._manager().schedule_clip_upload(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/clip/schedule/cancel":
+            result = self._manager().cancel_clip_upload(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/clip/upload/retry":
+            result = self._manager().retry_clip_upload(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/clip/upload":
+            result = self._manager().upload_clip_now(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/clip/edit":
+            result = self._manager().edit_clip_again(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/clip/delete":
+            result = self._manager().delete_clip(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/stop":
             self._json(self._manager().stop())
-        elif parsed.path == "/api/delete":
-            result = self._manager().delete_output(payload)
-            self._json(result, 400 if result.get("status") == "error" else 200)
-        elif parsed.path == "/api/save":
-            result = self._manager().save_output(payload)
-            self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path in {"/api/logs/clear", "/api/clear-logs", "/api/clear_logs"}:
             self._json(self._manager().clear_logs())
         elif parsed.path == "/api/activity":
@@ -205,14 +252,6 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/social/youtube/disconnect":
             delete_youtube_token(self._current_user())
             self._json({"status": "ok"})
-        elif parsed.path == "/api/social/youtube/upload":
-            self._upload_youtube(payload)
-        elif parsed.path == "/api/social/youtube/schedule":
-            result = self._manager().schedule_youtube_upload(payload)
-            self._json(result, 400 if result.get("status") == "error" else 200)
-        elif parsed.path == "/api/social/youtube/schedule/cancel":
-            result = self._manager().cancel_youtube_upload(payload)
-            self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/social/youtube/check":
             try:
                 self._json({"status": "ok", "existing": list_existing_youtube_videos(payload.get("video_ids") or [], self._current_user())})
@@ -268,7 +307,7 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         cfg_mgr = self._manager()._config()
         cfg_mgr.config.setdefault("watermark", {})["image_path"] = str(target.resolve())
         cfg_mgr.save()
-        self._json({"status": "ok", "path": str(target), "url": f"/api/download?path={quote(str(target))}"})
+        self._json({"status": "ok", "asset": "watermark", "image_path": str(target.resolve())})
 
     def _access_token(self):
         for part in self.headers.get("Cookie", "").split(";"):
@@ -282,8 +321,12 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         if cached is not None:
             return cached
         token = self._access_token()
-        url, anon_key, _ = _supabase_config()
-        if not token or not url or not anon_key:
+        url, anon_key, secret = _supabase_config()
+        if not url or "YOUR_" in url or not anon_key or "YOUR_" in anon_key:
+            expected = hmac.new((secret or "klipklop-local-session").encode(), _LOCAL_USER_ID.encode(), hashlib.sha256).hexdigest()
+            self._user_id = _LOCAL_USER_ID if token and hmac.compare_digest(token, expected) else ""
+            return self._user_id
+        if not token:
             self._user_id = ""
             return ""
         request = Request(f"{url}/auth/v1/user", headers={"apikey": anon_key, "Authorization": f"Bearer {token}"})
@@ -300,7 +343,10 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         if not user_id:
             raise PermissionError("Unauthorized")
         with _USER_MANAGERS_LOCK:
-            return _USER_MANAGERS.setdefault(user_id, WebJobManager(ROOT / "data" / user_id, user_id=user_id))
+            local_mode = user_id == _LOCAL_USER_ID and not _supabase_config()[0]
+            manager = _USER_MANAGERS.setdefault(user_id, WebJobManager(ROOT / "data" / user_id, user_id=user_id, local_mode=local_mode))
+            _USER_MANAGER_LAST_USED[user_id] = time.monotonic()
+            return manager
 
     def _origin_allowed(self):
         origin = self.headers.get("Origin", "").rstrip("/")
@@ -326,14 +372,18 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         if err is not None:
             self._json(err[0], err[1])
             return
-        url, anon_key, _ = _supabase_config()
-        if not url or "YOUR_" in url or not anon_key or "YOUR_" in anon_key:
-            self._json({"status": "error", "message": "Supabase belum dikonfigurasi"}, 500)
-            return
+        url, anon_key, secret = _supabase_config()
         email = str(payload.get("email", "")).strip()
         password = str(payload.get("password", ""))
         if not email or not password:
             self._json({"status": "error", "message": "Email dan password wajib diisi"}, 400)
+            return
+        if not url or "YOUR_" in url or not anon_key or "YOUR_" in anon_key:
+            if not hmac.compare_digest(password, _LOCAL_PASSWORD):
+                self._json({"status": "error", "message": "Password lokal salah"}, 401)
+                return
+            token = hmac.new((secret or "klipklop-local-session").encode(), _LOCAL_USER_ID.encode(), hashlib.sha256).hexdigest()
+            self._send_session(token)
             return
         req = Request(
             f"{url}/auth/v1/token?grant_type=password",
@@ -359,6 +409,9 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         if not token:
             self._json({"status": "error", "message": "Supabase did not return an access token"}, 401)
             return
+        self._send_session(token)
+
+    def _send_session(self, token):
         self.send_response(200)
         self._add_security_headers()
         secure = "; Secure" if _public_mode() else ""
@@ -410,22 +463,6 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._json({"status": "connected"})
         except Exception as exc:
             self._json({"status": "error", "message": str(exc)}, 400)
-
-    def _upload_youtube(self, payload):
-        target = Path(str(payload.get("path", ""))).resolve()
-        output_root = Path(self._manager().get_settings()["output_dir"] or str(self._manager().output_dir)).resolve()
-        if not target.exists() or output_root not in target.parents or target.suffix.lower() not in {".mp4", ".webm", ".mkv", ".mov", ".avi"}:
-            self._json({"status": "error", "message": "File video tidak ditemukan"}, 400)
-            return
-        title = str(payload.get("title") or target.stem).strip()
-        description = str(payload.get("description") or "").strip()
-        privacy = str(payload.get("privacy") or "private").strip()
-        try:
-            result = upload_youtube_video(target, title, description, privacy, self._current_user())
-            self._manager().log_activity({"action": "youtube_upload", "detail": result.get("video_id", target.name)})
-            self._json({"status": "ok", **result})
-        except Exception as e:
-            self._json({"status": "error", "message": str(e)}, 400)
 
     def log_message(self, fmt, *args):
         return
@@ -541,6 +578,18 @@ class WebKlipHandler(BaseHTTPRequestHandler):
 
         self.end_headers()
         self.wfile.write(raw)
+
+    def _serve_clip_media(self, query):
+        params = parse_qs(query, keep_blank_values=True)
+        target = self._manager().clip_artifact(params.get("clip_id", [""])[0], params.get("artifact", [""])[0], params.get("preview_id", [""])[0])
+        if not target:
+            self._json({"status": "error", "message": "Artifact klip tidak ditemukan"}, 404)
+            return
+        encoded = f"path={quote(str(target))}"
+        if params.get("download", [""])[0] == "1":
+            self._download(encoded)
+        else:
+            self._stream_video(encoded)
 
     def _stream_video(self, query):
         """Stream video inline with Range request support for browser playback."""

@@ -1,116 +1,263 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
-import { api } from '@/lib/api';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ClipEditorModal, type EditorClip } from '@/components/clip-editor/ClipEditorModal';
+import { WorkflowPanel, type WorkflowClip } from '@/components/clip-workflow/WorkflowPanel';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { apiGet, apiPost } from '@/lib/api';
+import { cloneSettings, mergeSettings, validateSettings, type ClipSettings, type SettingValue } from '@/lib/clip-settings';
 
-type Clip = {
-  clip_id: string;
-  status: string;
-  title: string;
-  description: string;
-  duration_seconds?: number;
-  virality_score?: number;
-  stream_url: string;
-  thumbnail_url?: string;
-  render_error?: string;
-  render_revision?: number;
-  youtube_upload?: { status: string; scheduled_at?: string; url?: string; error?: string } | null;
-};
+type ClipsResponse = { status: string; clips: WorkflowClip[] };
+type ClipResponse = { status: string; clip: WorkflowClip & EditorClip & { render_settings?: Partial<ClipSettings>; draft_settings?: Partial<ClipSettings>; hook_text?: string }; defaults: ClipSettings };
+type ActionResponse = { status: string; message?: string; stream_url?: string; preview_id?: string };
+type PreviewStatus = { state: 'queued' | 'rendering' | 'ready' | 'cancelled' | 'error'; stage: string; progress: number; elapsed_seconds: number; stream_url?: string; error?: string };
+type DeleteTarget = WorkflowClip | null;
+type GenerationClip = WorkflowClip & { generation_id?: string };
 
-const panelStates: Record<string, string[]> = {
-  queue: ['needs_edit', 'preview_rendering'],
-  processing: ['render_queued', 'rendering', 'render_error'],
-  schedule: ['ready_to_schedule', 'scheduled', 'uploading'],
-  result: ['uploaded', 'upload_error'],
-};
+export function defaultWibScheduleTime(now = new Date()): string {
+  const target = new Date(now.getTime() + 15 * 60_000);
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(target).map((part) => [part.type, part.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
 
 export default function Preview() {
   const navigate = useNavigate();
-  const [clips, setClips] = useState<Clip[]>([]);
-  const [selected, setSelected] = useState<Clip | null>(null);
-  const [draft, setDraft] = useState<any>(null);
+  const [searchParams] = useSearchParams();
+  const requestedGenerationId = searchParams.get('generation_id') || '';
+  const [clips, setClips] = useState<GenerationClip[]>([]);
+  const [selected, setSelected] = useState<ClipResponse['clip'] | null>(null);
+  const [settings, setSettings] = useState<ClipSettings | null>(null);
+  const [defaults, setDefaults] = useState<ClipSettings | null>(null);
+  const [hookText, setHookText] = useState('');
   const [previewUrl, setPreviewUrl] = useState('');
-  const [scheduleAt, setScheduleAt] = useState('');
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewState, setPreviewState] = useState('');
+  const [previewProgress, setPreviewProgress] = useState(0);
+  const [previewElapsed, setPreviewElapsed] = useState(0);
+  const [previewStale, setPreviewStale] = useState(false);
+  const previewId = useRef('');
   const [busy, setBusy] = useState('');
-  const [error, setError] = useState('');
+  const [pageError, setPageError] = useState('');
+  const [editorError, setEditorError] = useState('');
+  const [scheduleAt, setScheduleAt] = useState<Record<string, string>>({});
+  const [uploadText, setUploadText] = useState<Record<string, { title: string; description: string }>>({});
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
+  const previousActive = useRef(false);
+  const loadSequence = useRef(0);
 
   const load = useCallback(async () => {
+    const sequence = ++loadSequence.current;
     try {
-      const response = await api('/api/clips');
-      setClips(response.clips || []);
-      setSelected(current => (current ? (response.clips || []).find((clip: Clip) => clip.clip_id === current.clip_id) || null : null));
-    } catch (e: any) {
-      setError(e.message || 'Gagal memuat klip');
+      const data = await apiGet<ClipsResponse>('/api/clips');
+      if (sequence !== loadSequence.current) return;
+      setClips(data.clips || []);
+      setUploadText((current) => {
+        const next = { ...current };
+        data.clips.forEach((clip) => { if (!next[clip.clip_id]) next[clip.clip_id] = { title: clip.youtube_upload?.title || clip.title, description: clip.youtube_upload?.description || clip.description }; });
+        return next;
+      });
+      setScheduleAt((current) => {
+        const next = { ...current };
+        data.clips.forEach((clip) => {
+          if (clip.status === 'ready_to_schedule' && !next[clip.clip_id]) next[clip.clip_id] = defaultWibScheduleTime();
+        });
+        return next;
+      });
+      setPageError('');
+    } catch (requestError) {
+      setPageError(messageOf(requestError, 'Gagal memuat klip.'));
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => {
-    const active = clips.some(clip => panelStates.processing.includes(clip.status) || clip.status === 'uploading');
-    if (!active) return;
-    const timer = window.setInterval(load, 2000);
-    return () => window.clearInterval(timer);
-  }, [clips, load]);
+  const active = clips.some((clip) => ['render_queued', 'rendering', 'scheduled', 'uploading'].includes(clip.status));
 
-  const openEditor = async (clip: Clip) => {
-    setBusy('load');
-    setError('');
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!active) {
+      if (previousActive.current) void load();
+      previousActive.current = false;
+      return;
+    }
+    previousActive.current = true;
+    const timer = window.setInterval(() => void load(), 2000);
+    return () => window.clearInterval(timer);
+  }, [active, load]);
+
+  const run = async <T extends ActionResponse>(path: string, body: object, fallback: string): Promise<T | null> => {
+    setBusy(path);
+    setPageError('');
     try {
-      const response = await api(`/api/clip?clip_id=${encodeURIComponent(clip.clip_id)}`);
-      setSelected({ ...clip, ...response.clip });
-      setDraft(response.clip.render_settings || response.defaults || {});
-      setPreviewUrl('');
-    } catch (e: any) {
-      setError(e.message || 'Gagal membuka editor');
+      return await apiPost<T, object>(path, body);
+    } catch (requestError) {
+      setPageError(messageOf(requestError, fallback));
+      return null;
     } finally {
       setBusy('');
     }
   };
 
-  const update = (section: string, key: string, value: any) => setDraft((current: any) => ({ ...current, [section]: { ...(current?.[section] || {}), [key]: value } }));
-  const request = async (path: string, body: any) => {
-    if (!selected) return null;
-    setBusy(path);
-    setError('');
-    try { return await api(path, { method: 'POST', body: JSON.stringify({ clip_id: selected.clip_id, ...body }) }); }
-    catch (e: any) { setError(e.message || 'Proses gagal'); return null; }
-    finally { setBusy(''); }
-  };
-  const renderPreview = async () => {
-    const response = await request('/api/clip/preview', { settings: draft });
-    if (response?.stream_url) setPreviewUrl(response.stream_url);
-  };
-  const renderFinal = async () => { if (await request('/api/clip/render', { settings: draft })) { setSelected(null); await load(); } };
-  const saveDefaults = async () => { await request('/api/clip/defaults', { settings: draft }); };
-  const schedule = async (clip: Clip) => {
-    if (!scheduleAt) return;
-    setBusy('schedule');
+  const openEditor = async (clip: WorkflowClip) => {
+    setBusy('editor');
+    setPageError('');
     try {
-      await api('/api/social/youtube/schedule', { method: 'POST', body: JSON.stringify({ path: clip.stream_url.split('path=')[1]?.split('&')[0] ? decodeURIComponent(clip.stream_url.split('path=')[1].split('&')[0]) : '', title: clip.title, description: clip.description, scheduled_at: scheduleAt }) });
-      await load();
-    } catch (e: any) { setError(e.message || 'Gagal menjadwalkan'); }
-    finally { setBusy(''); }
+      const data = await apiGet<ClipResponse>(`/api/clip?clip_id=${encodeURIComponent(clip.clip_id)}`);
+      const snapshot = data.clip.render_settings || data.clip.draft_settings;
+      const merged = mergeSettings(data.defaults, snapshot);
+      if (data.clip.subtitle_capability === 'unavailable') merged.subtitle.enabled = false;
+      const snapshotBlur = data.clip.draft_settings?.blur_background;
+      if (snapshotBlur) merged.blur_background = { ...merged.blur_background, ...snapshotBlur };
+      setSelected(data.clip);
+      setDefaults(cloneSettings(data.defaults));
+      setSettings(merged);
+      setHookText(data.clip.hook_text || '');
+      setPreviewUrl('');
+      setPreviewStale(false);
+      setPreviewState('');
+      previewId.current = '';
+      setEditorError('');
+    } catch (requestError) {
+      setPageError(messageOf(requestError, 'Editor gagal dibuka.'));
+    } finally {
+      setBusy('');
+    }
   };
 
-  const panels = useMemo(() => Object.fromEntries(Object.entries(panelStates).map(([key, states]) => [key, clips.filter(clip => states.includes(clip.status))])), [clips]);
-  const label = (clip: Clip) => `${clip.title} · ${Math.round(clip.duration_seconds || 0)}s`;
+  const changeSetting = (section: keyof ClipSettings, key: string, value: SettingValue) => {
+    setSettings((current) => current ? { ...current, [section]: { ...(typeof current[section] === 'object' ? current[section] : {}), [key]: value } } : current);
+    setEditorError('');
+    setPreviewStale(true);
+  };
 
-  return <main className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-10">
-    <header><p className="text-sm font-medium uppercase tracking-widest text-primary">Workflow Klip</p><h1 className="font-display text-3xl font-bold">Preview & Render</h1><p className="text-muted">Preview FFmpeg dan final render memakai renderer yang sama.</p></header>
-    {error && <p className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
-    <section className="grid gap-4 lg:grid-cols-4">
-      <Panel title="Queue" subtitle="Klip siap diedit" clips={panels.queue} action={clip => <button onClick={() => openEditor(clip)} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground">Edit</button>} label={label} />
-      <Panel title="Proses" subtitle="Final render" clips={panels.processing} action={clip => <span className="text-xs text-muted">{clip.status === 'render_error' ? clip.render_error || 'Gagal' : 'Memproses...'}</span>} label={label} />
-      <Panel title="Set Waktu" subtitle="Final siap upload" clips={panels.schedule} action={clip => clip.status === 'ready_to_schedule' ? <div className="flex flex-col gap-2"><input type="datetime-local" value={scheduleAt} onChange={e => setScheduleAt(e.target.value)} className="rounded-lg border border-field bg-secondary p-2 text-xs" /><button disabled={!scheduleAt || !!busy} onClick={() => schedule(clip)} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground">Jadwalkan WIB</button></div> : <span className="text-xs text-primary">{clip.status === 'uploading' ? 'Uploading...' : 'Terjadwal'}</span>} label={label} />
-      <Panel title="Hasil" subtitle="Upload berhasil/gagal" clips={panels.result} action={clip => clip.youtube_upload?.url ? <a className="text-xs text-primary hover:underline" href={clip.youtube_upload.url} target="_blank" rel="noreferrer">Buka YouTube</a> : <span className="text-xs text-destructive">{clip.youtube_upload?.error || 'Gagal upload'}</span>} label={label} />
-    </section>
-    {selected && draft && createPortal(<div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Edit klip"><button type="button" onClick={() => setSelected(null)} className="absolute inset-0 bg-background/80" aria-label="Tutup editor" /><section className="relative z-10 grid max-h-[90dvh] w-full max-w-4xl gap-6 overflow-y-auto rounded-2xl border border-line bg-card p-6 lg:grid-cols-[300px_1fr]"><button type="button" onClick={() => setSelected(null)} className="absolute right-4 top-4 rounded-full border border-line px-3 py-1 text-sm text-muted">Tutup</button><div><video controls className="aspect-[9/16] w-full rounded-xl bg-black object-contain" src={previewUrl || selected.stream_url} /></div><div className="flex flex-col gap-5 pt-8 lg:pt-0"><div><h2 className="font-display text-xl font-bold">{selected.title}</h2><p className="text-sm text-muted">Atur klip ini. Perubahan tidak mengubah default akun kecuali disimpan.</p></div><div className="grid gap-4 md:grid-cols-2"><EditorToggle label="Hook" value={draft.hook_style?.enabled} onChange={value => update('hook_style', 'enabled', value)} /><EditorToggle label="Subtitle" value={draft.subtitle?.enabled} onChange={value => update('subtitle', 'enabled', value)} /><EditorToggle label="Watermark" value={draft.watermark?.enabled} onChange={value => update('watermark', 'enabled', value)} /><EditorToggle label="Source credit" value={draft.credit_watermark?.enabled} onChange={value => update('credit_watermark', 'enabled', value)} /><EditorNumber label="Posisi Hook Y" value={draft.hook_style?.position_y ?? .2} onChange={value => update('hook_style', 'position_y', value)} /><EditorNumber label="Posisi Subtitle Y" value={draft.subtitle?.position_y ?? .85} onChange={value => update('subtitle', 'position_y', value)} /><EditorNumber label="Ukuran Hook" value={draft.hook_style?.font_size ?? .054} step="0.001" onChange={value => update('hook_style', 'font_size', value)} /><EditorNumber label="Ukuran Subtitle" value={draft.subtitle?.size ?? .04} step="0.001" onChange={value => update('subtitle', 'size', value)} /></div><div className="flex flex-wrap gap-3"><button disabled={!!busy} onClick={renderPreview} className="rounded-xl border border-line px-4 py-2 text-sm font-bold disabled:opacity-50">{busy === '/api/clip/preview' ? 'Merender...' : 'Render Preview'}</button><button disabled={!!busy} onClick={saveDefaults} className="rounded-xl border border-line px-4 py-2 text-sm font-bold disabled:opacity-50">Simpan sebagai default</button><button disabled={!!busy} onClick={renderFinal} className="rounded-xl bg-primary px-4 py-2 text-sm font-bold text-primary-foreground disabled:opacity-50">Lanjut ke tahap berikutnya</button></div></div></section></div>, document.body)}
-    {!selected && clips.length === 0 && <section className="rounded-2xl border border-dashed border-line p-12 text-center"><p className="font-bold">Belum ada klip.</p><button onClick={() => navigate('/')} className="mt-3 text-sm font-bold text-primary">Kembali ke Dashboard</button></section>}
+  const resetSection = (section: keyof ClipSettings) => {
+    if (!defaults) return;
+    setSettings((current) => current ? { ...current, [section]: typeof defaults[section] === 'object' ? { ...defaults[section] } : defaults[section] } : current);
+    setEditorError('');
+    setPreviewStale(true);
+  };
+
+  const renderPreview = async () => {
+    if (!selected || !settings) return;
+    setPreviewBusy(true);
+    setPreviewProgress(0);
+    setPreviewElapsed(0);
+    setPreviewState('Menunggu render');
+    setPreviewStale(false);
+    setEditorError('');
+    try {
+      const data = await apiPost<ActionResponse, object>('/api/clip/preview', { clip_id: selected.clip_id, settings, hook_text: hookText });
+      if (data.stream_url) { setPreviewUrl(data.stream_url); setPreviewBusy(false); return; }
+      if (!data.preview_id) throw new Error('Preview ID tidak tersedia');
+      const activeId = data.preview_id;
+      previewId.current = activeId;
+      const poll = async (): Promise<void> => {
+        const status = await apiGet<PreviewStatus>(`/api/clip/preview/status?clip_id=${encodeURIComponent(selected.clip_id)}&preview_id=${encodeURIComponent(activeId)}`);
+        if (previewId.current !== activeId) return;
+        setPreviewState(status.stage);
+        setPreviewProgress(status.progress);
+        setPreviewElapsed(status.elapsed_seconds);
+        if (status.state === 'ready') { setPreviewUrl(status.stream_url || ''); setPreviewBusy(false); return; }
+        if (status.state === 'cancelled') { setPreviewBusy(false); setPreviewStale(true); return; }
+        if (status.state === 'error') throw new Error(status.error || 'Preview gagal.');
+        window.setTimeout(() => void poll().catch((error) => { if (previewId.current === activeId) { setEditorError(messageOf(error, 'Preview gagal.')); setPreviewBusy(false); } }), 1000);
+      };
+      await poll();
+    } catch (requestError) {
+      setEditorError(messageOf(requestError, 'Preview gagal. Periksa pengaturan lalu coba lagi.'));
+      setPreviewBusy(false);
+    }
+  };
+
+  const cancelPreview = async () => {
+    if (!selected || !previewId.current) return;
+    try { await apiPost('/api/clip/preview/cancel', { clip_id: selected.clip_id, preview_id: previewId.current }); } catch (error) { setEditorError(messageOf(error, 'Preview tidak dapat dibatalkan.')); }
+  };
+
+  const saveDefaults = async () => {
+    if (!selected || !settings) return;
+    setBusy('defaults');
+    setEditorError('');
+    try {
+      await apiPost<ActionResponse, object>('/api/clip/defaults', { clip_id: selected.clip_id, settings });
+      setDefaults(cloneSettings(settings));
+    } catch (requestError) {
+      setEditorError(messageOf(requestError, 'Default gagal disimpan.'));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const renderFinal = async () => {
+    if (!selected || !settings) return;
+    setBusy('render');
+    setEditorError('');
+    try {
+      await apiPost<ActionResponse, object>('/api/clip/render', { clip_id: selected.clip_id, settings, hook_text: hookText });
+      setSelected(null);
+      setSettings(null);
+      await load();
+    } catch (requestError) {
+      setEditorError(messageOf(requestError, 'Render final gagal dimulai.'));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const uploadNow = async (clip: WorkflowClip) => {
+    const text = uploadText[clip.clip_id] || { title: clip.title, description: clip.description };
+    if (await run('/api/clip/upload', { clip_id: clip.clip_id, ...text }, 'Upload gagal.')) await load();
+  };
+
+  const scheduleClip = async (clip: WorkflowClip) => {
+    const scheduledAt = scheduleAt[clip.clip_id];
+    const text = uploadText[clip.clip_id] || { title: clip.title, description: clip.description };
+    if (!scheduledAt) return;
+    if (await run('/api/clip/schedule', { clip_id: clip.clip_id, scheduled_at: scheduledAt, ...text }, 'Jadwal gagal disimpan.')) {
+      setScheduleAt((current) => ({ ...current, [clip.clip_id]: '' }));
+      await load();
+    }
+  };
+
+  const actionAndLoad = async (path: string, clip: WorkflowClip, fallback: string, body: object = {}) => {
+    if (await run(path, { clip_id: clip.clip_id, ...body }, fallback)) await load();
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    const target = deleteTarget;
+    if (await run('/api/clip/delete', { clip_id: target.clip_id }, 'Klip gagal dihapus.')) {
+      setDeleteTarget(null);
+      await load();
+    }
+  };
+
+  const invalid = useMemo(() => settings ? validateSettings(settings).length > 0 : true, [settings]);
+  const prioritizedClips = useMemo(() => {
+    if (!requestedGenerationId) return clips;
+    const newestQueue = clips.filter((clip) => clip.status === 'needs_edit' && (clip.generation_id || clip.clip_id) === requestedGenerationId);
+    const otherWorkflow = clips.filter((clip) => clip.status !== 'needs_edit');
+    return [...newestQueue, ...otherWorkflow];
+  }, [clips, requestedGenerationId]);
+
+  return <main className="mx-auto flex w-full max-w-[90rem] flex-col gap-6 px-4 py-8 sm:px-6 sm:py-10">
+    <header className="flex flex-col gap-2">
+      <p className="text-sm font-bold text-primary">Workflow Klip</p>
+      <h1 className="font-display text-3xl font-bold tracking-tight">Preview & Render</h1>
+      <p className="max-w-2xl text-sm leading-relaxed text-muted">Edit draft, pantau render final, lalu upload atau jadwalkan ke YouTube.</p>
+    </header>
+    {pageError && <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm font-medium text-destructive">{pageError}</div>}
+    <WorkflowPanel clips={prioritizedClips} busy={busy} scheduleAt={scheduleAt} uploadText={uploadText} onScheduleAtChange={(clipId, value) => setScheduleAt((current) => ({ ...current, [clipId]: value }))} onUploadTextChange={(clipId, value) => setUploadText((current) => ({ ...current, [clipId]: value }))} onEdit={openEditor} onDelete={setDeleteTarget} onUpload={uploadNow} onSchedule={scheduleClip} onCancelSchedule={(clip) => actionAndLoad('/api/clip/schedule/cancel', clip, 'Jadwal gagal dibatalkan.')} onEditAgain={(clip) => actionAndLoad('/api/clip/edit', clip, 'Klip gagal dikembalikan ke editor.')} onRetryRender={(clip) => actionAndLoad('/api/clip/render/retry', clip, 'Render gagal dimulai ulang.')} onRetryUpload={(clip) => actionAndLoad('/api/clip/upload/retry', clip, 'Upload gagal diulang.', { upload_now: true })} onBackToSchedule={(clip) => actionAndLoad('/api/clip/upload/retry', clip, 'Klip gagal dikembalikan ke Set Waktu.')} onDashboard={() => navigate('/')} />
+    {selected && settings && defaults && <ClipEditorModal clip={selected} settings={settings} previewUrl={previewUrl} previewBusy={previewBusy} actionBusy={Boolean(busy)} error={editorError} invalid={invalid} hookText={hookText} backgroundVisible={settings.screen_size !== '16:9'} previewState={previewState} previewProgress={previewProgress} previewElapsed={previewElapsed} previewStale={previewStale} onHookTextChange={(value) => { setHookText(value); setPreviewStale(true); }} onClose={() => { setSelected(null); setSettings(null); setEditorError(''); }} onChange={changeSetting} onReset={resetSection} onPreview={renderPreview} onCancelPreview={cancelPreview} onSaveDefaults={saveDefaults} onRender={renderFinal} />}
+    <ConfirmModal isOpen={Boolean(deleteTarget)} title="Hapus klip lokal?" message={deleteTarget ? `File lokal “${deleteTarget.title}” akan dihapus permanen. Video YouTube yang sudah tayang tidak ikut dihapus.` : ''} onConfirm={confirmDelete} onCancel={() => setDeleteTarget(null)} busy={busy === '/api/clip/delete'} />
   </main>;
 }
 
-function Panel({ title, subtitle, clips, action, label }: { title: string; subtitle: string; clips: Clip[]; action: (clip: Clip) => ReactNode; label: (clip: Clip) => string }) {
-  return <section className="min-h-64 rounded-2xl border border-line bg-card p-4"><h2 className="font-display text-lg font-bold">{title}</h2><p className="mb-4 text-xs text-muted">{subtitle}</p><div className="flex flex-col gap-3">{clips.length ? clips.map(clip => <article key={clip.clip_id} className="rounded-xl border border-line bg-secondary/50 p-3"><p className="line-clamp-2 text-sm font-bold">{label(clip)}</p><div className="mt-3">{action(clip)}</div></article>) : <p className="py-8 text-center text-xs text-muted">Kosong</p>}</div></section>;
-}
-function EditorToggle({ label, value, onChange }: { label: string; value: boolean; onChange: (value: boolean) => void }) { return <label className="flex items-center justify-between rounded-xl border border-line p-3 text-sm font-medium">{label}<input type="checkbox" checked={!!value} onChange={e => onChange(e.target.checked)} /></label>; }
-function EditorNumber({ label, value, step = '0.01', onChange }: { label: string; value: number; step?: string; onChange: (value: number) => void }) { return <label className="flex flex-col gap-1 rounded-xl border border-line p-3 text-sm font-medium">{label}<input type="number" min="0" max="1" step={step} value={value} onChange={e => onChange(Number(e.target.value))} className="rounded-lg border border-field bg-secondary p-2" /></label>; }
+function messageOf(error: unknown, fallback: string) { return error instanceof Error && error.message ? error.message : fallback; }

@@ -46,6 +46,48 @@ if _ffmpeg_path and Path(_ffmpeg_path).exists():
     debug_log(f"FFmpeg added to PATH: {_ffmpeg_dir}")
 
 
+class LocalClipRenderer(FfmpegMixin, PortraitMixin, ExportMixin):
+    def __init__(
+        self,
+        ffmpeg_path: str = "ffmpeg",
+        output_dir: str = "output",
+        watermark_settings: dict = None,
+        credit_watermark_settings: dict = None,
+        hook_style_settings: dict = None,
+        subtitle_style: dict = None,
+        video_quality: str = "720",
+        landscape_blur: bool = False,
+        screen_size: str = "9:16",
+        progress_callback=None,
+        cancel_check=None,
+        log_callback=None,
+    ):
+        self.ffmpeg_path = ffmpeg_path
+        self.output_dir = Path(output_dir)
+        self.watermark_settings = watermark_settings or {"enabled": False}
+        self.credit_watermark_settings = credit_watermark_settings or {"enabled": False}
+        self.hook_style_settings = hook_style_settings or {}
+        self.blur_background_settings = self.hook_style_settings.get("blur_background", {})
+        self.subtitle_style = subtitle_style or {}
+        self.video_quality = str(video_quality or "720")
+        self.landscape_blur = bool(landscape_blur)
+        self.screen_size = "16:9" if str(screen_size) == "16:9" else "9:16"
+        resolutions = {
+            "16:9": {"480": "854:480", "720": "1280:720", "1080": "1920:1080", "1440": "2560:1440", "2160": "3840:2160"},
+            "9:16": {"480": "540:960", "720": "720:1280", "1080": "1080:1920", "1440": "1440:2560", "2160": "2160:3840"},
+        }
+        self.output_resolution = resolutions[self.screen_size].get(self.video_quality, resolutions[self.screen_size]["720"])
+        self.face_tracking_mode = "center"
+        self.optimize_mode = "local"
+        self.gpu_enabled = False
+        self.gpu_encoder_args = []
+        self.channel_name = ""
+        self.render_timeout = 900
+        self.is_cancelled = cancel_check or (lambda: False)
+        self.log = log_callback or print
+        self.set_progress = progress_callback or (lambda *_args: None)
+
+
 class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, ExportMixin):
     def __init__(
         self,
@@ -222,7 +264,10 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
             if self.is_cancelled():
                 return
             full_transcript = None
-            if not srt_path:
+            if srt_path:
+                full_transcript = self.parse_srt_timed(srt_path)
+                transcript = timed_segments_to_prompt(full_transcript)
+            else:
                 self.set_progress("Subtitle tidak ditemukan, download audio-only untuk transkripsi Groq...", 0.18)
                 audio_path = self.download_audio_only(url)
                 try:
@@ -233,8 +278,6 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
                         Path(audio_path).unlink(missing_ok=True)
                     except Exception:
                         pass
-            else:
-                transcript = self.parse_srt(srt_path)
             self.set_progress("Finding highlights...", 0.3)
             highlights_cache = cache_dir / f"highlights.{self._cache_key(str(num_clips) + getattr(self, 'system_prompt', '') + str(transcript))}.json"
             if use_sections and highlights_cache.exists():
@@ -280,6 +323,9 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         def _do_clip(clip_source, highlight, idx, caption_transcript):
             try:
                 if not self.is_cancelled():
+                    if add_captions and caption_transcript and not caption_transcript.get("words"):
+                        self.set_progress(f"Clip {idx}/{total_clips}: Menyelaraskan subtitle kata...", 0.42)
+                        caption_transcript = self.transcribe_audio_with_timestamps(clip_source, require_words=True)
                     self.process_clip(
                         clip_source, highlight, idx, total_clips,
                         add_captions=add_captions, add_hook=add_hook, pre_cut=True,
@@ -292,7 +338,7 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
                     pass
 
         def _slice_for_clip(highlight):
-            if not add_captions or full_transcript is None:
+            if full_transcript is None:
                 return None
             return slice_timed_transcript(
                 full_transcript,

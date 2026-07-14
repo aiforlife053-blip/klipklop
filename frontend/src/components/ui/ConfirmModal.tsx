@@ -1,3 +1,4 @@
+import { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 interface ConfirmModalProps {
@@ -8,40 +9,44 @@ interface ConfirmModalProps {
   onCancel: () => void;
   confirmText?: string;
   cancelText?: string;
+  busy?: boolean;
 }
 
-export function ConfirmModal({
-  isOpen,
-  title,
-  message,
-  onConfirm,
-  onCancel,
-  confirmText = 'Ya, Hapus',
-  cancelText = 'Batal',
-}: ConfirmModalProps) {
-  if (!isOpen) return null;
+export function ConfirmModal({ isOpen, title, message, onConfirm, onCancel, confirmText = 'Ya, Hapus', cancelText = 'Batal', busy = false }: ConfirmModalProps) {
+  const titleId = useId();
+  const descriptionId = useId();
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    cancelRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) onCancel();
+      if (event.key === 'Tab' && !event.shiftKey && document.activeElement === confirmRef.current) { event.preventDefault(); cancelRef.current?.focus(); }
+      if (event.key === 'Tab' && event.shiftKey && document.activeElement === cancelRef.current) { event.preventDefault(); confirmRef.current?.focus(); }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => { document.removeEventListener('keydown', onKeyDown); previousFocus?.focus(); };
+  }, [busy, isOpen, onCancel]);
+
+  useEffect(() => { if (isOpen && busy) dialogRef.current?.focus(); }, [busy, isOpen]);
+
+  if (!isOpen) return null;
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40">
-      <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl transform animate-in fade-in zoom-in-95 duration-200">
-        <h3 className="text-slate-900 text-[18px] font-bold mb-2">{title}</h3>
-        <p className="text-slate-500 text-[14px] mb-6">{message}</p>
-        <div className="flex justify-end gap-3">
-          <button
-            onClick={onCancel}
-            className="px-4 py-2 rounded-lg text-[13px] font-semibold text-slate-600 hover:bg-slate-50 transition"
-          >
-            {cancelText}
-          </button>
-          <button
-            onClick={onConfirm}
-            className="px-4 py-2 rounded-lg text-[13px] font-semibold bg-red-500 hover:bg-red-600 text-white transition shadow-sm"
-          >
-            {confirmText}
-          </button>
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-background/90 p-4" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId}>
+      <button type="button" disabled={busy} className="absolute inset-0 cursor-default disabled:cursor-wait" onClick={onCancel} aria-label="Tutup konfirmasi" />
+      <section ref={dialogRef} tabIndex={-1} className="relative w-full max-w-sm rounded-2xl border border-line bg-card p-6 focus:outline-none">
+        <h2 id={titleId} className="font-display text-lg font-bold text-foreground">{title}</h2>
+        <p id={descriptionId} className="mt-2 text-sm leading-relaxed text-muted">{message}</p>
+        <div className="mt-6 flex justify-end gap-3">
+          <button ref={cancelRef} type="button" disabled={busy} onClick={onCancel} className="rounded-lg border border-line px-4 py-2 text-sm font-bold text-foreground hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-card disabled:opacity-50">{cancelText}</button>
+          <button ref={confirmRef} type="button" disabled={busy} onClick={onConfirm} className="rounded-lg bg-destructive px-4 py-2 text-sm font-bold text-white hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-destructive focus:ring-offset-2 focus:ring-offset-card disabled:opacity-50">{busy ? 'Menghapus...' : confirmText}</button>
         </div>
-      </div>
+      </section>
     </div>,
-    document.body
+    document.body,
   );
 }

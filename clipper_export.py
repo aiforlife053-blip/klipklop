@@ -1,4 +1,3 @@
-import hashlib
 import json
 import os
 import re
@@ -13,7 +12,15 @@ from pathlib import Path
 
 from clipper_shared import SUBPROCESS_FLAGS, TimedTranscript, _hex_to_rgb, validate_timed_transcript
 from clipper_base import ClipperBase
+from subtitle_cues import non_overlapping_segments
 from utils.logger import debug_log
+
+
+def _write_json_atomic(path, data):
+    path = Path(path)
+    temporary = path.with_name(f"{path.stem}.{uuid.uuid4().hex}.tmp")
+    temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(temporary, path)
 
 
 class ExportMixin(ClipperBase):
@@ -48,14 +55,14 @@ class ExportMixin(ClipperBase):
         return lines
 
     def _probe_render_input(self, input_path: str):
-        result = subprocess.run(
+        result = self._run_probe_subprocess(
             [self.ffmpeg_path, "-i", input_path],
             capture_output=True,
             text=True,
             creationflags=SUBPROCESS_FLAGS,
         )
-        dimensions = re.search(r'(\d{3,4})x(\d{3,4})', result.stderr)
-        duration_match = re.search(r"Duration: (\d+):(\d+):(\d+\.\d+)", result.stderr)
+        dimensions = re.search(r'(\d{3,4})x(\d{3,4})', result.stderr or "")
+        duration_match = re.search(r"Duration: (\d+):(\d+):(\d+\.\d+)", result.stderr or "")
         width, height = (int(dimensions.group(1)), int(dimensions.group(2))) if dimensions else self._render_size()
         duration = 60.0
         if duration_match:
@@ -64,13 +71,13 @@ class ExportMixin(ClipperBase):
         return width, height, duration
 
     def _has_audio_stream(self, input_path: str):
-        result = subprocess.run(
+        result = self._run_probe_subprocess(
             [self.ffmpeg_path, "-i", input_path],
             capture_output=True,
             text=True,
             creationflags=SUBPROCESS_FLAGS,
         )
-        return "Audio:" in result.stderr
+        return "Audio:" in (result.stderr or "")
 
     def _create_hook_overlay(self, hook_text: str, width: int, height: int, output_path: Path):
         from PIL import Image, ImageDraw, ImageFont
@@ -99,23 +106,23 @@ class ExportMixin(ClipperBase):
                 continue
         if font is None:
             font = ImageFont.load_default()
-        lines = self._wrap_preview_text(str(hook_text).upper(), font, int(width * 0.9))
+        lines = self._wrap_preview_text(str(hook_text), font, int(width * 0.9))
         line_height = int(font_px * 1.2)
         total_height = line_height * len(lines)
         center_x = float(style.get("position_x", 0.5)) * width
         center_y = float(style.get("position_y", 0.2)) * height
         block_top = center_y - total_height / 2
-        stroke_width = max(0, int(round(float(style.get("outline_thickness", 1.5)) / 340 * width)))
+        outline_width = max(0, int(round(float(style.get("outline_thickness", 1.5)) / 340 * width)))
+        weight_width = max(0, int(round((font_weight - 400) / 200 * width / 340))) if font_family == "Poppins" else 0
+        stroke_width = outline_width + weight_width
         text_color = _hex_to_rgb(str(style.get("text_color") or "#FFD700"))
         outline_color = _hex_to_rgb(str(style.get("outline_color") or "#000000"))
-        shadow_y = max(1, int(round(3 / 340 * width)))
         overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
         for line_index, line in enumerate(lines):
             bbox = draw.textbbox((0, 0), line, font=font, stroke_width=stroke_width)
             text_x = center_x - (bbox[2] - bbox[0]) / 2 - bbox[0]
             text_y = block_top + line_index * line_height - bbox[1]
-            draw.text((text_x, text_y + shadow_y), line, font=font, fill=(0, 0, 0, 128), stroke_width=stroke_width, stroke_fill=(0, 0, 0, 128))
             draw.text((text_x, text_y), line, font=font, fill=(*text_color, 255), stroke_width=stroke_width, stroke_fill=(*outline_color, 255))
         overlay.save(output_path, "PNG")
 
@@ -150,7 +157,9 @@ class ExportMixin(ClipperBase):
         transcript: TimedTranscript | None = None,
     ) -> Path | None:
         if transcript is not None:
-            transcript = validate_timed_transcript(transcript, require_words=True)
+            transcript = validate_timed_transcript(transcript)
+            if not transcript["words"] and not transcript["segments"]:
+                raise ValueError("Subtitle transcript has no timestamped content")
         else:
             audio_file = clip_dir / "caption_audio.mp3"
             result = subprocess.run(
@@ -192,13 +201,13 @@ class ExportMixin(ClipperBase):
     def _escape_filter_path(self, path: Path):
         return str(path).replace('\\', '/').replace(':', '\\:').replace("'", "\\'")
 
-    def _build_composite_command(self, input_path: str, output_path: str, duration: float, audio_source=None, hook_overlay=None, ass_file=None, watermark_path=None, watermark_placeholder=False, credit_overlay=None):
+    def _build_composite_command(self, input_path: str, output_path: str, duration: float, audio_source=None, hook_overlay=None, ass_file=None, watermark_path=None, watermark_placeholder=False, credit_overlay=None, portrait_filters=None, output_size=None, profile="final"):
         inputs = [input_path]
         audio_index = 0
         if audio_source and Path(audio_source).resolve() != Path(input_path).resolve():
             audio_index = len(inputs)
             inputs.append(str(audio_source))
-        filters = ["[0:v]setpts=PTS-STARTPTS[v0]"]
+        filters = list(portrait_filters or ["[0:v]setpts=PTS-STARTPTS[v0]"])
         current = "v0"
         layer = 1
         if hook_overlay:
@@ -242,6 +251,9 @@ class ExportMixin(ClipperBase):
             filters.append(f"[{input_index}:v]format=rgba[credit]")
             filters.append(f"[{current}][credit]overlay=0:0[v{layer}]")
             current = f"v{layer}"
+        if output_size:
+            filters.append(f"[{current}]scale={output_size[0]}:{output_size[1]}[vscaled]")
+            current = "vscaled"
         filters.append(f"[{current}]format=yuv420p[vout]")
         if audio_source:
             filters.append(f"[{audio_index}:a]asetpts=PTS-STARTPTS[aout]")
@@ -303,29 +315,33 @@ class ExportMixin(ClipperBase):
                 cmd = [self.ffmpeg_path, "-y", "-ss", start, "-i", video_path, "-t", str(duration), *self.get_video_encoder_args(), "-c:a", "aac", "-b:a", "192k", "-progress", "pipe:1", str(landscape_file)]
                 self.run_ffmpeg_with_progress(cmd, duration, lambda progress: clip_progress("Memotong video", progress * 0.15))
                 source_file = landscape_file
-            if add_captions:
-                ass_file = self._create_caption_ass(str(source_file), clip_dir, caption_transcript)
-                actual_captions = True
-                cleanup_paths.append(ass_file)
+            reframe_started = time.monotonic()
             if getattr(self, "screen_size", "9:16") == "16:9":
                 render_input = source_file
-                clip_progress("Menyiapkan overlay", 0.55)
+                clip_progress("Menyiapkan draft", 0.55)
             else:
                 clip_progress("Menyusun video portrait", 0.15)
                 self.convert_to_portrait_with_progress(str(source_file), str(portrait_file), lambda progress: clip_progress("Menyusun video portrait", 0.15 + progress * 0.4))
                 render_input = portrait_file
-            width, height, render_duration = self._probe_render_input(str(render_input))
-            final_duration = min(duration, render_duration) if render_duration > 0 else duration
-            audio_source = str(source_file) if self._has_audio_stream(str(source_file)) else None
+            self.log(f"  Reframe elapsed: {time.monotonic() - reframe_started:.1f}s")
             if getattr(self, "draft_only", False):
+                if add_captions and caption_transcript is None:
+                    raise ValueError("Subtitle transcript tidak tersedia")
                 source_output = clip_dir / "source.mp4"
                 draft_output = clip_dir / "draft.mp4"
                 shutil.copyfile(source_file, source_output)
                 shutil.copyfile(render_input, draft_output)
-                if caption_transcript is not None:
-                    (clip_dir / "transcript.json").write_text(json.dumps(caption_transcript, ensure_ascii=False), encoding="utf-8")
+                caption_transcript = validate_timed_transcript(caption_transcript) if caption_transcript else {"duration": max(0.0, duration), "words": [], "segments": []}
+                has_timed_transcript = bool(caption_transcript["words"] or caption_transcript["segments"])
+                (clip_dir / "transcript.json").write_text(json.dumps(caption_transcript, ensure_ascii=False), encoding="utf-8")
+                thumbnail_path = clip_dir / "thumbnail.jpg"
+                result = self._run_probe_subprocess([self.ffmpeg_path, "-y", "-ss", str(min(1.0, duration * 0.1)), "-i", str(draft_output), "-frames:v", "1", "-q:v", "3", str(thumbnail_path)], capture_output=True)
+                if result.returncode != 0 or not thumbnail_path.is_file():
+                    raise RuntimeError("Thumbnail draft gagal dibuat")
                 metadata = {
                     "clip_id": uuid.uuid4().hex,
+                    "generation_id": self.output_dir.name,
+                    "created_at": datetime.now().astimezone().isoformat(),
                     "status": "needs_edit",
                     "title": highlight["title"],
                     "description": highlight.get("description", ""),
@@ -340,14 +356,25 @@ class ExportMixin(ClipperBase):
                     "source_path": "source.mp4",
                     "draft_path": "draft.mp4",
                     "final_path": "master.mp4",
-                    "transcript_path": "transcript.json" if caption_transcript is not None else "",
+                    "transcript_path": "transcript.json" if has_timed_transcript else "",
+                    "draft_settings": {
+                        "landscape_blur": bool(getattr(self, "landscape_blur", False)),
+                        "blur_background": dict(getattr(self, "blur_background_settings", {}) or {}),
+                        "video_quality": str(getattr(self, "video_quality", "720")),
+                        "screen_size": str(getattr(self, "screen_size", "9:16")),
+                    },
                     "render_revision": 0,
                 }
-                (clip_dir / "data.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
-                thumbnail_path = clip_dir / "thumbnail.jpg"
-                subprocess.run([self.ffmpeg_path, "-y", "-ss", str(min(1.0, duration * 0.1)), "-i", str(draft_output), "-frames:v", "1", "-q:v", "3", str(thumbnail_path)], capture_output=True, timeout=30)
+                _write_json_atomic(clip_dir / "data.json", metadata)
                 clip_progress("Siap diedit", 1.0)
                 return
+            if add_captions:
+                ass_file = self._create_caption_ass(str(source_file), clip_dir, caption_transcript)
+                actual_captions = True
+                cleanup_paths.append(ass_file)
+            width, height, render_duration = self._probe_render_input(str(render_input))
+            final_duration = min(duration, render_duration) if render_duration > 0 else duration
+            audio_source = str(source_file) if self._has_audio_stream(str(source_file)) else None
             if actual_hook:
                 self._create_hook_overlay(highlight.get("hook_text", highlight["title"]), width, height, hook_overlay)
             if actual_credit:
@@ -388,7 +415,7 @@ class ExportMixin(ClipperBase):
                 "channel_name": self.channel_name,
                 "virality_score": int(highlight.get("virality_score", 5) or 5),
             }
-            (clip_dir / "data.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+            _write_json_atomic(clip_dir / "data.json", metadata)
             try:
                 thumbnail_path = clip_dir / "thumbnail.jpg"
                 subprocess.run([self.ffmpeg_path, "-y", "-ss", str(min(1.0, duration * 0.1)), "-i", str(final_file), "-frames:v", "1", "-q:v", "3", str(thumbnail_path)], capture_output=True, timeout=30)
@@ -406,50 +433,47 @@ class ExportMixin(ClipperBase):
         self.watermark_settings = settings.get("watermark", {})
         self.credit_watermark_settings = settings.get("credit_watermark", {})
         self.hook_style_settings = settings.get("hook_style", {})
+        self.blur_background_settings = settings.get("blur_background", {})
         self.subtitle_style = settings.get("subtitle", {})
         source_file = clip_dir / "source.mp4"
         if not source_file.is_file():
             raise ValueError("Source klip tidak tersedia")
-        transcript_path = clip_dir / str(metadata.get("transcript_path") or "")
+        transcript_path = clip_dir / str(metadata.get("transcript_path") or "transcript.json")
         transcript = json.loads(transcript_path.read_text(encoding="utf-8")) if transcript_path.is_file() else None
-        portrait_file = clip_dir / "render.portrait.mp4"
-        hook_overlay = clip_dir / "render.hook.png"
-        credit_overlay = clip_dir / "render.credit.png"
-        ass_file = None
-        temporary = [portrait_file, hook_overlay, credit_overlay]
+        operation_id = uuid.uuid4().hex[:12]
+        hook_overlay, credit_overlay, ass_file = (clip_dir / f"render-{operation_id}.hook.png"), (clip_dir / f"render-{operation_id}.credit.png"), None
+        temporary = [hook_overlay, credit_overlay]
         try:
-            if getattr(self, "screen_size", "9:16") == "16:9":
-                render_input = source_file
+            source_width, source_height, duration = self._probe_render_input(str(source_file))
+            width, height = self._render_size()
+            portrait_filters = None
+            if getattr(self, "screen_size", "9:16") != "16:9":
+                blur = bool(settings.get("blur_background", {}).get("enabled")) and source_width > source_height
+                portrait_filters, _ = self._portrait_filter(width, height, blur)
             else:
-                self.convert_to_portrait_with_progress(str(source_file), str(portrait_file), lambda _progress: None)
-                render_input = portrait_file
-            width, height, duration = self._probe_render_input(str(render_input))
-            audio_source = str(source_file) if self._has_audio_stream(str(source_file)) else None
+                width, height = self._render_size()
             hook = settings.get("hook_style", {})
             if hook.get("enabled"):
                 self._create_hook_overlay(metadata.get("hook_text") or metadata.get("title", ""), width, height, hook_overlay)
             subtitle = settings.get("subtitle", {})
-            if subtitle.get("enabled") and transcript:
-                ass_file = self._create_caption_ass(str(source_file), clip_dir, transcript)
+            if subtitle.get("enabled"):
+                if not transcript:
+                    raise ValueError("Transcript subtitle tidak tersedia")
+                ass_file = clip_dir / f"render-{operation_id}.captions.ass"
+                generated_ass = self._create_caption_ass(str(source_file), clip_dir, transcript)
+                os.replace(generated_ass, ass_file)
                 temporary.append(ass_file)
             credit = settings.get("credit_watermark", {})
-            if credit.get("enabled") and metadata.get("channel_name"):
-                self.channel_name = metadata["channel_name"]
+            if credit.get("enabled"):
+                self.channel_name = metadata.get("channel_name", "")
                 self._create_credit_overlay(width, height, credit_overlay)
             watermark = settings.get("watermark", {})
             watermark_path = Path(str(watermark.get("image_path") or "")) if watermark.get("enabled") else None
-            if watermark_path and not watermark_path.is_file():
-                watermark_path = None
-            command = self._build_composite_command(
-                str(render_input), str(output_path), duration,
-                audio_source=audio_source,
-                hook_overlay=hook_overlay if hook.get("enabled") else None,
-                ass_file=ass_file,
-                watermark_path=watermark_path,
-                watermark_placeholder=bool(watermark.get("enabled") and not watermark_path),
-                credit_overlay=credit_overlay if credit.get("enabled") and metadata.get("channel_name") else None,
-            )
-            self.run_ffmpeg_with_progress(command, duration, lambda _progress: None)
+            if watermark.get("enabled") and (not watermark_path or not watermark_path.is_file()):
+                raise ValueError("Watermark belum tersedia")
+            preview_size = (540, 960) if getattr(self, "screen_size", "9:16") != "16:9" else (854, 480)
+            command = self._build_composite_command(str(source_file), str(output_path), duration, audio_source=str(source_file) if self._has_audio_stream(str(source_file)) else None, hook_overlay=hook_overlay if hook.get("enabled") else None, ass_file=ass_file, watermark_path=watermark_path, credit_overlay=credit_overlay if credit.get("enabled") else None, portrait_filters=portrait_filters, output_size=preview_size if preview else None, profile="preview_fast" if preview else "final")
+            self.run_ffmpeg_with_progress(command, duration, lambda progress: self.set_progress("Menyusun video", progress), timeout=getattr(self, "render_timeout", 900))
             if not output_path.is_file() or output_path.stat().st_size < 1000:
                 raise RuntimeError("Final render gagal")
         finally:
@@ -574,7 +598,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         "text": " ".join(text_parts),
                     })
         else:
-            for segment in transcript["segments"]:
+            for segment in non_overlapping_segments(transcript["segments"]):
                 start = segment["start"] + time_offset
                 end = segment["end"] + time_offset
                 words = segment["text"].split()
@@ -590,27 +614,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     })
 
         for event in events:
-            ass_content += f"Dialogue: 0,{event['start']},{event['end']},Default,,0,0,0,,{{\\pos({pos_x},{pos_y})}}{event['text']}\n"
+            ass_content += f"Dialogue: 0,{event['start']},{event['end']},Default,,0,0,0,,{{\\pos({pos_x},{pos_y})\\b{font_weight}}}{event['text']}\n"
 
         with open(output_path, "w", encoding="utf-8") as file:
             file.write(ass_content)
         return len(events)
-
-    async def _generate_edge_tts_async(self, hook_text: str, output_path: str) -> None:
-        import edge_tts
-        voice = getattr(self, "tts_voice", "id-ID-ArdiNeural") or "id-ID-ArdiNeural"
-        communicate = edge_tts.Communicate(hook_text, voice)
-        await communicate.save(output_path)
-
-    def _generate_edge_tts(self, hook_text: str) -> str:
-        cache_root = Path(os.environ.get("KLIPKLOP_CACHE_DIR") or self.output_dir.parent / "cache") / "tts"
-        cache_root.mkdir(parents=True, exist_ok=True)
-        voice = getattr(self, "tts_voice", "id-ID-ArdiNeural") or "id-ID-ArdiNeural"
-        cache_file = cache_root / f"{hashlib.sha1((voice + hook_text).encode('utf-8')).hexdigest()}.mp3"
-        if cache_file.exists():
-            self.log("  ✓ Using cached hook TTS")
-            return str(cache_file)
-        import asyncio
-        asyncio.run(self._generate_edge_tts_async(hook_text, str(cache_file)))
-        return str(cache_file)
 

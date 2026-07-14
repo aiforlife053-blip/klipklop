@@ -24,21 +24,20 @@ Buka `http://127.0.0.1:8765` jika browser tidak terbuka otomatis.
 
 Ini local-only. Hosting publik butuh desain terpisah untuk auth, queue, worker FFmpeg, storage, rate limit, dan secret vault.
 
-## VPS Deploy Checklist
+## VPS Deploy
 
-Deployment minimal harus menyertakan file dan folder source, tetapi harus mengecualikan artifact lokal dan rahasia pengguna.
+Buat artifact dari root repository dengan PowerShell 5.1+:
 
-**Include:**
-- Python source files (`*.py`)
-- Frontend source (`frontend/`) dan `package.json`/`package-lock.json` (jika build dilakukan di VPS) atau `frontend/dist/` (jika prebuilt static)
-- `requirements.txt`
-- `README.md` dan `PRODUCT.md`
-- Folder `fonts/`
+```powershell
+.\deploy\package.ps1 -OutputPath "$env:TEMP\klipklop-deploy.zip"
+```
 
-**Exclude:**
-- `config.json`
-- `cookie.txt` dan `cookies.txt`
-- Folder output video: `output/`
-- Folder sementara: `_temp/` dan `cache/`
-- Folder system dan tool lokal: `bin/`, `ffmpeg/`, `__pycache__/`, `.pytest_cache/`, `node_modules/`
-- File logs dan tracker statik runtime: `error.log`, `tickets.json`, `static/watermarks/`
+Script menjalankan `npm ci` dan `npm run build`, lalu membuat ZIP dengan timestamp entry tetap dan `DEPLOY-MANIFEST.txt` berisi SHA-256 setiap file. Gunakan `-SkipBuild` hanya jika `frontend/dist/index.html` sudah dibangun dari source saat ini. Audit isi tanpa membuat ZIP:
+
+```powershell
+.\deploy\package.ps1 -SkipBuild -ListOnly
+```
+
+Artifact menyertakan source aplikasi, `frontend/dist`, dependencies manifests, fonts, migration, serta konfigurasi deployment. Artifact mengecualikan `.git`, `.venv`, `venv`, `node_modules`, `data`, output video, cache, temporary files, build outputs non-deploy, logs, database lokal, archive, environment files, credentials, cookies, token, dan private key. `deploy/klipklop.env.example` tetap disertakan karena hanya template.
+
+Jangan ekstrak ZIP langsung ke `/opt/klipklop` dan jangan jalankan sinkronisasi `--delete` tanpa protected filters. Prosedur staging, validasi manifest, selective copy, preservation `/opt/klipklop/data` dan `/opt/klipklop/.venv`, ownership, restart, rollback, log, API, serta SPA checks ada di `vps_manual.md`.

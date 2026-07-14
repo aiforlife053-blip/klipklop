@@ -1,1324 +1,203 @@
 import json
-import os
 import re
 import subprocess
+import time
 from pathlib import Path
 
-from clipper_shared import SUBPROCESS_FLAGS, YTDLP_MODULE_AVAILABLE, yt_dlp
+from clipper_shared import SUBPROCESS_FLAGS, TimedTranscript, YTDLP_MODULE_AVAILABLE, validate_timed_transcript, yt_dlp
 from clipper_base import ClipperBase
 from utils.helpers import get_deno_path, get_ffmpeg_path
-from utils.logger import debug_log
 
 
 class DownloadMixin(ClipperBase):
     def _format_selector(self):
         quality = str(getattr(self, "video_quality", "720") or "720")
         max_height = {"480": 480, "720": 720, "1080": 1080, "1440": 1440, "2160": 2160}.get(quality, 720)
-        return (
-            f"bestvideo[height<={max_height}][fps<=30]+bestaudio/"
-            f"best[height<={max_height}][fps<=30]/"
-            f"bestvideo[height<={max_height}]+bestaudio/"
-            f"best[height<={max_height}]"
-        )
+        return f"bestvideo[height<={max_height}][fps<=30]+bestaudio/best[height<={max_height}][fps<=30]/bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]"
 
     def _format_sort(self):
-        return ['res', 'vcodec:h264', 'fps:30', 'br']
+        return ["res", "vcodec:h264", "fps:30", "br"]
 
     def _cookies_path(self):
         path = getattr(self, "cookies_path", None)
         return Path(path) if path and Path(path).is_file() else None
 
-    def _apply_common_ytdlp_options(self, ydl_opts: dict):
+    def _apply_common_ytdlp_options(self, options):
         deno_path = get_deno_path()
         ffmpeg_path = get_ffmpeg_path()
         if deno_path and Path(deno_path).exists():
-            ydl_opts['js_runtimes'] = {'deno': {'path': deno_path}}
-            ydl_opts['remote_components'] = ['ejs:github']
+            options["js_runtimes"] = {"deno": {"path": deno_path}}
+            options["remote_components"] = ["ejs:github"]
         if ffmpeg_path and Path(ffmpeg_path).exists():
-            ydl_opts['ffmpeg_location'] = str(Path(ffmpeg_path).parent)
-        cookies_path = self._cookies_path()
-        if cookies_path:
-            ydl_opts['cookiefile'] = str(cookies_path)
-        return ydl_opts
+            options["ffmpeg_location"] = str(Path(ffmpeg_path).parent)
+        if cookies_path := self._cookies_path():
+            options["cookiefile"] = str(cookies_path)
+        return options
 
-    def download_audio_only(self, url: str) -> str:
+    def download_audio_only(self, url):
         self.log("  Downloading audio-only fallback (MP3 16kHz mono 32kbps)...")
-        if not (YTDLP_MODULE_AVAILABLE and self.ytdlp_path == "yt_dlp_module"):
-            return self._download_audio_only_subprocess(url)
-        return self._download_audio_only_module(url)
+        if YTDLP_MODULE_AVAILABLE and self.ytdlp_path == "yt_dlp_module":
+            return self._download_audio_only_module(url)
+        return self._download_audio_only_subprocess(url)
 
-    def _download_audio_only_module(self, url: str) -> str:
+    def _download_audio_only_module(self, url):
         output_path = self.temp_dir / "source_audio.mp3"
-        last_percent = {"value": -1.0}
-        def progress_hook(d):
+        last_percent = -1.0
+
+        def progress_hook(status):
+            nonlocal last_percent
             if self.is_cancelled():
-                raise Exception("Cancelled by user")
-            if d.get('status') == 'downloading':
-                match = re.search(r'(\d+\.?\d*)%', d.get('_percent_str', '0%').strip())
-                if match:
-                    percent = float(match.group(1))
-                    if percent + 0.05 < last_percent["value"]:
-                        return
-                    last_percent["value"] = percent
-                    self.set_progress(f"Downloading audio-only fallback... {percent:.1f}%", 0.18 + percent / 100 * 0.08)
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': str(self.temp_dir / 'source_audio.%(ext)s'),
-            'progress_hooks': [progress_hook],
-            'quiet': True,
-            'no_warnings': False,
-            'extract_flat': False,
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '32',
-            }],
-            'postprocessor_args': ['-ac', '1', '-ar', '16000', '-b:a', '32k'],
-        }
-        self._apply_common_ytdlp_options(ydl_opts)
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        if output_path.exists():
-            return str(output_path)
-        for candidate in self.temp_dir.glob("source_audio.*"):
-            if candidate.suffix.lower() == ".mp3":
-                return str(candidate)
-        raise Exception("Audio-only download failed: output file not found")
+                raise InterruptedError("Stopped")
+            if status.get("status") != "downloading":
+                return
+            match = re.search(r"(\d+\.?\d*)%", status.get("_percent_str", ""))
+            if match and float(match.group(1)) + 0.05 >= last_percent:
+                last_percent = float(match.group(1))
+                self.set_progress(f"Downloading audio-only fallback... {last_percent:.1f}%", 0.18 + last_percent / 100 * 0.08)
 
-    def _download_audio_only_subprocess(self, url: str) -> str:
-        output_path = self.temp_dir / "source_audio.mp3"
-        cmd = [
-            self.ytdlp_path,
-            "-f", "bestaudio/best",
-            "-x", "--audio-format", "mp3",
-            "--postprocessor-args", "ffmpeg:-ac 1 -ar 16000 -b:a 32k",
-            "-o", str(self.temp_dir / "source_audio.%(ext)s"),
-            url,
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
-        if result.returncode != 0:
-            raise Exception(f"Audio-only download failed:\n{result.stderr}")
-        if output_path.exists():
-            return str(output_path)
-        for candidate in self.temp_dir.glob("source_audio.*"):
-            if candidate.suffix.lower() == ".mp3":
-                return str(candidate)
-        raise Exception("Audio-only download failed: output file not found")
+        options = self._apply_common_ytdlp_options({"format": "bestaudio/best", "outtmpl": str(self.temp_dir / "source_audio.%(ext)s"), "progress_hooks": [progress_hook], "quiet": True, "no_warnings": False, "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "32"}], "postprocessor_args": ["-ac", "1", "-ar", "16000", "-b:a", "32k"]})
+        with yt_dlp.YoutubeDL(options) as downloader:
+            downloader.download([url])
+        return self._find_output("source_audio", {".mp3"})
 
-    def download_video_only(self, url: str) -> str:
-        self.log(f"  Downloading source video once ({getattr(self, 'video_quality', '720')}p max)...")
-        if not (YTDLP_MODULE_AVAILABLE and self.ytdlp_path == "yt_dlp_module"):
-            return self._download_video_only_subprocess(url)
-        return self._download_video_only_module(url)
+    def _download_audio_only_subprocess(self, url):
+        result = self._run_cancelable_subprocess([self.ytdlp_path, "-f", "bestaudio/best", "-x", "--audio-format", "mp3", "--postprocessor-args", "ffmpeg:-ac 1 -ar 16000 -b:a 32k", "-o", str(self.temp_dir / "source_audio.%(ext)s"), url], capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS, timeout=900)
+        if result.returncode:
+            raise RuntimeError(f"Audio-only download failed:\n{result.stderr}")
+        return self._find_output("source_audio", {".mp3"})
 
-    def _download_video_only_module(self, url: str) -> str:
-        ffmpeg_path = get_ffmpeg_path()
-        deno_path = get_deno_path()
-        last_percent = {"value": -1.0}
-        def progress_hook(d):
-            if self.is_cancelled():
-                raise Exception("Cancelled by user")
-            if d.get('status') == 'downloading':
-                match = re.search(r'(\d+\.?\d*)%', d.get('_percent_str', '0%').strip())
-                if match:
-                    percent = float(match.group(1))
-                    if percent + 0.05 < last_percent["value"]:
-                        return
-                    last_percent["value"] = percent
-                    self.set_progress(f"Downloading source video/audio... {percent:.1f}%", 0.32 + percent / 100 * 0.08)
-        ydl_opts = {
-            'format': self._format_selector(),
-            'merge_output_format': 'mp4',
-            'outtmpl': str(self.temp_dir / 'source.%(ext)s'),
-            'progress_hooks': [progress_hook],
-            'quiet': True,
-            'no_warnings': False,
-            'extract_flat': False,
-        }
-        if deno_path and Path(deno_path).exists():
-            ydl_opts['js_runtimes'] = {'deno': {'path': deno_path}}
-            ydl_opts['remote_components'] = ['ejs:github']
-        if ffmpeg_path and Path(ffmpeg_path).exists():
-            ydl_opts['ffmpeg_location'] = str(Path(ffmpeg_path).parent)
-        cookies_path = self._cookies_path()
-        if cookies_path:
-            ydl_opts['cookiefile'] = str(cookies_path)
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        for candidate in self.temp_dir.glob("source.*"):
-            if candidate.suffix.lower() in {".mp4", ".mkv", ".webm"}:
-                self.log(f"  ✓ Source video ready: {candidate.name}")
-                return str(candidate)
-        raise Exception("Source video download failed: output file not found")
-
-    def _download_video_only_subprocess(self, url: str) -> str:
-        cmd = [self.ytdlp_path, "-f", self._format_selector(), "--merge-output-format", "mp4", "-o", str(self.temp_dir / "source.%(ext)s"), url]
-        result = subprocess.run(cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
-        if result.returncode != 0:
-            raise Exception(f"Source video download failed:\n{result.stderr}")
-        for candidate in self.temp_dir.glob("source.*"):
-            if candidate.suffix.lower() in {".mp4", ".mkv", ".webm"}:
-                return str(candidate)
-        raise Exception("Source video download failed: output file not found")
-
-    def download_video(self, url: str) -> tuple:
-        """Download video and subtitle with progress using yt-dlp module or executable"""
-        self.log("[1/4] Downloading video & subtitle...")
-        
-        # Check if using yt-dlp module
-        use_module = YTDLP_MODULE_AVAILABLE and self.ytdlp_path == "yt_dlp_module"
-        
-        if use_module:
-            return self._download_video_module(url)
-        else:
-            return self._download_video_subprocess(url)
-
-    def _download_video_module(self, url: str) -> tuple:
-        """Download video using yt-dlp Python module API"""
-        self.log(f"  Using yt-dlp module v{yt_dlp.version.__version__}")
-        
-        video_info = {}
-        
-        # Get FFmpeg and Deno paths
-        ffmpeg_path = get_ffmpeg_path()
-        deno_path = get_deno_path()
-        
-        self.log(f"  FFmpeg path: {ffmpeg_path}")
-        self.log(f"  Deno path: {deno_path}")
-        
-        # Setup environment with Deno in PATH
-        if deno_path and Path(deno_path).exists():
-            deno_dir = str(Path(deno_path).parent)
-            if "PATH" in os.environ:
-                os.environ["PATH"] = f"{deno_dir}{os.pathsep}{os.environ['PATH']}"
-            else:
-                os.environ["PATH"] = deno_dir
-            self.log(f"  Deno added to PATH: {deno_dir}")
-        else:
-            self.log(f"  WARNING: Deno not found!")
-        
-        # Progress hook for yt-dlp
-        def progress_hook(d):
-            if self.is_cancelled():
-                raise Exception("Cancelled by user")
-            
-            if d['status'] == 'downloading':
-                percent_str = d.get('_percent_str', '0%').strip()
-                # Extract numeric percent
-                match = re.search(r'(\d+\.?\d*)%', percent_str)
-                if match:
-                    percent = float(match.group(1))
-                    self.set_progress(f"Downloading video... {percent:.1f}%", 0.05 + percent / 100 * 0.2)
-            elif d['status'] == 'finished':
-                self.log("  Download finished, processing...")
-                self.set_progress("Processing downloaded file...", 0.25)
-        
-        # High-quality format selector
-        format_selector = self._format_selector()
-        
-        # Base yt-dlp options
-        ydl_opts = {
-            'format': format_selector,
-            'format_sort': self._format_sort(),
-            'format_sort_force': True,
-            'merge_output_format': 'mp4',
-            'outtmpl': str(self.temp_dir / 'source.%(ext)s'),
-            'progress_hooks': [progress_hook],
-            'quiet': True,
-            'no_warnings': False,
-            'extract_flat': False,
-        }
-        
-        # Only request subtitles if a real language is selected (skip for AI transcription mode)
-        if self.subtitle_language and self.subtitle_language != "none":
-            ydl_opts['writesubtitles'] = True
-            ydl_opts['writeautomaticsub'] = True
-            ydl_opts['subtitleslangs'] = [self.subtitle_language]
-            ydl_opts['subtitlesformat'] = 'srt'
-        else:
-            self.log("  Skipping subtitle download (AI transcription mode)")
-        
-        # Add Deno JS runtime if available
-        if deno_path and Path(deno_path).exists():
-            ydl_opts['js_runtimes'] = {'deno': {'path': deno_path}}
-            ydl_opts['remote_components'] = ['ejs:github']
-            self.log(f"  JS runtime: deno at {deno_path}")
-        else:
-            self.log(f"  WARNING: Deno not found - some formats may be missing!")
-        
-        # Add FFmpeg location if available
-        if ffmpeg_path and Path(ffmpeg_path).exists():
-            ydl_opts['ffmpeg_location'] = str(Path(ffmpeg_path).parent)
-            self.log(f"  FFmpeg location: {ydl_opts['ffmpeg_location']}")
-            
-            # Only add subtitle converter postprocessor if FFmpeg is available AND subtitles requested
-            if self.subtitle_language and self.subtitle_language != "none":
-                ydl_opts['postprocessors'] = [{
-                    'key': 'FFmpegSubtitlesConvertor',
-                    'format': 'srt',
-                }]
-        else:
-            self.log(f"  WARNING: FFmpeg not found - subtitle conversion disabled")
-        
-        cookies_path = self._cookies_path()
-        if cookies_path:
-            ydl_opts['cookiefile'] = str(cookies_path)
-            self.log(f"  Using login file from: {cookies_path}")
-        
-        # Single download attempt (no browser cookies fallback)
-        last_error = None
-        try:
-            self.log(f"  Starting download...")
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # First get video info
-                self.log("  Fetching video info...")
-                info = ydl.extract_info(url, download=False)
-                
-                if info:
-                    video_info = {
-                        "title": info.get("title", ""),
-                        "description": (info.get("description", "") or "")[:2000],
-                        "channel": info.get("channel", ""),
-                    }
-                    self.log(f"  Title: {video_info['title'][:50]}...")
-                
-                # Now download
-                if self.subtitle_language and self.subtitle_language != "none":
-                    self.log(f"  Downloading video with {self.subtitle_language} subtitle...")
-                else:
-                    self.log(f"  Downloading video (no subtitle, AI transcription mode)...")
-                ydl.download([url])
-            
-            self.log(f"  ✓ Download successful!")
-                
-        except Exception as e:
-            last_error = str(e)
-            self.log(f"  ✗ Failed: {last_error[:100]}")
-            
-            # Provide helpful error message for common issues
-            if "403" in last_error or "Forbidden" in last_error:
-                raise Exception(
-                    "❌ ERROR: YouTube menolak akses (HTTP 403 Forbidden)\n\n"
-                    "PENYEBAB:\n"
-                    "• Cookies sudah EXPIRED (biasanya 1-2 minggu)\n"
-                    "• Cookies tidak lengkap atau tidak valid\n"
-                    "• Browser tidak login ke YouTube saat export cookies\n\n"
-                    "SOLUSI:\n"
-                    "1. Buka youtube.com di browser\n"
-                    "2. PASTIKAN sudah LOGIN ke akun YouTube/Google\n"
-                    "3. Export cookies BARU menggunakan extension:\n"
-                    "   - Chrome/Edge: 'Get cookies.txt LOCALLY'\n"
-                    "   - Firefox: 'cookies.txt'\n"
-                    "4. Upload cookies.txt yang baru di halaman Home\n\n"
-                    "📖 Lihat COOKIES.md untuk panduan lengkap"
-                )
-            elif "downloaded file is empty" in last_error.lower() or "file is empty" in last_error.lower():
-                raise Exception(
-                    "❌ ERROR: File video kosong (0 bytes)\n\n"
-                    "PENYEBAB:\n"
-                    "• YouTube mendeteksi aktivitas BOT\n"
-                    "• Cookies tidak cukup kuat untuk akses video content\n"
-                    "• Video mungkin memiliki proteksi khusus\n\n"
-                    "SOLUSI:\n"
-                    "1. Buka browser INCOGNITO/PRIVATE mode\n"
-                    "2. Buka youtube.com dan LOGIN ke akun Google\n"
-                    "3. Tonton 2-3 video LENGKAP (bukan skip)\n"
-                    "4. Buka video yang ingin di-download, tonton sebentar\n"
-                    "5. Export cookies BARU dengan extension:\n"
-                    "   - Chrome/Edge: 'Get cookies.txt LOCALLY'\n"
-                    "   - Firefox: 'cookies.txt'\n"
-                    "6. Upload cookies.txt yang baru\n\n"
-                    "💡 TIP: Gunakan akun yang aktif menonton YouTube\n"
-                    "📖 Lihat COOKIES.md untuk panduan lengkap"
-                )
-            elif "Sign in to confirm" in last_error or "bot" in last_error.lower():
-                raise Exception(
-                    "❌ ERROR: YouTube meminta verifikasi bot\n\n"
-                    "PENYEBAB:\n"
-                    "• Cookies sudah tidak valid\n"
-                    "• YouTube mendeteksi aktivitas mencurigakan\n\n"
-                    "SOLUSI:\n"
-                    "1. Buka youtube.com di browser INCOGNITO/PRIVATE\n"
-                    "2. Login ke akun YouTube/Google\n"
-                    "3. Tonton 1-2 video untuk 'warm up' akun\n"
-                    "4. Export cookies baru\n"
-                    "5. Upload cookies.txt yang baru\n\n"
-                    "📖 Lihat COOKIES.md untuk panduan lengkap"
-                )
-            else:
-                raise Exception(f"Download failed!\n\n{last_error}")
-        
-        video_path = self.temp_dir / "source.mp4"
-        srt_path = self.temp_dir / f"source.{self.subtitle_language}.srt"
-        
-        if not srt_path.exists():
-            # Check if any subtitle was downloaded (fallback to other languages)
-            available_subs = list(self.temp_dir.glob("source.*.srt"))
-            if available_subs:
-                srt_path = available_subs[0]
-                detected_lang = srt_path.stem.split('.')[-1]
-                self.log(f"  ⚠ {self.subtitle_language} subtitle not found, using {detected_lang} instead")
-            else:
-                srt_path = None
-                self.log(f"  ✗ No subtitle found for language: {self.subtitle_language}")
-        
-        return str(video_path), str(srt_path) if srt_path else None, video_info
-
-    def _download_video_subprocess(self, url: str) -> tuple:
-        """Download video using yt-dlp subprocess (fallback)"""
-        # Validate yt-dlp is available
-        try:
-            version_check = subprocess.run(
-                [self.ytdlp_path, "--version"],
-                capture_output=True,
-                text=True,
-                creationflags=SUBPROCESS_FLAGS,
-                timeout=5
-            )
-            if version_check.returncode != 0:
-                raise Exception(f"yt-dlp not working properly. Path: {self.ytdlp_path}")
-            self.log(f"  Using yt-dlp version: {version_check.stdout.strip()}")
-        except FileNotFoundError:
-            raise Exception(f"yt-dlp not found at: {self.ytdlp_path}\n\nPlease install yt-dlp or check the path in settings.")
-        except subprocess.TimeoutExpired:
-            raise Exception(f"yt-dlp not responding. Path: {self.ytdlp_path}")
-        except Exception as e:
-            raise Exception(f"Failed to validate yt-dlp: {str(e)}")
-        
-        base_args = []
-        try:
-            help_result = subprocess.run(
-                [self.ytdlp_path, "--help"],
-                capture_output=True,
-                text=True,
-                creationflags=SUBPROCESS_FLAGS,
-                timeout=5
-            )
-            if help_result.returncode == 0:
-                help_text = help_result.stdout
-                if "--no-impersonate" in help_text:
-                    base_args.append("--no-impersonate")
-        except Exception:
-            pass
-        
-        # Get video metadata
-        self.log("  Fetching video info...")
-        meta_cmd = [self.ytdlp_path, "--dump-json", "--no-download", *base_args, url]
-        
-        result = subprocess.run(
-            meta_cmd, 
-            capture_output=True, 
-            text=True,
-            creationflags=SUBPROCESS_FLAGS
-        )
-        video_info = {}
-        
-        if result.returncode == 0:
-            try:
-                yt_data = json.loads(result.stdout)
-                video_info = {
-                    "title": yt_data.get("title", ""),
-                    "description": yt_data.get("description", "")[:2000],
-                    "channel": yt_data.get("channel", ""),
-                }
-                self.log(f"  Title: {video_info['title'][:50]}...")
-            except json.JSONDecodeError:
-                self.log("  Warning: Could not parse metadata")
-        
-        # Download video + subtitle with progress
-        if self.subtitle_language and self.subtitle_language != "none":
-            self.log(f"  Downloading video with {self.subtitle_language} subtitle...")
-        else:
-            self.log(f"  Downloading video (no subtitle, AI transcription mode)...")
-        
-        # Try multiple download strategies (fallback on failure)
-        download_strategies = [
-            {
-                "name": "Browser cookies (Chrome)",
-                "extra_args": ["--cookies-from-browser", "chrome"]
-            },
-            {
-                "name": "Browser cookies (Edge)",
-                "extra_args": ["--cookies-from-browser", "edge"]
-            },
-            {
-                "name": "Simple format (no auth)",
-                "extra_args": []
-            }
-        ]
-        
-        # High-quality format selector (prioritize 720p+ with fallback)
-        format_selector = self._format_selector()
-        
-        last_error = None
-        for strategy in download_strategies:
-            if self.is_cancelled():
-                raise Exception("Cancelled by user")
-            
-            self.log(f"  Trying: {strategy['name']}...")
-            
-            cmd = [
-                self.ytdlp_path,
-                "-f", format_selector,
-                "--format-sort", "res,br",
-                *base_args,
-                *strategy["extra_args"],
-            ]
-            
-            # Only request subtitles if a real language is selected
-            if self.subtitle_language and self.subtitle_language != "none":
-                cmd.extend([
-                    "--write-sub", "--write-auto-sub",
-                    "--sub-lang", self.subtitle_language,
-                    "--convert-subs", "srt",
-                ])
-            
-            cmd.extend([
-                "--merge-output-format", "mp4",
-                "--newline",
-                "-o", str(self.temp_dir / "source.%(ext)s"),
-                url
-            ])
-            
-            # Run with realtime progress output
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                creationflags=SUBPROCESS_FLAGS
-            )
-            
-            last_progress = ""
-            output_lines = []
-            
-            while True:
-                if self.is_cancelled():
-                    process.terminate()
-                    process.wait()
-                    raise Exception("Cancelled by user")
-                
-                line = process.stdout.readline()
-                if not line and process.poll() is not None:
-                    break
-                
-                line = line.strip()
-                output_lines.append(line)
-                
-                if not line:
-                    continue
-                    
-                # Parse download progress
-                if "[download]" in line and "%" in line:
-                    match = re.search(r'(\d+\.?\d*)%', line)
-                    if match:
-                        percent = match.group(1)
-                        progress_text = f"  Downloading: {percent}%"
-                        if progress_text != last_progress:
-                            self.set_progress(f"Downloading video... {percent}%", 0.05 + float(percent) / 100 * 0.2)
-                            last_progress = progress_text
-                elif "[Merger]" in line or "Merging" in line:
-                    self.log("  Merging video & audio...")
-                    self.set_progress("Merging video & audio...", 0.25)
-            
-            # Check if successful
-            if process.returncode == 0:
-                self.log(f"  ✓ Download successful using: {strategy['name']}")
-                break
-            else:
-                # Capture error for logging
-                stderr_output = process.stderr.read() if process.stderr else ""
-                error_lines = []
-                
-                for line in output_lines + stderr_output.split('\n'):
-                    line = line.strip()
-                    if line and ('ERROR' in line or 'error' in line):
-                        error_lines.append(line)
-                
-                last_error = '\n'.join(error_lines[-5:]) if error_lines else f"Return code {process.returncode}"
-                self.log(f"  ✗ Failed: {last_error.split(chr(10))[0][:80]}")  # First line only
-                
-                # Continue to next strategy
-                continue
-        else:
-            # All strategies failed - provide helpful error message
-            if last_error and ("403" in last_error or "Forbidden" in last_error):
-                raise Exception(
-                    "❌ ERROR: YouTube menolak akses (HTTP 403 Forbidden)\n\n"
-                    "PENYEBAB:\n"
-                    "• Cookies sudah EXPIRED (biasanya 1-2 minggu)\n"
-                    "• Cookies tidak lengkap atau tidak valid\n"
-                    "• Browser tidak login ke YouTube saat export cookies\n\n"
-                    "SOLUSI:\n"
-                    "1. Buka youtube.com di browser\n"
-                    "2. PASTIKAN sudah LOGIN ke akun YouTube/Google\n"
-                    "3. Export cookies BARU menggunakan extension:\n"
-                    "   - Chrome/Edge: 'Get cookies.txt LOCALLY'\n"
-                    "   - Firefox: 'cookies.txt'\n"
-                    "4. Upload cookies.txt yang baru di halaman Home\n\n"
-                    "📖 Lihat COOKIES.md untuk panduan lengkap\n\n"
-                    f"Detail error:\n{last_error}"
-                )
-            elif last_error and ("downloaded file is empty" in last_error.lower() or "file is empty" in last_error.lower()):
-                raise Exception(
-                    "❌ ERROR: File video kosong (0 bytes)\n\n"
-                    "PENYEBAB:\n"
-                    "• YouTube mendeteksi aktivitas BOT\n"
-                    "• Cookies tidak cukup kuat untuk akses video content\n"
-                    "• Video mungkin memiliki proteksi khusus\n\n"
-                    "SOLUSI:\n"
-                    "1. Buka browser INCOGNITO/PRIVATE mode\n"
-                    "2. Buka youtube.com dan LOGIN ke akun Google\n"
-                    "3. Tonton 2-3 video LENGKAP (bukan skip)\n"
-                    "4. Buka video yang ingin di-download, tonton sebentar\n"
-                    "5. Export cookies BARU dengan extension:\n"
-                    "   - Chrome/Edge: 'Get cookies.txt LOCALLY'\n"
-                    "   - Firefox: 'cookies.txt'\n"
-                    "6. Upload cookies.txt yang baru\n\n"
-                    "💡 TIP: Gunakan akun yang aktif menonton YouTube\n"
-                    "📖 Lihat COOKIES.md untuk panduan lengkap\n\n"
-                    f"Detail error:\n{last_error}"
-                )
-            elif last_error and ("Sign in to confirm" in last_error or "bot" in last_error.lower()):
-                raise Exception(
-                    "❌ ERROR: YouTube meminta verifikasi bot\n\n"
-                    "PENYEBAB:\n"
-                    "• Cookies sudah tidak valid\n"
-                    "• YouTube mendeteksi aktivitas mencurigakan\n\n"
-                    "SOLUSI:\n"
-                    "1. Buka youtube.com di browser INCOGNITO/PRIVATE\n"
-                    "2. Login ke akun YouTube/Google\n"
-                    "3. Tonton 1-2 video untuk 'warm up' akun\n"
-                    "4. Export cookies baru\n"
-                    "5. Upload cookies.txt yang baru\n\n"
-                    "📖 Lihat COOKIES.md untuk panduan lengkap\n\n"
-                    f"Detail error:\n{last_error}"
-                )
-            else:
-                raise Exception(f"Download failed after trying all methods!\n\nLast error:\n{last_error}")
-        
-        video_path = self.temp_dir / "source.mp4"
-        srt_path = self.temp_dir / f"source.{self.subtitle_language}.srt"
-        
-        if not srt_path.exists():
-            # Check if any subtitle was downloaded (fallback to other languages)
-            available_subs = list(self.temp_dir.glob("source.*.srt"))
-            if available_subs:
-                srt_path = available_subs[0]
-                detected_lang = srt_path.stem.split('.')[-1]
-                self.log(f"  ⚠ {self.subtitle_language} subtitle not found, using {detected_lang} instead")
-            else:
-                srt_path = None
-                self.log(f"  ✗ No subtitle found for language: {self.subtitle_language}")
-        
-        return str(video_path), str(srt_path) if srt_path else None, video_info
-
-    def get_available_subtitles(url: str, ytdlp_path: str = "yt-dlp", cookies_path: str = None) -> dict:
-        """Get list of available subtitles for a YouTube video
-        
-        Args:
-            url: YouTube video URL
-            ytdlp_path: Path to yt-dlp executable or "yt_dlp_module" for module
-            cookies_path: Path to cookies.txt file (required)
-        
-        Returns:
-            dict with keys:
-                - 'subtitles': list of manual subtitle languages
-                - 'automatic_captions': list of auto-generated subtitle languages
-                - 'error': error message if failed
-        """
-        # Language name mapping (common ones)
-        lang_names = {
-            "en": "English",
-            "id": "Indonesian",
-            "es": "Spanish",
-            "fr": "French",
-            "de": "German",
-            "pt": "Portuguese",
-            "ru": "Russian",
-            "ja": "Japanese",
-            "ko": "Korean",
-            "zh": "Chinese",
-            "ar": "Arabic",
-            "hi": "Hindi",
-            "it": "Italian",
-            "nl": "Dutch",
-            "pl": "Polish",
-            "tr": "Turkish",
-            "vi": "Vietnamese",
-            "th": "Thai",
-        }
-        
-        # Check if using yt-dlp module
-        use_module = YTDLP_MODULE_AVAILABLE and ytdlp_path == "yt_dlp_module"
-        
-        if use_module:
-            return DownloadMixin._get_subtitles_module(url, cookies_path, lang_names)
-        return DownloadMixin._get_subtitles_subprocess(url, ytdlp_path, cookies_path, lang_names)
-
-    def _get_subtitles_module(url: str, cookies_path: str, lang_names: dict) -> dict:
-        """Get subtitles using yt-dlp Python module API"""
-        try:
-            # Check if cookies.txt exists
-            if not cookies_path or not Path(cookies_path).exists():
-                return {
-                    "error": "cookies.txt not found. Please upload cookies.txt file.",
-                    "subtitles": [],
-                    "automatic_captions": []
-                }
-            
-            # Validate cookies file has YouTube auth cookies
-            # Check both plain cookies (SID, HSID, etc.) and __Secure- prefixed variants
-            # Modern browsers/extensions often export only __Secure- versions
-            required_cookies = ['SID', 'HSID', 'SSID', 'APISID', 'SAPISID', 'LOGIN_INFO']
-            secure_prefixes = ['__Secure-1P', '__Secure-3P']
-            found_cookies = []
-            try:
-                with open(cookies_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    for cookie in required_cookies:
-                        # Check plain cookie name (tab-separated format)
-                        if f"\t{cookie}\t" in content or content.endswith(f"\t{cookie}"):
-                            found_cookies.append(cookie)
-                        else:
-                            # Check __Secure- prefixed variants (e.g. __Secure-3PSID)
-                            for prefix in secure_prefixes:
-                                secure_name = f"{prefix}{cookie}"
-                                if f"\t{secure_name}\t" in content or content.endswith(f"\t{secure_name}"):
-                                    found_cookies.append(secure_name)
-                                    break
-                
-                if not found_cookies:
-                    debug_log(f"Cookies file missing required auth cookies. Found: {found_cookies}")
-                    return {
-                        "error": "Invalid cookies.txt - missing YouTube authentication cookies.\n\n"
-                                 "Please export fresh cookies from your browser while logged into YouTube.\n\n"
-                                 "Required cookies: SID, HSID, SSID, APISID, SAPISID, LOGIN_INFO\n\n"
-                                 "Use a browser extension like 'Get cookies.txt LOCALLY' to export.",
-                        "subtitles": [],
-                        "automatic_captions": []
-                    }
-                debug_log(f"Found auth cookies: {found_cookies}")
-            except Exception as e:
-                debug_log(f"Error reading cookies file: {e}")
-            
-            debug_log(f"Using yt-dlp module v{yt_dlp.version.__version__}")
-            debug_log(f"Cookies path: {cookies_path} (exists: {Path(cookies_path).exists()})")
-            
-            # Setup Deno in PATH if available
-            deno_path = get_deno_path()
-            ffmpeg_path = get_ffmpeg_path()
-            
-            if deno_path and Path(deno_path).exists():
-                deno_dir = str(Path(deno_path).parent)
-                if "PATH" in os.environ:
-                    if deno_dir not in os.environ["PATH"]:
-                        os.environ["PATH"] = f"{deno_dir}{os.pathsep}{os.environ['PATH']}"
-                else:
-                    os.environ["PATH"] = deno_dir
-                debug_log(f"Deno path added: {deno_dir}")
-            
-            # yt-dlp options for fetching info only
-            # NOTE: Don't use player_client=android with cookies - it bypasses cookie auth
-            ydl_opts = {
-                'skip_download': True,
-                'quiet': False,  # Show warnings for debugging
-                'no_warnings': False,
-                'cookiefile': str(cookies_path),  # Ensure string path
-            }
-            
-            # Add Deno JS runtime if available
-            if deno_path and Path(deno_path).exists():
-                ydl_opts['js_runtimes'] = {'deno': {'path': deno_path}}
-                ydl_opts['remote_components'] = ['ejs:github']
-                debug_log(f"JS runtime: deno at {deno_path}")
-            
-            # Add FFmpeg location if available
-            if ffmpeg_path and Path(ffmpeg_path).exists():
-                ydl_opts['ffmpeg_location'] = str(Path(ffmpeg_path).parent)
-                debug_log(f"FFmpeg location: {ydl_opts['ffmpeg_location']}")
-            
-            debug_log(f"yt-dlp opts: cookiefile={ydl_opts['cookiefile']}")
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                video_data = ydl.extract_info(url, download=False)
-            
-            if not video_data:
-                return {"error": "Failed to fetch video info", "subtitles": [], "automatic_captions": []}
-            
-            # Extract subtitles (exclude live_chat)
-            subtitles = []
-            auto_captions = []
-            
-            # Get manual subtitles
-            if "subtitles" in video_data and video_data["subtitles"]:
-                for lang_code in video_data["subtitles"].keys():
-                    if "live_chat" in lang_code:
-                        continue
-                    lang_name = lang_names.get(lang_code, lang_code.upper())
-                    subtitles.append({"code": lang_code, "name": lang_name})
-            
-            # Get automatic captions
-            if "automatic_captions" in video_data and video_data["automatic_captions"]:
-                for lang_code in video_data["automatic_captions"].keys():
-                    if "live_chat" in lang_code:
-                        continue
-                    lang_name = lang_names.get(lang_code, lang_code.upper())
-                    auto_captions.append({"code": lang_code, "name": lang_name})
-            
-            return {
-                "subtitles": subtitles,
-                "automatic_captions": auto_captions,
-                "error": None
-            }
-            
-        except Exception as e:
-            debug_log(f"yt-dlp module error: {e}")
-            return {"error": str(e), "subtitles": [], "automatic_captions": []}
-
-    def _get_subtitles_subprocess(url: str, ytdlp_path: str, cookies_path: str, lang_names: dict) -> dict:
-        """Get subtitles using yt-dlp subprocess (fallback)"""
-        try:
-            # Check if cookies.txt exists
-            if not cookies_path or not Path(cookies_path).exists():
-                return {
-                    "error": "cookies.txt not found. Please upload cookies.txt file.",
-                    "subtitles": [],
-                    "automatic_captions": []
-                }
-            
-            # Setup environment with Deno path if available
-            env = os.environ.copy()
-            deno_path = get_deno_path()
-            if deno_path:
-                deno_dir = str(Path(deno_path).parent)
-                if "PATH" in env:
-                    env["PATH"] = f"{deno_dir}{os.pathsep}{env['PATH']}"
-                else:
-                    env["PATH"] = deno_dir
-                debug_log(f"Deno found at: {deno_path}")
-            else:
-                debug_log("Deno not found - remote-components may not work")
-            
-            # Use --dump-json to get structured data
-            # NOTE: Don't use player_client=android with cookies - it bypasses cookie auth
-            cmd = [ytdlp_path, "--dump-json", "--skip-download", 
-                   "--cookies", cookies_path]
-            
-            # Check for remote-components support (requires Deno)
-            try:
-                help_result = subprocess.run(
-                    [ytdlp_path, "--help"],
-                    capture_output=True,
-                    text=True,
-                    creationflags=SUBPROCESS_FLAGS,
-                    timeout=5
-                )
-                if help_result.returncode == 0:
-                    help_text = help_result.stdout
-                    
-                    # Add remote-components if supported AND Deno is available
-                    if "--remote-components" in help_text and deno_path:
-                        cmd.extend(["--remote-components", "ejs:github"])
-                        debug_log("Added --remote-components ejs:github")
-                    
-                    # Add no-impersonate if supported
-                    if "--no-impersonate" in help_text:
-                        cmd.append("--no-impersonate")
-                        debug_log("Added --no-impersonate flag")
-            except Exception as e:
-                debug_log(f"Error checking yt-dlp features: {e}")
-            
-            # Add URL at the end
-            cmd.append(url)
-            
-            # Log command for debugging
-            debug_log(f"Running command: {' '.join(cmd)}")
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                creationflags=SUBPROCESS_FLAGS,
-                env=env,  # Use modified environment with Deno path
-                timeout=30  # Add timeout to prevent hanging
-            )
-            
-            if result.returncode != 0:
-                # Log stderr for debugging
-                error_msg = result.stderr.strip() if result.stderr else "Unknown error"
-                debug_log(f"yt-dlp stderr: {error_msg}")
-                return {"error": f"Failed to fetch video info: {error_msg[:100]}", "subtitles": [], "automatic_captions": []}
-            
-            # Parse JSON output
-            video_data = json.loads(result.stdout)
-            
-            # Extract subtitles (exclude live_chat)
-            subtitles = []
-            auto_captions = []
-            
-            # Get manual subtitles
-            if "subtitles" in video_data and video_data["subtitles"]:
-                for lang_code in video_data["subtitles"].keys():
-                    if "live_chat" in lang_code:
-                        continue
-                    lang_name = lang_names.get(lang_code, lang_code.upper())
-                    subtitles.append({"code": lang_code, "name": lang_name})
-            
-            # Get automatic captions
-            if "automatic_captions" in video_data and video_data["automatic_captions"]:
-                for lang_code in video_data["automatic_captions"].keys():
-                    if "live_chat" in lang_code:
-                        continue
-                    lang_name = lang_names.get(lang_code, lang_code.upper())
-                    auto_captions.append({"code": lang_code, "name": lang_name})
-            
-            return {
-                "subtitles": subtitles,
-                "automatic_captions": auto_captions,
-                "error": None
-            }
-            
-        except subprocess.TimeoutExpired:
-            return {"error": "Timeout fetching subtitles", "subtitles": [], "automatic_captions": []}
-        except json.JSONDecodeError:
-            return {"error": "Failed to parse video data", "subtitles": [], "automatic_captions": []}
-        except Exception as e:
-            return {"error": str(e), "subtitles": [], "automatic_captions": []}
-
-    def download_subtitle_only(self, url: str) -> tuple:
-        """Download only subtitle (no video) using yt-dlp.
-        
-        Returns:
-            tuple: (srt_path, video_info) where srt_path is str or None
-        """
+    def download_subtitle_only(self, url):
         self.log("[1/2] Downloading subtitle only...")
-        
-        use_module = YTDLP_MODULE_AVAILABLE and self.ytdlp_path == "yt_dlp_module"
-        
-        if use_module:
+        if YTDLP_MODULE_AVAILABLE and self.ytdlp_path == "yt_dlp_module":
             return self._download_subtitle_only_module(url)
-        else:
-            return self._download_subtitle_only_subprocess(url)
+        return self._download_subtitle_only_subprocess(url)
 
-    def _download_subtitle_only_module(self, url: str) -> tuple:
-        """Download subtitle only using yt-dlp Python module API"""
-        self.log(f"  Using yt-dlp module v{yt_dlp.version.__version__}")
-        
-        video_info = {}
-        
-        # Get Deno path
-        deno_path = get_deno_path()
-        ffmpeg_path = get_ffmpeg_path()
-        
-        # Setup environment with Deno in PATH
-        if deno_path and Path(deno_path).exists():
-            deno_dir = str(Path(deno_path).parent)
-            if "PATH" in os.environ:
-                os.environ["PATH"] = f"{deno_dir}{os.pathsep}{os.environ['PATH']}"
-            else:
-                os.environ["PATH"] = deno_dir
-        
-        # yt-dlp options: skip video download, only get subtitle
-        ydl_opts = {
-            'skip_download': True,
-            'writesubtitles': True,
-            'writeautomaticsub': True,
-            'subtitleslangs': [self.subtitle_language],
-            'subtitlesformat': 'srt',
-            'outtmpl': str(self.temp_dir / 'source.%(ext)s'),
-            'quiet': True,
-            'no_warnings': False,
-        }
-        
-        # Add Deno JS runtime if available
-        if deno_path and Path(deno_path).exists():
-            ydl_opts['js_runtimes'] = {'deno': {'path': deno_path}}
-            ydl_opts['remote_components'] = ['ejs:github']
-        
-        # Add FFmpeg location for subtitle conversion
-        if ffmpeg_path and Path(ffmpeg_path).exists():
-            ydl_opts['ffmpeg_location'] = str(Path(ffmpeg_path).parent)
-            ydl_opts['postprocessors'] = [{
-                'key': 'FFmpegSubtitlesConvertor',
-                'format': 'srt',
-            }]
-        
-        cookies_path = self._cookies_path()
-        if cookies_path:
-            ydl_opts['cookiefile'] = str(cookies_path)
-        
-        try:
-            self.log(f"  Downloading {self.subtitle_language} subtitle...")
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # Get video info + download subtitle
-                info = ydl.extract_info(url, download=True)
-                
-                if info:
-                    video_info = {
-                        "title": info.get("title", ""),
-                        "description": (info.get("description", "") or "")[:2000],
-                        "channel": info.get("channel", ""),
-                    }
-                    self.log(f"  Title: {video_info['title'][:50]}...")
-            
-            self.log(f"  ✓ Subtitle download complete!")
-            
-        except Exception as e:
-            last_error = str(e)
-            self.log(f"  ✗ Failed: {last_error[:100]}")
-            
-            if "403" in last_error or "Forbidden" in last_error:
-                raise Exception(
-                    "❌ ERROR: YouTube menolak akses (HTTP 403 Forbidden)\n\n"
-                    "Cookies sudah EXPIRED. Silakan export cookies baru.\n\n"
-                    "📖 Lihat COOKIES.md untuk panduan lengkap"
-                )
-            else:
-                self.log("  Subtitle unavailable, will transcribe locally")
-                return None, video_info
-        
-        # Find downloaded subtitle file
-        srt_path = self.temp_dir / f"source.{self.subtitle_language}.srt"
-        
-        if not srt_path.exists():
-            srt_path = None
-            self.log("  ✗ Subtitle Indonesia not found, will transcribe locally")
-        
-        return str(srt_path) if srt_path else None, video_info
+    def _subtitle_options(self):
+        return self._apply_common_ytdlp_options({"skip_download": True, "writesubtitles": True, "writeautomaticsub": True, "subtitleslangs": [self.subtitle_language], "subtitlesformat": "srt", "outtmpl": str(self.temp_dir / "source.%(ext)s"), "quiet": True, "no_warnings": False, "socket_timeout": 30, "retries": 3, "extractor_retries": 3, "postprocessors": [{"key": "FFmpegSubtitlesConvertor", "format": "srt"}]})
 
-    def _download_subtitle_only_subprocess(self, url: str) -> tuple:
-        """Download subtitle only using yt-dlp subprocess (fallback)"""
-        # Validate yt-dlp
-        try:
-            version_check = subprocess.run(
-                [self.ytdlp_path, "--version"],
-                capture_output=True, text=True,
-                creationflags=SUBPROCESS_FLAGS, timeout=5
-            )
-            if version_check.returncode != 0:
-                raise Exception(f"yt-dlp not working properly. Path: {self.ytdlp_path}")
-            self.log(f"  Using yt-dlp version: {version_check.stdout.strip()}")
-        except FileNotFoundError:
-            raise Exception(f"yt-dlp not found at: {self.ytdlp_path}")
-        
-        # Get video metadata first
-        self.log("  Fetching video info...")
-        meta_cmd = [self.ytdlp_path, "--dump-json", "--no-download", url]
-        
-        cookies_path = self._cookies_path()
-        if cookies_path:
-            meta_cmd.extend(["--cookies", str(cookies_path)])
-        
-        result = subprocess.run(
-            meta_cmd, capture_output=True, text=True,
-            creationflags=SUBPROCESS_FLAGS, timeout=30
-        )
-        
-        video_info = {}
-        if result.returncode == 0:
-            try:
-                yt_data = json.loads(result.stdout)
-                video_info = {
-                    "title": yt_data.get("title", ""),
-                    "description": yt_data.get("description", "")[:2000],
-                    "channel": yt_data.get("channel", ""),
-                }
-                self.log(f"  Title: {video_info['title'][:50]}...")
-            except json.JSONDecodeError:
-                self.log("  Warning: Could not parse metadata")
-        
-        # Download subtitle only
-        self.log(f"  Downloading {self.subtitle_language} subtitle...")
-        cmd = [
-            self.ytdlp_path,
-            "--skip-download",
-            "--write-sub", "--write-auto-sub",
-            "--sub-lang", self.subtitle_language,
-            "--convert-subs", "srt",
-            "-o", str(self.temp_dir / "source.%(ext)s"),
-        ]
-        
-        if cookies_path:
-            cmd.extend(["--cookies", str(cookies_path)])
-        
-        cmd.append(url)
-        
-        result = subprocess.run(
-            cmd, capture_output=True, text=True,
-            creationflags=SUBPROCESS_FLAGS, timeout=30
-        )
-        
-        if result.returncode != 0:
-            error_msg = result.stderr.strip() if result.stderr else "Unknown error"
-            self.log(f"  ✗ Failed: {error_msg[:100]}")
-            if "403" in error_msg or "Forbidden" in error_msg:
-                raise Exception(f"Subtitle download failed!\n\n{error_msg}")
-            return None, video_info
-        
-        self.log(f"  ✓ Subtitle download complete!")
-        
-        # Find downloaded subtitle file
-        srt_path = self.temp_dir / f"source.{self.subtitle_language}.srt"
-        
-        if not srt_path.exists():
-            srt_path = None
-            self.log("  ✗ Subtitle Indonesia not found, will transcribe locally")
-        
-        return str(srt_path) if srt_path else None, video_info
+    def _video_info(self, info):
+        return {"title": info.get("title", ""), "description": (info.get("description", "") or "")[:2000], "channel": info.get("channel", "")} if info else {}
 
-    def download_video_section(self, url: str, start_time: str, end_time: str, output_path: str) -> str:
-        """Download a specific section of a video using yt-dlp --download-sections.
-        
-        Args:
-            url: YouTube video URL
-            start_time: Start timestamp (HH:MM:SS,mmm or HH:MM:SS.mmm)
-            end_time: End timestamp (HH:MM:SS,mmm or HH:MM:SS.mmm)
-            output_path: Path to save the downloaded section
-            
-        Returns:
-            str: Path to downloaded video file
-        """
-        # Normalize timestamps (replace comma with dot for yt-dlp)
-        start_clean = start_time.replace(",", ".")
-        end_clean = end_time.replace(",", ".")
-        
-        use_module = YTDLP_MODULE_AVAILABLE and self.ytdlp_path == "yt_dlp_module"
-        
-        if use_module:
-            return self._download_section_module(url, start_clean, end_clean, output_path)
-        else:
-            return self._download_section_subprocess(url, start_clean, end_clean, output_path)
-
-    def _download_section_module(self, url: str, start_time: str, end_time: str, output_path: str) -> str:
-        """Download video section using yt-dlp Python module"""
-        self.log(f"  Downloading section {start_time} → {end_time}...")
-        
-        # Get paths
-        ffmpeg_path = get_ffmpeg_path()
-        deno_path = get_deno_path()
-        
-        # Setup Deno in PATH
-        if deno_path and Path(deno_path).exists():
-            deno_dir = str(Path(deno_path).parent)
-            if "PATH" in os.environ:
-                if deno_dir not in os.environ["PATH"]:
-                    os.environ["PATH"] = f"{deno_dir}{os.pathsep}{os.environ['PATH']}"
-            else:
-                os.environ["PATH"] = deno_dir
-        
-        # Progress hook
-        def progress_hook(d):
+    def _download_subtitle_only_module(self, url):
+        def cancel(_):
             if self.is_cancelled():
-                raise Exception("Cancelled by user")
-            
-            if d['status'] == 'downloading':
-                percent_str = d.get('_percent_str', '0%').strip()
-                match = re.search(r'(\d+\.?\d*)%', percent_str)
-                if match:
-                    percent = float(match.group(1))
-                    self.log(f"  Downloading section... {percent:.1f}%")
-                    self.set_progress(f"Downloading video section... {percent:.1f}%", 0.32 + percent / 100 * 0.08)
-            elif d['status'] == 'finished':
-                self.log("  Section download finished, processing...")
-        
-        # Format selector
-        format_selector = self._format_selector()
-        
-        ydl_opts = {
-            'format': format_selector,
-            'format_sort': self._format_sort(),
-            'format_sort_force': True,
-            'merge_output_format': 'mp4',
-            'outtmpl': output_path,
-            'progress_hooks': [progress_hook],
-            'quiet': True,
-            'no_warnings': False,
-            'download_ranges': yt_dlp.utils.download_range_func(None, [(
-                self.parse_timestamp(start_time),
-                self.parse_timestamp(end_time)
-            )]),
-            'concurrent_fragment_downloads': 4,
-            'fragment_retries': 5,
-            'retries': 5,
-        }
-        
-        # Add Deno JS runtime
-        if deno_path and Path(deno_path).exists():
-            ydl_opts['js_runtimes'] = {'deno': {'path': deno_path}}
-            ydl_opts['remote_components'] = ['ejs:github']
-        
-        # Add FFmpeg location
-        if ffmpeg_path and Path(ffmpeg_path).exists():
-            ydl_opts['ffmpeg_location'] = str(Path(ffmpeg_path).parent)
-        
-        cookies_path = self._cookies_path()
-        if cookies_path:
-            ydl_opts['cookiefile'] = str(cookies_path)
-        
+                raise InterruptedError("Stopped")
+        options = self._subtitle_options()
+        options["progress_hooks"] = [cancel]
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-            
-            self.log(f"  ✓ Section downloaded!")
-            
-        except Exception as e:
-            last_error = str(e)
-            self.log(f"  ✗ Section download failed: {last_error[:100]}")
-            raise Exception(f"Failed to download video section!\n\n{last_error}")
-        
-        # Find the actual output file (yt-dlp may add extension)
-        output_dir = Path(output_path).parent
-        output_stem = Path(output_path).stem
-        
-        # Check for exact match first
-        if Path(output_path).exists():
-            return output_path
-        
-        # Check for .mp4 variant
-        mp4_path = output_dir / f"{output_stem}.mp4"
-        if mp4_path.exists():
-            return str(mp4_path)
-        
-        # Search for any file with the stem
-        candidates = list(output_dir.glob(f"{output_stem}.*"))
-        video_candidates = [c for c in candidates if c.suffix in ('.mp4', '.mkv', '.webm')]
-        if video_candidates:
-            return str(video_candidates[0])
-        
-        raise Exception(f"Downloaded section file not found at: {output_path}")
+            with yt_dlp.YoutubeDL(options) as downloader:
+                info = downloader.extract_info(url, download=True)
+        except Exception as exc:
+            if "403" in str(exc) or "Forbidden" in str(exc):
+                raise RuntimeError("YouTube menolak akses subtitle. Perbarui cookies.txt.") from exc
+            self.log("  Subtitle unavailable, will transcribe locally")
+            return None, {}
+        subtitle = self.temp_dir / f"source.{self.subtitle_language}.srt"
+        return (str(subtitle) if subtitle.is_file() else None), self._video_info(info)
 
-    def _download_section_subprocess(self, url: str, start_time: str, end_time: str, output_path: str) -> str:
-        """Download video section using yt-dlp subprocess (fallback)"""
-        self.log(f"  Downloading section {start_time} → {end_time}...")
-        
-        # Build section string for yt-dlp
-        section_str = f"*{start_time}-{end_time}"
-        
-        format_selector = self._format_selector()
-        
-        cmd = [
-            self.ytdlp_path,
-            "-f", format_selector,
-            "--format-sort", ",".join(self._format_sort()),
-            "--format-sort-force",
-            "--download-sections", section_str,
-            "--concurrent-fragments", "4",
-            "--fragment-retries", "5",
-            "--retries", "5",
-            "--newline",
-            "--merge-output-format", "mp4",
-            "-o", output_path,
-        ]
-        
-        cookies_path = self._cookies_path()
-        if cookies_path:
-            cmd.extend(["--cookies", str(cookies_path)])
-        
-        cmd.append(url)
-        
-        self.log(f"  Running: {' '.join(cmd[:6])}...")
-        
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            creationflags=SUBPROCESS_FLAGS
-        )
-        
-        output_lines = []
-        while True:
+    def _download_subtitle_only_subprocess(self, url):
+        cookies = self._cookies_path()
+        metadata = [self.ytdlp_path, "--dump-json", "--no-download"]
+        if cookies:
+            metadata.extend(["--cookies", str(cookies)])
+        metadata.append(url)
+        result = subprocess.run(metadata, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS, timeout=30)
+        try:
+            info = self._video_info(json.loads(result.stdout)) if result.returncode == 0 else {}
+        except json.JSONDecodeError:
+            info = {}
+        command = [self.ytdlp_path, "--skip-download", "--write-sub", "--write-auto-sub", "--sub-lang", self.subtitle_language, "--convert-subs", "srt", "-o", str(self.temp_dir / "source.%(ext)s")]
+        if cookies:
+            command.extend(["--cookies", str(cookies)])
+        result = self._run_cancelable_subprocess([*command, url], capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS, timeout=900)
+        if result.returncode:
+            if "403" in result.stderr or "Forbidden" in result.stderr:
+                raise RuntimeError("YouTube menolak akses subtitle. Perbarui cookies.txt.")
+            return None, info
+        subtitle = self.temp_dir / f"source.{self.subtitle_language}.srt"
+        return (str(subtitle) if subtitle.is_file() else None), info
+
+    def download_video_section(self, url, start_time, end_time, output_path):
+        start = start_time.replace(",", ".")
+        end = end_time.replace(",", ".")
+        started = time.monotonic()
+        try:
+            if YTDLP_MODULE_AVAILABLE and self.ytdlp_path == "yt_dlp_module":
+                return self._download_section_module(url, start, end, output_path)
+            return self._download_section_subprocess(url, start, end, output_path)
+        finally:
+            self.log(f"  Section download elapsed: {time.monotonic() - started:.1f}s")
+
+    def _download_section_module(self, url, start_time, end_time, output_path):
+        def progress_hook(status):
+            if self.is_cancelled():
+                raise InterruptedError("Stopped")
+            match = re.search(r"(\d+\.?\d*)%", status.get("_percent_str", "")) if status.get("status") == "downloading" else None
+            if match:
+                self.set_progress(f"Downloading video section... {match.group(1)}%", 0.32 + float(match.group(1)) / 100 * 0.08)
+        options = self._apply_common_ytdlp_options({
+            "format": self._format_selector(),
+            "format_sort": self._format_sort(),
+            "format_sort_force": True,
+            "merge_output_format": "mp4",
+            "outtmpl": output_path,
+            "progress_hooks": [progress_hook],
+            "quiet": True,
+            "no_warnings": False,
+            "download_ranges": yt_dlp.utils.download_range_func(None, [(self.parse_timestamp(start_time), self.parse_timestamp(end_time))]),
+            'concurrent_fragment_downloads': 4,
+            "fragment_retries": 5,
+            "retries": 5,
+        })
+        with yt_dlp.YoutubeDL(options) as downloader:
+            downloader.download([url])
+        return self._find_output(Path(output_path).stem, {".mp4", ".mkv", ".webm"}, output_path)
+
+    def _download_section_subprocess(self, url, start_time, end_time, output_path):
+        command = [self.ytdlp_path, "-f", self._format_selector(), "--format-sort", ",".join(self._format_sort()), "--format-sort-force", "--download-sections", f"*{start_time}-{end_time}", "--concurrent-fragments", "4", "--fragment-retries", "5", "--retries", "5", "--newline", "--merge-output-format", "mp4", "-o", output_path]
+        if cookies := self._cookies_path():
+            command.extend(["--cookies", str(cookies)])
+        process = subprocess.Popen([*command, url], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, creationflags=SUBPROCESS_FLAGS)
+        lines = []
+        for line in process.stdout or []:
             if self.is_cancelled():
                 process.terminate()
-                process.wait()
-                raise Exception("Cancelled by user")
-            
-            line = process.stdout.readline()
-            if not line and process.poll() is not None:
-                break
-            
-            line = line.strip()
-            if line:
-                output_lines.append(line)
-                output_lines = output_lines[-100:]
-            if "[download]" in line and "%" in line:
-                match = re.search(r'(\d+\.?\d*)%', line)
-                if match:
-                    percent = match.group(1)
-                    self.log(f"  Downloading section... {percent}%")
-                    self.set_progress(f"Downloading video section... {percent}%", 0.32 + float(percent) / 100 * 0.08)
-        
-        if process.returncode != 0:
-            error_output = "\n".join(output_lines[-20:])
-            self.log(f"  ✗ Section download failed: {error_output[-200:]}")
-            raise Exception(f"Failed to download video section!\n\n{error_output[-200:]}")
-        
-        self.log(f"  ✓ Section downloaded!")
-        
-        # Find the actual output file
-        output_dir = Path(output_path).parent
-        output_stem = Path(output_path).stem
-        
-        if Path(output_path).exists():
-            return output_path
-        
-        mp4_path = output_dir / f"{output_stem}.mp4"
-        if mp4_path.exists():
-            return str(mp4_path)
-        
-        candidates = list(output_dir.glob(f"{output_stem}.*"))
-        video_candidates = [c for c in candidates if c.suffix in ('.mp4', '.mkv', '.webm')]
-        if video_candidates:
-            return str(video_candidates[0])
-        
-        raise Exception(f"Downloaded section file not found at: {output_path}")
+                raise InterruptedError("Stopped")
+            lines.append(line.strip())
+            match = re.search(r"(\d+\.?\d*)%", line) if "[download]" in line else None
+            if match:
+                self.set_progress(f"Downloading video section... {match.group(1)}%", 0.32 + float(match.group(1)) / 100 * 0.08)
+        if process.wait() != 0:
+            raise RuntimeError(f"Failed to download video section:\n{' '.join(lines[-20:])[-400:]}")
+        return self._find_output(Path(output_path).stem, {".mp4", ".mkv", ".webm"}, output_path)
 
-    def parse_srt(self, srt_path: str) -> str:
-        """Parse SRT to text with timestamps"""
-        with open(srt_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        
-        pattern = r"(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n(.*?)(?=\n\n|\Z)"
-        matches = re.findall(pattern, content, re.DOTALL)
-        
-        lines = []
-        for idx, start, end, text in matches:
-            clean_text = text.replace("\n", " ").strip()
-            lines.append(f"[{start} - {end}] {clean_text}")
-        
-        return "\n".join(lines)
+    def _find_output(self, stem, suffixes, exact=None):
+        if exact and Path(exact).is_file():
+            return str(exact)
+        for candidate in self.temp_dir.glob(f"{stem}.*"):
+            if candidate.suffix.lower() in suffixes:
+                return str(candidate)
+        raise RuntimeError(f"Downloaded output not found: {stem}")
 
-    def extract_transcript_for_highlight(self, srt_path: str, highlight: dict) -> str:
-        """Extract subtitle text within a highlight's time range.
-        
-        Args:
-            srt_path: Path to SRT file
-            highlight: Dict with start_time and end_time keys
-            
-        Returns:
-            str: Concatenated subtitle text within the time range
-        """
-        with open(srt_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        
-        pattern = r"(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n(.*?)(?=\n\n|\Z)"
-        matches = re.findall(pattern, content, re.DOTALL)
-        
-        start_sec = self.parse_timestamp(highlight["start_time"])
-        end_sec = self.parse_timestamp(highlight["end_time"])
-        
-        lines = []
-        for idx, start, end, text in matches:
-            sub_start = self.parse_timestamp(start)
-            sub_end = self.parse_timestamp(end)
-            
-            # Include subtitle if it overlaps with highlight range
-            if sub_end >= start_sec and sub_start <= end_sec:
-                clean_text = text.replace("\n", " ").strip()
-                if clean_text:
-                    lines.append(clean_text)
-        
-        return " ".join(lines)
+    def parse_srt_timed(self, srt_path):
+        content = Path(srt_path).read_text(encoding="utf-8-sig")
+        timestamp = r"(\d{1,}):(\d{2}):(\d{2})[,.](\d{1,3})"
+        pattern = re.compile(rf"^\s*{timestamp}\s*-->\s*{timestamp}(?:\s+.*)?$")
+
+        def seconds(parts):
+            hours, minutes, value, milliseconds = parts
+            return int(hours) * 3600 + int(minutes) * 60 + int(value) + int(milliseconds.ljust(3, "0")[:3]) / 1000
+
+        segments = []
+        for block in re.split(r"\n\s*\n", content.strip()):
+            lines = block.splitlines()
+            if lines and lines[0].strip().isdigit():
+                lines = lines[1:]
+            if not lines or not (match := pattern.match(lines[0])):
+                continue
+            text = " ".join(line.strip() for line in lines[1:] if line.strip())
+            if text:
+                segments.append({"text": text, "start": seconds(match.groups()[:4]), "end": seconds(match.groups()[4:])})
+        if not segments:
+            raise ValueError("SRT contains no valid subtitle segments")
+        return validate_timed_transcript({"duration": max(item["end"] for item in segments), "words": [], "segments": segments})

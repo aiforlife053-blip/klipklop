@@ -503,7 +503,7 @@ Transcript:
                         headers=headers,
                         data=form_data,
                         files={"file": (os.path.basename(audio_path), audio_file, mime)},
-                        timeout=600,
+                        timeout=(15, 120),
                     )
             except (requests.Timeout, requests.ConnectionError) as exc:
                 if attempt == 2:
@@ -639,26 +639,3 @@ Transcript:
             for chunk_path in chunk_paths:
                 Path(chunk_path).unlink(missing_ok=True)
 
-    def _whisper_transcribe_file(self, audio_path: str, time_offset: float = 0) -> list:
-        return self._transcribe_groq_chunk(audio_path, time_offset)["segments"]
-
-    def _whisper_transcribe_words_api(self, audio_path: str):
-        from types import SimpleNamespace
-
-        transcript = self.transcribe_audio_with_timestamps(audio_path, require_words=True)
-        return SimpleNamespace(
-            words=[SimpleNamespace(**word) for word in transcript["words"]],
-            segments=transcript["segments"],
-            text=" ".join(segment["text"].strip() for segment in transcript["segments"]).strip(),
-        )
-
-    def _whisper_transcribe_words(self, audio_path: str):
-        return self._whisper_transcribe_words_api(audio_path)
-
-    def _seconds_to_srt_timestamp(seconds: float) -> str:
-        """Convert seconds to SRT timestamp format HH:MM:SS,mmm"""
-        h = int(seconds // 3600)
-        m = int((seconds % 3600) // 60)
-        s = seconds % 60
-        ms = int((s - int(s)) * 1000)
-        return f"{h:02d}:{m:02d}:{int(s):02d},{ms:03d}"
