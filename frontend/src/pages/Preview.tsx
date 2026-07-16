@@ -9,6 +9,7 @@ import { cloneSettings, mergeSettings, validateSettings, type ClipSettings, type
 type ClipsResponse = { status: string; clips: WorkflowClip[] };
 type ClipResponse = { status: string; clip: WorkflowClip & EditorClip & { render_settings?: Partial<ClipSettings>; draft_settings?: Partial<ClipSettings>; hook_text?: string }; defaults: ClipSettings };
 type ActionResponse = { status: string; message?: string; stream_url?: string; preview_id?: string };
+type GamingDetectionResponse = { status: string; message?: string; facecam?: { x: number; y: number; width: number; height: number }; confidence?: number };
 type PreviewStatus = { state: 'queued' | 'rendering' | 'ready' | 'cancelled' | 'error'; stage: string; progress: number; elapsed_seconds: number; stream_url?: string; error?: string };
 type DeleteTarget = WorkflowClip | null;
 type GenerationClip = WorkflowClip & { generation_id?: string };
@@ -48,11 +49,15 @@ export default function Preview() {
   const [busy, setBusy] = useState('');
   const [pageError, setPageError] = useState('');
   const [editorError, setEditorError] = useState('');
+  const [gamingDetectionStatus, setGamingDetectionStatus] = useState('');
+  const [gamingDetectionBusy, setGamingDetectionBusy] = useState(false);
   const [scheduleAt, setScheduleAt] = useState<Record<string, string>>({});
   const [uploadText, setUploadText] = useState<Record<string, { title: string; description: string }>>({});
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
   const previousActive = useRef(false);
   const loadSequence = useRef(0);
+  const detectionSequence = useRef(0);
+  const selectedClipId = useRef('');
 
   const load = useCallback(async () => {
     const sequence = ++loadSequence.current;
@@ -106,6 +111,8 @@ export default function Preview() {
   };
 
   const openEditor = async (clip: WorkflowClip) => {
+    detectionSequence.current += 1;
+    selectedClipId.current = clip.clip_id;
     setBusy('editor');
     setPageError('');
     try {
@@ -124,6 +131,8 @@ export default function Preview() {
       setPreviewState('');
       previewId.current = '';
       setEditorError('');
+      setGamingDetectionStatus(merged.video_layout.mode === 'gaming' ? 'Facecam terdeteksi.' : '');
+      setGamingDetectionBusy(false);
     } catch (requestError) {
       setPageError(messageOf(requestError, 'Editor gagal dibuka.'));
     } finally {
@@ -142,6 +151,42 @@ export default function Preview() {
     setSettings((current) => current ? { ...current, [section]: typeof defaults[section] === 'object' ? { ...defaults[section] } : defaults[section] } : current);
     setEditorError('');
     setPreviewStale(true);
+  };
+
+  const detectGaming = async (force = false) => {
+    if (!selected || gamingDetectionBusy) return;
+    const clipId = selected.clip_id;
+    const sequence = ++detectionSequence.current;
+    const currentRequest = () => detectionSequence.current === sequence && selectedClipId.current === clipId;
+    setSettings((current) => current ? { ...current, video_layout: { mode: 'gaming' } } : current);
+    setGamingDetectionBusy(true);
+    setGamingDetectionStatus('Mendeteksi facecam…');
+    setEditorError('');
+    setPreviewStale(true);
+    try {
+      const data = await apiPost<GamingDetectionResponse, object>('/api/clip/gaming/detect', { clip_id: clipId, ...(force ? { force: true } : {}) });
+      if (!currentRequest()) return;
+      if (data.status !== 'ok' || !data.facecam) throw new Error(data.message || 'Facecam tidak ditemukan.');
+      setSettings((current) => current ? { ...current, video_layout: { mode: 'gaming', facecam_x: data.facecam?.x, facecam_y: data.facecam?.y, facecam_width: data.facecam?.width, facecam_height: data.facecam?.height, facecam_confidence: data.confidence } } : current);
+      setGamingDetectionStatus('Facecam terdeteksi.');
+    } catch (requestError) {
+      if (!currentRequest()) return;
+      setGamingDetectionStatus('Deteksi facecam gagal.');
+      setEditorError(messageOf(requestError, 'Facecam tidak ditemukan. Coba deteksi ulang.'));
+    } finally {
+      if (currentRequest()) setGamingDetectionBusy(false);
+    }
+  };
+
+  const changeVideoLayout = (mode: 'normal' | 'gaming') => {
+    if (mode === 'normal') {
+      setSettings((current) => current ? { ...current, video_layout: { ...current.video_layout, mode } } : current);
+      setGamingDetectionStatus('');
+      setEditorError('');
+      setPreviewStale(true);
+      return;
+    }
+    void detectGaming();
   };
 
   const renderPreview = async () => {
@@ -255,7 +300,7 @@ export default function Preview() {
     </header>
     {pageError && <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm font-medium text-destructive">{pageError}</div>}
     <WorkflowPanel clips={prioritizedClips} busy={busy} scheduleAt={scheduleAt} uploadText={uploadText} onScheduleAtChange={(clipId, value) => setScheduleAt((current) => ({ ...current, [clipId]: value }))} onUploadTextChange={(clipId, value) => setUploadText((current) => ({ ...current, [clipId]: value }))} onEdit={openEditor} onDelete={setDeleteTarget} onUpload={uploadNow} onSchedule={scheduleClip} onCancelSchedule={(clip) => actionAndLoad('/api/clip/schedule/cancel', clip, 'Jadwal gagal dibatalkan.')} onEditAgain={(clip) => actionAndLoad('/api/clip/edit', clip, 'Klip gagal dikembalikan ke editor.')} onRetryRender={(clip) => actionAndLoad('/api/clip/render/retry', clip, 'Render gagal dimulai ulang.')} onRetryUpload={(clip) => actionAndLoad('/api/clip/upload/retry', clip, 'Upload gagal diulang.', { upload_now: true })} onBackToSchedule={(clip) => actionAndLoad('/api/clip/upload/retry', clip, 'Klip gagal dikembalikan ke Set Waktu.')} onDashboard={() => navigate('/')} />
-    {selected && settings && defaults && <ClipEditorModal clip={selected} settings={settings} previewUrl={previewUrl} previewBusy={previewBusy} actionBusy={Boolean(busy)} error={editorError} invalid={invalid} hookText={hookText} backgroundVisible={settings.screen_size !== '16:9'} previewState={previewState} previewProgress={previewProgress} previewElapsed={previewElapsed} previewStale={previewStale} onHookTextChange={(value) => { setHookText(value); setPreviewStale(true); }} onClose={() => { setSelected(null); setSettings(null); setEditorError(''); }} onChange={changeSetting} onReset={resetSection} onPreview={renderPreview} onCancelPreview={cancelPreview} onSaveDefaults={saveDefaults} onRender={renderFinal} />}
+    {selected && settings && defaults && <ClipEditorModal clip={selected} settings={settings} previewUrl={previewUrl} previewBusy={previewBusy} actionBusy={Boolean(busy)} error={editorError} invalid={invalid} hookText={hookText} backgroundVisible={settings.screen_size !== '16:9' && settings.video_layout.mode !== 'gaming'} gamingDetectionStatus={gamingDetectionStatus} gamingDetectionBusy={gamingDetectionBusy} previewState={previewState} previewProgress={previewProgress} previewElapsed={previewElapsed} previewStale={previewStale} onHookTextChange={(value) => { setHookText(value); setPreviewStale(true); }} onClose={() => { detectionSequence.current += 1; selectedClipId.current = ''; setSelected(null); setSettings(null); setEditorError(''); setGamingDetectionBusy(false); }} onChange={changeSetting} onVideoLayoutChange={changeVideoLayout} onRedetectGaming={() => void detectGaming(true)} onClearError={() => setEditorError('')} onReset={resetSection} onPreview={renderPreview} onCancelPreview={cancelPreview} onSaveDefaults={saveDefaults} onRender={renderFinal} />}
     <ConfirmModal isOpen={Boolean(deleteTarget)} title="Hapus klip lokal?" message={deleteTarget ? `File lokal “${deleteTarget.title}” akan dihapus permanen. Video YouTube yang sudah tayang tidak ikut dihapus.` : ''} onConfirm={confirmDelete} onCancel={() => setDeleteTarget(null)} busy={busy === '/api/clip/delete'} />
   </main>;
 }

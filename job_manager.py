@@ -26,6 +26,7 @@ from openai import OpenAI
 from clipper_core import AutoClipperCore, LocalClipRenderer
 from config.config_manager import ConfigManager
 from config.editor_defaults import CUE_BUILDER_VERSION, PREVIEW_PROFILE_VERSION, SCENE_BUILDER_VERSION, editor_defaults
+from gaming_layout import DETECTOR_VERSION, FACE_NOT_FOUND_MESSAGE, GamingLayoutError, detect_facecam, validate_roi
 from subtitle_cues import build_subtitle_cues
 from render_scheduler import RenderAttempt, RenderScheduler
 from youtube_uploader import upload_youtube_video
@@ -351,6 +352,7 @@ class WebJobManager:
             "credit_watermark": cfg.get("credit_watermark", {"enabled": True, "text": "sc : {channel}", "color": "#FFFFFF", "size": 0.032, "opacity": 0.55, "position_x": 0.06, "position_y": 0.23}),
             "hook_style": cfg.get("hook_style", {"enabled": True, "font_size": 0.054, "font_family": "Plus Jakarta Sans", "font_weight": 800, "text_color": "#FFD700", "outline_color": "#000000", "outline_thickness": 1.5, "duration": 5.0, "position_x": 0.5, "position_y": 0.2}),
             "blur_background": cfg.get("blur_background", {"enabled": True, "scale": 1.0, "zoom": 1.08, "strength": 30}),
+            "video_layout": {"mode": cfg.get("video_layout", {}).get("mode", "normal")},
             "output_dir": cfg.get("output_dir", str(self.output_dir)),
             "parallel_workers": int(cfg.get("parallel_workers", 1)),
             "cookie_exists": cookies["exists"],
@@ -507,6 +509,10 @@ class WebJobManager:
         blur_background["scale"] = max(1.0, min(2.0, float(self._as_float(blur_background.get("scale"), 1.6))))
         blur_background["zoom"] = max(1.0, min(3.0, float(blur_background.get("zoom", 1.08) or 1.08)))
         blur_background["strength"] = max(0, min(100, self._as_int(blur_background.get("strength"), 30)))
+        video_layout_payload = payload.get("video_layout") if isinstance(payload.get("video_layout"), dict) else {}
+        video_layout = {"mode": str(video_layout_payload.get("mode", cfg_mgr.config.get("video_layout", {}).get("mode", "normal")))}
+        if video_layout["mode"] not in {"normal", "gaming"}:
+            video_layout["mode"] = "normal"
         if self._vault_enabled:
             try:
                 if clear_api_key or clear_highlight_api_key:
@@ -563,6 +569,7 @@ class WebJobManager:
         cfg_mgr.config["hook_style"] = hook_style
         cfg_mgr.config["subtitle"] = subtitle_cfg
         cfg_mgr.config["blur_background"] = blur_background
+        cfg_mgr.config["video_layout"] = video_layout
         cfg_mgr.config["output_dir"] = output_dir
         parallel_workers = max(1, min(8, self._as_int(payload.get("parallel_workers", cfg_mgr.config.get("parallel_workers", 1)), 1)))
         cfg_mgr.config["parallel_workers"] = parallel_workers
@@ -831,7 +838,7 @@ class WebJobManager:
         transcript_path = meta_path.parent / str(meta.get("transcript_path") or "transcript.json")
         try:
             transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
-            settings = self._render_settings({}, meta)
+            settings = self._render_settings({}, meta, require_gaming_roi=False)
             cues = build_subtitle_cues(transcript, settings["subtitle"].get("text_transform", "none"))
             if len(cues) > 3600 or len(json.dumps(cues, ensure_ascii=False).encode("utf-8")) > 2 * 1024 * 1024:
                 raise ValueError("Subtitle terlalu besar")
@@ -844,7 +851,7 @@ class WebJobManager:
             view["subtitle_reason"] = "Subtitle bertimestamp tidak tersedia"
         view["watermark_url"] = ""
         view["watermark_revision"] = ""
-        view["resolved_credit_text"] = self._resolve_credit_text(self._render_settings({}, meta)["credit_watermark"].get("text", ""), meta.get("channel_name", ""))
+        view["resolved_credit_text"] = self._resolve_credit_text(self._render_settings({}, meta, require_gaming_roi=False)["credit_watermark"].get("text", ""), meta.get("channel_name", ""))
         return {"status": "ok", "clip": view, "defaults": self._editor_defaults()}
 
     @staticmethod
@@ -856,9 +863,12 @@ class WebJobManager:
         return editor_defaults()
 
     def _editor_defaults(self):
-        return self._editor_defaults_local()
+        defaults = self._editor_defaults_local()
+        mode = self._config().config.get("video_layout", {}).get("mode", "normal")
+        defaults["video_layout"] = {"mode": mode if mode in {"normal", "gaming"} else "normal"}
+        return defaults
 
-    def _render_settings(self, payload, metadata):
+    def _render_settings(self, payload, metadata, require_gaming_roi=True):
         defaults = self._editor_defaults()
         supplied = payload.get("settings") if isinstance(payload.get("settings"), dict) else metadata.get("render_settings") if isinstance(metadata.get("render_settings"), dict) else {}
         snapshot = metadata.get("draft_settings") if isinstance(metadata.get("draft_settings"), dict) else {}
@@ -893,7 +903,49 @@ class WebJobManager:
         settings["landscape_blur"] = self._as_bool(settings["blur_background"].get("enabled"), self._as_bool(snapshot.get("landscape_blur"), False))
         settings["video_quality"] = str(snapshot.get("video_quality") or "720")
         settings["screen_size"] = "16:9" if str(snapshot.get("screen_size")) == "16:9" else "9:16"
+        layout = settings.get("video_layout", {})
+        mode = str(layout.get("mode") or "normal")
+        if mode not in {"normal", "gaming"}:
+            mode = "normal"
+        settings["video_layout"] = {"mode": mode}
+        if mode == "gaming":
+            settings["screen_size"] = "9:16"
+            detected = metadata.get("gaming_detection") if isinstance(metadata.get("gaming_detection"), dict) else {}
+            roi_source = layout if all(key in layout for key in ("facecam_x", "facecam_y", "facecam_width", "facecam_height")) else detected.get("facecam")
+            roi = validate_roi({"x": roi_source.get("facecam_x", roi_source.get("x")), "y": roi_source.get("facecam_y", roi_source.get("y")), "width": roi_source.get("facecam_width", roi_source.get("width")), "height": roi_source.get("facecam_height", roi_source.get("height"))} if isinstance(roi_source, dict) else None)
+            if not roi:
+                if require_gaming_roi:
+                    raise GamingLayoutError(FACE_NOT_FOUND_MESSAGE)
+                return settings
+            confidence = self._as_float(layout.get("facecam_confidence", detected.get("confidence")), 0.0)
+            settings["video_layout"].update(facecam_x=roi["x"], facecam_y=roi["y"], facecam_width=roi["width"], facecam_height=roi["height"], facecam_confidence=max(0.0, min(1.0, confidence)))
         return settings
+
+    def detect_gaming_facecam(self, payload):
+        if not isinstance(payload, dict):
+            return {"status": "error", "message": "Payload deteksi tidak valid"}
+        clip_id = str(payload.get("clip_id") or "")
+        lock, meta_path, metadata = self._locked_clip_meta(clip_id)
+        try:
+            if not meta_path:
+                return {"status": "error", "message": "Klip tidak ditemukan"}
+            source = meta_path.parent / "source.mp4"
+            identity = {**self._file_identity(source), "detector_version": DETECTOR_VERSION}
+            cached = metadata.get("gaming_detection") if isinstance(metadata.get("gaming_detection"), dict) else {}
+            if not self._as_bool(payload.get("force"), False) and cached.get("source") == identity and validate_roi(cached.get("facecam")):
+                return {"status": "ok", "facecam": cached["facecam"], "confidence": cached.get("confidence", 0.0), "cached": True}
+            try:
+                detected = detect_facecam(source)
+            except GamingLayoutError as exc:
+                metadata.pop("gaming_detection", None)
+                self._write_json_atomic(meta_path, metadata)
+                return {"status": "error", "message": str(exc)}
+            facecam = {key: detected[key] for key in ("x", "y", "width", "height")}
+            metadata["gaming_detection"] = {"source": identity, "facecam": facecam, "confidence": detected["confidence"]}
+            self._write_json_atomic(meta_path, metadata)
+            return {"status": "ok", "facecam": facecam, "confidence": detected["confidence"], "cached": False}
+        finally:
+            lock.release()
 
     def render_clip(self, payload, preview=False):
         clip_id = str(payload.get("clip_id") or "")
@@ -903,7 +955,18 @@ class WebJobManager:
                 return {"status": "error", "message": "Klip tidak ditemukan"}
             if metadata.get("status") not in {"needs_edit", "render_error"}:
                 return {"status": "error", "message": "Klip tidak dapat dirender pada status ini"}
-            settings = self._render_settings(payload, metadata)
+            try:
+                settings = self._render_settings(payload, metadata)
+            except GamingLayoutError as exc:
+                return {"status": "error", "message": str(exc)}
+            if settings["video_layout"]["mode"] == "gaming":
+                detection = metadata.get("gaming_detection") if isinstance(metadata.get("gaming_detection"), dict) else {}
+                current_identity = {**self._file_identity(meta_path.parent / "source.mp4"), "detector_version": DETECTOR_VERSION}
+                if detection.get("source") != current_identity:
+                    return {"status": "error", "message": FACE_NOT_FOUND_MESSAGE}
+                geometry = metadata.get("source_geometry") if isinstance(metadata.get("source_geometry"), dict) else self._source_geometry(meta_path.parent / "source.mp4")
+                if not geometry.get("is_landscape"):
+                    return {"status": "error", "message": "Mode gaming hanya mendukung source landscape."}
             if settings["subtitle"].get("enabled"):
                 transcript_path = meta_path.parent / str(metadata.get("transcript_path") or "transcript.json")
                 try:

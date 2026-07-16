@@ -32,9 +32,14 @@ interface ClipEditorModalProps {
   invalid: boolean;
   hookText: string;
   backgroundVisible: boolean;
+  gamingDetectionStatus?: string;
+  gamingDetectionBusy?: boolean;
   onHookTextChange: (value: string) => void;
   onClose: () => void;
   onChange: (section: keyof ClipSettings, key: string, value: SettingValue) => void;
+  onVideoLayoutChange?: (mode: 'normal' | 'gaming') => void;
+  onRedetectGaming?: () => void;
+  onClearError?: () => void;
   onReset: (section: keyof ClipSettings) => void;
   onPreview: () => void;
   onSaveDefaults: () => void;
@@ -51,7 +56,7 @@ const focusButton = 'rounded-lg transition-colors focus:outline-none focus:ring-
 const rangeClass = 'h-2 w-full cursor-pointer appearance-none rounded-full bg-field accent-primary focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 focus:ring-offset-card';
 
 export function ClipEditorModal(props: ClipEditorModalProps) {
-  const { clip, settings, previewUrl, previewBusy, actionBusy, error, invalid, hookText, backgroundVisible, onHookTextChange, onClose, onChange, onReset, onPreview, onSaveDefaults, onRender, previewState, previewProgress, previewElapsed, previewStale, onCancelPreview } = props;
+  const { clip, settings, previewUrl, previewBusy, actionBusy, error, invalid, hookText, backgroundVisible, gamingDetectionStatus, gamingDetectionBusy, onHookTextChange, onClose, onChange, onVideoLayoutChange, onRedetectGaming, onClearError, onReset, onPreview, onSaveDefaults, onRender, previewState, previewProgress, previewElapsed, previewStale, onCancelPreview } = props;
   const [currentTime, setCurrentTime] = useState(0);
   const contract: ClipEditorContract = { source_url: clip.source_url || clip.draft_url || clip.stream_url, source_geometry: clip.source_geometry || { width: 0, height: 0, is_landscape: false }, subtitle_cues: clip.subtitle_cues || [], subtitle_capability: clip.subtitle_capability || 'unavailable', subtitle_reason: clip.subtitle_reason || '', watermark_url: clip.watermark_url || '', watermark_revision: clip.watermark_revision || '', resolved_credit_text: clip.resolved_credit_text || '' };
   const titleId = useId();
@@ -60,9 +65,11 @@ export function ClipEditorModal(props: ClipEditorModalProps) {
   const onCloseRef = useRef(onClose);
   const previewBusyRef = useRef(previewBusy);
   const actionBusyRef = useRef(actionBusy);
+  const gamingDetectionBusyRef = useRef(gamingDetectionBusy);
   onCloseRef.current = onClose;
   previewBusyRef.current = previewBusy;
   actionBusyRef.current = actionBusy;
+  gamingDetectionBusyRef.current = gamingDetectionBusy;
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState('');
 
@@ -70,7 +77,7 @@ export function ClipEditorModal(props: ClipEditorModalProps) {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     closeRef.current?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !previewBusyRef.current && !actionBusyRef.current) onCloseRef.current();
+      if (event.key === 'Escape' && !previewBusyRef.current && !actionBusyRef.current && !gamingDetectionBusyRef.current) onCloseRef.current();
       if (event.key !== 'Tab') return;
       const focusable = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), video[controls], a[href]') || []);
       if (!focusable.length) return;
@@ -115,7 +122,7 @@ export function ClipEditorModal(props: ClipEditorModalProps) {
             </div>
             <p className="mt-1 text-xs text-muted sm:text-sm">Preview memakai renderer final yang sama.</p>
           </div>
-          <button ref={closeRef} type="button" onClick={onClose} disabled={previewBusy || actionBusy} className={`${focusButton} shrink-0 border border-line px-3 py-2 text-sm font-bold text-foreground hover:bg-secondary`} aria-label="Tutup editor">Tutup</button>
+          <button ref={closeRef} type="button" onClick={onClose} disabled={previewBusy || actionBusy || gamingDetectionBusy} className={`${focusButton} shrink-0 border border-line px-3 py-2 text-sm font-bold text-foreground hover:bg-secondary`} aria-label="Tutup editor">Tutup</button>
         </header>
 
         <div className="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.45fr)] lg:overflow-hidden">
@@ -124,9 +131,10 @@ export function ClipEditorModal(props: ClipEditorModalProps) {
           </div>
           <Tabs.Root defaultValue="hook" className="flex min-h-0 flex-col">
             <Tabs.List aria-label="Pengaturan klip" className="flex shrink-0 gap-1 overflow-x-auto border-b border-line px-3 pt-3 sm:px-5">
-              <Tab value="hook">Hook</Tab><Tab value="subtitle">Subtitle</Tab><Tab value="watermark">Watermark</Tab><Tab value="credit">Credit</Tab>{backgroundVisible && <Tab value="background">Latar</Tab>}
+              <Tab value="layout">Layout video</Tab><Tab value="hook">Hook</Tab><Tab value="subtitle">Subtitle</Tab><Tab value="watermark">Watermark</Tab><Tab value="credit">Credit</Tab>{backgroundVisible && <Tab value="background">Latar</Tab>}
             </Tabs.List>
             <div className="min-h-0 flex-1 bg-background/35 p-4 lg:overflow-y-auto lg:p-6">
+              <Tabs.Content value="layout"><Section title="Layout video" onReset={() => onVideoLayoutChange?.('normal')}><div className="grid gap-3 sm:col-span-2 sm:grid-cols-2"><button type="button" onClick={() => onVideoLayoutChange?.('normal')} disabled={gamingDetectionBusy} aria-pressed={settings.video_layout.mode === 'normal'} className={`${focusButton} rounded-xl border p-4 text-left ${settings.video_layout.mode === 'normal' ? 'border-primary bg-primary/10 text-primary' : 'border-field bg-secondary text-foreground hover:border-white/20'}`}><span className="block font-bold">Normal</span><span className="mt-1 block text-xs text-muted">Layout video standar.</span></button><button type="button" onClick={() => onVideoLayoutChange?.('gaming')} disabled={gamingDetectionBusy} aria-pressed={settings.video_layout.mode === 'gaming'} className={`${focusButton} rounded-xl border p-4 text-left ${settings.video_layout.mode === 'gaming' ? 'border-primary bg-primary/10 text-primary' : 'border-field bg-secondary text-foreground hover:border-white/20'}`}><span className="block font-bold">Gaming</span><span className="mt-1 block text-xs text-muted">Facecam atas, gameplay bawah.</span></button></div>{settings.video_layout.mode === 'gaming' && <div className="flex flex-col gap-3 rounded-xl border border-field bg-secondary p-4 sm:col-span-2"><div aria-live="polite"><p className="text-sm font-semibold">{gamingDetectionStatus || 'Facecam belum terdeteksi.'}</p>{Number.isFinite(settings.video_layout.facecam_confidence) && <p className="mt-1 text-xs text-muted">Confidence {Math.round(Number(settings.video_layout.facecam_confidence) * 100)}%</p>}</div><div className="flex flex-wrap gap-2"><button type="button" onClick={onRedetectGaming} disabled={gamingDetectionBusy} className={`${focusButton} border border-primary/50 px-3 py-2 text-sm font-bold text-primary hover:bg-primary/10`}>{gamingDetectionBusy ? 'Mendeteksi facecam…' : 'Deteksi ulang'}</button>{error && onClearError && <button type="button" onClick={onClearError} className={`${focusButton} border border-line px-3 py-2 text-sm font-bold text-foreground hover:bg-background`}>Hapus error</button>}</div></div>}</Section></Tabs.Content>
               <Tabs.Content value="hook"><Section title="Hook" onReset={() => onReset('hook_style')}><Toggle label="Tampilkan hook" checked={Boolean(settings.hook_style.enabled)} onChange={(value) => onChange('hook_style', 'enabled', value)} /><Field label="Teks hook"><textarea rows={3} maxLength={180} value={hookText} onChange={(event) => onHookTextChange(event.target.value)} className={`${inputClass} h-auto py-2`} /></Field><FontControls section="hook_style" values={settings.hook_style} onChange={onChange} /><NumberField label="Ukuran" value={settings.hook_style.font_size} min={0.01} max={0.1} step={0.001} onChange={(value) => onChange('hook_style', 'font_size', value)} /><ColorField label="Warna teks" value={settings.hook_style.text_color} onChange={(value) => onChange('hook_style', 'text_color', value)} /><ColorField label="Warna outline" value={settings.hook_style.outline_color} onChange={(value) => onChange('hook_style', 'outline_color', value)} /><NumberField label="Ketebalan outline" value={settings.hook_style.outline_thickness} min={0} max={6} step={0.1} onChange={(value) => onChange('hook_style', 'outline_thickness', value)} /><RatioField label="Posisi X" value={settings.hook_style.position_x} onChange={(value) => onChange('hook_style', 'position_x', value)} /><RatioField label="Posisi Y" value={settings.hook_style.position_y} onChange={(value) => onChange('hook_style', 'position_y', value)} /></Section></Tabs.Content>
               <Tabs.Content value="subtitle"><Section title="Subtitle" onReset={() => onReset('subtitle')}><Toggle label="Tampilkan subtitle" checked={Boolean(settings.subtitle.enabled)} disabled={contract.subtitle_capability === 'unavailable'} onChange={(value) => onChange('subtitle', 'enabled', value)} />{contract.subtitle_capability === 'unavailable' && <p className="text-sm text-muted">{contract.subtitle_reason}</p>}<FontControls section="subtitle" values={settings.subtitle} onChange={onChange} /><NumberField label="Ukuran" value={settings.subtitle.size} min={0.01} max={0.1} step={0.001} onChange={(value) => onChange('subtitle', 'size', value)} /><ColorField label="Warna teks" value={settings.subtitle.text_color} onChange={(value) => onChange('subtitle', 'text_color', value)} /><ColorField label="Warna highlight" value={settings.subtitle.color} onChange={(value) => onChange('subtitle', 'color', value)} /><ColorField label="Warna outline" value={settings.subtitle.outline_color} onChange={(value) => onChange('subtitle', 'outline_color', value)} /><NumberField label="Ketebalan outline" value={settings.subtitle.outline_thickness} min={0} max={6} step={0.1} onChange={(value) => onChange('subtitle', 'outline_thickness', value)} /><RatioField label="Posisi X" value={settings.subtitle.position_x} onChange={(value) => onChange('subtitle', 'position_x', value)} /><RatioField label="Posisi Y" value={settings.subtitle.position_y} onChange={(value) => onChange('subtitle', 'position_y', value)} /></Section></Tabs.Content>
               <Tabs.Content value="watermark"><Section title="Watermark" onReset={() => onReset('watermark')}><Toggle label="Tampilkan watermark" checked={Boolean(settings.watermark.enabled)} onChange={(value) => onChange('watermark', 'enabled', value)} /><Field label="Gambar watermark"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadWatermark} disabled={uploadBusy} className="block w-full text-sm text-muted file:mr-3 file:rounded-lg file:border-0 file:bg-primary file:px-3 file:py-2 file:font-bold file:text-primary-foreground focus:outline-none focus:ring-2 focus:ring-primary" /><span className="text-xs text-muted">PNG, JPG, atau WEBP. Maksimal 400KB.</span></Field>{(uploadError || settings.watermark.image_path) && <p className={`text-sm ${uploadError ? 'text-destructive' : 'text-muted'}`}>{uploadError || 'Watermark siap digunakan.'}</p>}<NumberField label="Ukuran" value={settings.watermark.scale} min={0.1} max={2} step={0.01} onChange={(value) => onChange('watermark', 'scale', value)} /><RatioField label="Opacity" value={settings.watermark.opacity} onChange={(value) => onChange('watermark', 'opacity', value)} /><RatioField label="Posisi X" value={settings.watermark.position_x} onChange={(value) => onChange('watermark', 'position_x', value)} /><RatioField label="Posisi Y" value={settings.watermark.position_y} onChange={(value) => onChange('watermark', 'position_y', value)} /></Section></Tabs.Content>

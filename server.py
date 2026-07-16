@@ -198,6 +198,9 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/start":
             result = self._manager().start(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/clip/gaming/detect":
+            result = self._manager().detect_gaming_facecam(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/clip/preview":
             result = self._manager().render_clip(payload, preview=True)
             self._json(result, 400 if result.get("status") == "error" else 200)

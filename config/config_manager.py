@@ -89,6 +89,11 @@ class ConfigManager:
                     if key not in current_section:
                         current_section[key] = value
                         dirty = True
+            video_layout = config.setdefault("video_layout", {})
+            mode = video_layout.get("mode") if video_layout.get("mode") in {"normal", "gaming"} else "normal"
+            if video_layout != {"mode": mode}:
+                config["video_layout"] = {"mode": mode}
+                dirty = True
             if not config.get("_natural_text_defaults_migrated"):
                 if config.setdefault("subtitle", {}).get("text_transform") == "uppercase":
                     config["subtitle"]["text_transform"] = "none"
@@ -164,7 +169,8 @@ class ConfigManager:
             },
             "gpu_acceleration": {
                 "enabled": False
-            }
+            },
+            "video_layout": {"mode": "normal"}
         }
         self.save_config(config)
         return config

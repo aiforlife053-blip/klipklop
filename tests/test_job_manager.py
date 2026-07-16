@@ -1895,6 +1895,111 @@ def test_process_clip_prepares_portrait_before_captions(tmp_path):
     assert harness.events[:2] == [("portrait", None), ("caption", transcript)]
 
 
+def test_legacy_clip_defaults_to_normal_gaming_layout(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    assert manager._render_settings({}, {})["video_layout"] == {"mode": "normal"}
+    assert manager._config().config["video_layout"] == {"mode": "normal"}
+
+
+def test_global_defaults_persist_gaming_mode_without_facecam_roi(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    manager.save_settings({"video_layout": {"mode": "gaming", "facecam_x": 0.1, "facecam_y": 0.1, "facecam_width": 0.2, "facecam_height": 0.2, "facecam_confidence": 0.9}})
+    assert manager._config().config["video_layout"] == {"mode": "gaming"}
+
+
+def test_saved_gaming_default_allows_loading_legacy_clip_without_detection(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    manager.save_settings({"video_layout": {"mode": "gaming"}})
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "draft.mp4").write_bytes(b"draft")
+    (clip_dir / "source.mp4").write_bytes(b"source")
+    (clip_dir / "data.json").write_text(json.dumps({"clip_id": "legacy-gaming", "status": "needs_edit"}), encoding="utf-8")
+    result = manager.get_clip("legacy-gaming")
+    assert result["status"] == "ok"
+    assert result["defaults"]["video_layout"] == {"mode": "gaming"}
+
+
+def test_gaming_forces_nine_by_sixteen_while_normal_preserves_draft_screen_size(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    metadata = {"draft_settings": {"screen_size": "16:9"}, "gaming_detection": {"facecam": {"x": 0.1, "y": 0.1, "width": 0.2, "height": 0.2}, "confidence": 0.9}}
+    gaming = manager._render_settings({"settings": {"video_layout": {"mode": "gaming"}}}, metadata)
+    normal = manager._render_settings({"settings": {"video_layout": {"mode": "normal"}}}, metadata)
+    assert gaming["screen_size"] == "9:16"
+    assert normal["screen_size"] == "16:9"
+
+
+def test_gaming_render_without_detection_is_rejected(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "source.mp4").write_bytes(b"source")
+    (clip_dir / "data.json").write_text(json.dumps({"clip_id": "gaming", "status": "needs_edit", "source_geometry": {"width": 1920, "height": 1080, "is_landscape": True}}), encoding="utf-8")
+    result = manager.render_clip({"clip_id": "gaming", "settings": {"video_layout": {"mode": "gaming"}, "subtitle": {"enabled": False}}}, preview=True)
+    assert result == {"status": "error", "message": mod.FACE_NOT_FOUND_MESSAGE}
+
+
+def test_detect_gaming_facecam_persists_and_reuses_source_identity(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    source = clip_dir / "source.mp4"
+    source.write_bytes(b"source")
+    meta_path = clip_dir / "data.json"
+    meta_path.write_text(json.dumps({"clip_id": "detect", "status": "needs_edit"}), encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(mod, "detect_facecam", lambda _path: calls.append(1) or {"x": 0.02, "y": 0.03, "width": 0.3, "height": 0.4, "confidence": 0.91})
+    first = manager.detect_gaming_facecam({"clip_id": "detect"})
+    second = manager.detect_gaming_facecam({"clip_id": "detect"})
+    saved = json.loads(meta_path.read_text(encoding="utf-8"))["gaming_detection"]
+    assert first["cached"] is False and second["cached"] is True
+    assert calls == [1]
+    assert saved["facecam"] == first["facecam"]
+    source.write_bytes(b"changed-source")
+    manager.detect_gaming_facecam({"clip_id": "detect"})
+    assert calls == [1, 1]
+
+
+def test_detect_gaming_facecam_rejects_invalid_payload_and_portrait(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    assert manager.detect_gaming_facecam(None)["status"] == "error"
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "source.mp4").write_bytes(b"source")
+    (clip_dir / "data.json").write_text(json.dumps({"clip_id": "portrait", "status": "needs_edit"}), encoding="utf-8")
+    monkeypatch.setattr(mod, "detect_facecam", lambda _path: (_ for _ in ()).throw(mod.GamingLayoutError("Mode gaming hanya mendukung source landscape.")))
+    result = manager.detect_gaming_facecam({"clip_id": "portrait"})
+    assert result == {"status": "error", "message": "Mode gaming hanya mendukung source landscape."}
+
+
+def test_gaming_preview_cache_changes_with_roi(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    source = clip_dir / "source.mp4"
+    source.write_bytes(b"source")
+    identity = {**manager._file_identity(source), "detector_version": mod.DETECTOR_VERSION}
+    facecam = {"x": 0.02, "y": 0.03, "width": 0.3, "height": 0.4}
+    metadata = {"clip_id": "cache", "status": "needs_edit", "render_revision": 0, "source_geometry": {"width": 1920, "height": 1080, "is_landscape": True}, "gaming_detection": {"source": identity, "facecam": facecam, "confidence": 0.9}}
+    (clip_dir / "data.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+    class Renderer:
+        def __init__(self, **_kwargs):
+            pass
+
+        def render_existing_clip(self, _clip_dir, _metadata, _settings, output, preview=False):
+            output.write_bytes(b"x" * 1000)
+
+    monkeypatch.setattr(mod, "LocalClipRenderer", Renderer)
+    monkeypatch.setattr(mod._PREVIEW_SCHEDULER, "submit", lambda *_args, **_kwargs: None)
+    base = {"clip_id": "cache", "settings": {"subtitle": {"enabled": False}, "video_layout": {"mode": "gaming", "facecam_x": 0.02, "facecam_y": 0.03, "facecam_width": 0.3, "facecam_height": 0.4, "facecam_confidence": 0.9}}}
+    first = manager.render_clip(base, preview=True)
+    changed = json.loads(json.dumps(base))
+    changed["settings"]["video_layout"]["facecam_x"] = 0.04
+    second = manager.render_clip(changed, preview=True)
+    assert first["preview_id"] != second["preview_id"]
+
+
 if __name__ == "__main__":
     tests = [value for name, value in globals().items() if name.startswith("test_")]
     import tempfile

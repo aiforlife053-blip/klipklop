@@ -16,6 +16,7 @@ from pathlib import Path
 
 from clipper_shared import SUBPROCESS_FLAGS, TimedTranscript, _hex_to_rgb, validate_timed_transcript
 from clipper_base import ClipperBase
+from gaming_layout import GamingLayoutError, build_gaming_filtergraph, validate_roi
 from subtitle_cues import non_overlapping_segments
 from utils.logger import debug_log
 
@@ -513,13 +514,26 @@ class ExportMixin(ClipperBase):
         temporary = [hook_overlay, credit_overlay]
         try:
             source_width, source_height, duration = self._probe_render_input(str(source_file))
-            width, height = self._render_size()
+            layout = settings.get("video_layout", {})
+            if layout.get("mode") == "gaming":
+                quality_widths = {"480": 540, "720": 720, "1080": 1080, "1440": 1440, "2160": 2160}
+                width = quality_widths.get(str(getattr(self, "video_quality", "720")), 720)
+                height = width * 16 // 9
+            else:
+                width, height = self._render_size()
             portrait_filters = None
+            if layout.get("mode") == "gaming":
+                roi = validate_roi({"x": layout.get("facecam_x"), "y": layout.get("facecam_y"), "width": layout.get("facecam_width"), "height": layout.get("facecam_height")})
+                if not roi:
+                    raise GamingLayoutError("Facecam tidak ditemukan. Gunakan video dengan facecam yang terlihat jelas, lalu coba lagi.")
+                portrait_filters, _ = build_gaming_filtergraph(source_width, source_height, width, height, roi)
             hook = settings.get("hook_style", {})
             tts_source, intro_duration = None, 0.0
             if hook.get("enabled"):
                 tts_source, intro_duration = self._generate_hook_tts(metadata.get("hook_text") or metadata.get("title", ""), clip_dir)
-            if getattr(self, "screen_size", "9:16") != "16:9":
+            if layout.get("mode") == "gaming":
+                pass
+            elif getattr(self, "screen_size", "9:16") != "16:9":
                 blur = bool(settings.get("blur_background", {}).get("enabled")) and source_width > source_height
                 portrait_filters, _ = self._portrait_filter(width, height, blur)
             else:
@@ -543,7 +557,7 @@ class ExportMixin(ClipperBase):
             watermark_path = Path(str(watermark.get("image_path") or "")) if watermark.get("enabled") else None
             if watermark.get("enabled") and (not watermark_path or not watermark_path.is_file()):
                 raise ValueError("Watermark belum tersedia")
-            preview_size = (540, 960) if getattr(self, "screen_size", "9:16") != "16:9" else (854, 480)
+            preview_size = (540, 960) if layout.get("mode") == "gaming" or getattr(self, "screen_size", "9:16") != "16:9" else (854, 480)
             command = self._build_composite_command(str(source_file), str(output_path), duration, audio_source=str(source_file) if self._has_audio_stream(str(source_file)) else None, hook_overlay=hook_overlay if hook.get("enabled") else None, ass_file=ass_file, watermark_path=watermark_path, credit_overlay=credit_overlay if credit.get("enabled") else None, portrait_filters=portrait_filters, output_size=preview_size if preview else None, profile="preview_fast" if preview else "final", tts_source=tts_source, intro_duration=intro_duration)
             self.run_ffmpeg_with_progress(command, duration + intro_duration, lambda progress: self.set_progress("Menyusun video", progress), timeout=getattr(self, "render_timeout", 900))
             if not output_path.is_file() or output_path.stat().st_size < 1000:

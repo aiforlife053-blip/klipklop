@@ -11,6 +11,7 @@ const settings: ClipSettings = {
   watermark: { enabled: false, scale: 0.15, opacity: 0.8, position_x: 0.85, position_y: 0.05 },
   credit_watermark: { enabled: false, text: 'sc : {channel}', color: '#FFFFFF', size: 0.032, opacity: 0.55, position_x: 0.06, position_y: 0.23 },
   blur_background: { enabled: false, scale: 1.6, zoom: 1.08, strength: 10 },
+  video_layout: { mode: 'normal' },
   screen_size: '9:16',
 };
 const clip: EditorClip = { clip_id: 'clip', title: 'Clip', status: 'needs_edit', stream_url: '/video', source_url: '/video', source_geometry: { width: 1920, height: 1080, is_landscape: true } };
@@ -36,6 +37,29 @@ describe('ClipEditorModal controls', () => {
     setup();
     expect(screen.getByRole('switch', { name: /Tampilkan hook/ })).toBeChecked();
     expect(screen.getByText('Aktif di hasil video')).toBeInTheDocument();
+  });
+
+  it('offers gaming detection controls and clears detection errors', async () => {
+    const onVideoLayoutChange = vi.fn();
+    const onRedetectGaming = vi.fn();
+    const onClearError = vi.fn();
+    render(<ClipEditorModal clip={clip} settings={{ ...settings, video_layout: { mode: 'gaming', facecam_x: 0.1, facecam_y: 0.1, facecam_width: 0.2, facecam_height: 0.2, facecam_confidence: 0.84 } }} previewUrl="" previewBusy={false} actionBusy={false} error="Deteksi gagal" invalid={false} hookText="Hook" backgroundVisible={false} gamingDetectionStatus="Facecam terdeteksi." onHookTextChange={vi.fn()} onClose={vi.fn()} onChange={vi.fn()} onVideoLayoutChange={onVideoLayoutChange} onRedetectGaming={onRedetectGaming} onClearError={onClearError} onReset={vi.fn()} onPreview={vi.fn()} onSaveDefaults={vi.fn()} onRender={vi.fn()} />);
+    await userEvent.click(screen.getByRole('tab', { name: 'Layout video' }));
+    expect(screen.getByRole('button', { name: /Gaming/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('Confidence 84%')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Deteksi ulang' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Hapus error' }));
+    expect(onRedetectGaming).toHaveBeenCalledOnce();
+    expect(onClearError).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('tab', { name: 'Latar' })).not.toBeInTheDocument();
+  });
+
+  it('blocks close button and Escape while gaming detection runs', async () => {
+    const onClose = vi.fn();
+    render(<ClipEditorModal clip={clip} settings={{ ...settings, video_layout: { mode: 'gaming' } }} previewUrl="" previewBusy={false} actionBusy={false} error="" invalid hookText="Hook" backgroundVisible={false} gamingDetectionBusy onHookTextChange={vi.fn()} onClose={onClose} onChange={vi.fn()} onReset={vi.fn()} onPreview={vi.fn()} onSaveDefaults={vi.fn()} onRender={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Tutup editor' })).toBeDisabled();
+    await userEvent.keyboard('{Escape}');
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('keeps textarea focus while the parent rerenders for every character', async () => {
