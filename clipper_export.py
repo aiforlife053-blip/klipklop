@@ -503,7 +503,9 @@ class ExportMixin(ClipperBase):
             _write_json_atomic(clip_dir / "data.json", metadata)
             try:
                 thumbnail_path = clip_dir / "thumbnail.jpg"
-                subprocess.run([self.ffmpeg_path, "-y", "-ss", str(min(1.0, duration * 0.1)), "-i", str(final_file), "-frames:v", "1", "-q:v", "3", str(thumbnail_path)], capture_output=True, timeout=30)
+                from clipper_ffmpeg import _FFMPEG_PROCESS_LOCK
+                with _FFMPEG_PROCESS_LOCK:
+                    subprocess.run([self.ffmpeg_path, "-y", "-ss", str(min(1.0, duration * 0.1)), "-i", str(final_file), "-frames:v", "1", "-q:v", "3", str(thumbnail_path)], capture_output=True, timeout=30)
             except Exception as exc:
                 self.log(f"  Thumbnail extraction failed (non-fatal): {exc}")
             clip_progress("Selesai", 1.0)
@@ -529,7 +531,14 @@ class ExportMixin(ClipperBase):
         source_file = clip_dir / "source.mp4"
         if not source_file.is_file():
             raise ValueError("Source klip tidak tersedia")
-        transcript_path = clip_dir / str(metadata.get("transcript_path") or "transcript.json")
+        name = Path(str(metadata.get("transcript_path") or "transcript.json")).name
+        if name != "transcript.json":
+            name = "transcript.json"
+        transcript_path = (clip_dir / name).resolve()
+        try:
+            transcript_path.relative_to(clip_dir.resolve())
+        except ValueError:
+            transcript_path = clip_dir / "transcript.json"
         transcript = json.loads(transcript_path.read_text(encoding="utf-8")) if transcript_path.is_file() else None
         operation_id = uuid.uuid4().hex[:12]
         hook_overlay, credit_overlay, ass_file = (clip_dir / f"render-{operation_id}.hook.png"), (clip_dir / f"render-{operation_id}.credit.png"), None

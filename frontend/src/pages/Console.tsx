@@ -1,11 +1,12 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
+
 import { useOutletContext } from 'react-router-dom';
 import type { DashboardOutletContext } from '@/components/layout/DashboardLayout';
 import { api } from '@/lib/api';
 
 export default function Console() {
   const { status, refreshStatus } = useOutletContext<DashboardOutletContext>();
-  const logs = Array.isArray(status?.logs) ? status.logs.slice(-200) : [];
+  const logs = useMemo(() => Array.isArray(status?.logs) ? status.logs.slice(-200) : [], [status?.logs]);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

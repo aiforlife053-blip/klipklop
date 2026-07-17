@@ -1,4 +1,3 @@
-import hashlib
 import json
 import logging
 import os
@@ -25,18 +24,15 @@ from openai import OpenAI
 
 from clipper_core import AutoClipperCore, LocalClipRenderer
 from config.config_manager import ConfigManager
-from config.editor_defaults import CUE_BUILDER_VERSION, PREVIEW_PROFILE_VERSION, SCENE_BUILDER_VERSION, editor_defaults, v3_locked_render_settings
+from config.editor_defaults import editor_defaults, v3_locked_render_settings
 from gaming_layout import DETECTOR_VERSION, FACE_NOT_FOUND_MESSAGE, GamingLayoutError, detect_facecam, validate_roi
 from layout_modes import (
     V3_MODES,
     LayoutModeError,
     validate_mode,
-    validate_orientation,
-    is_legal_transition,
     validate_facecam_overlap,
 )
 from subtitle_cues import build_subtitle_cues
-from render_scheduler import RenderAttempt, RenderScheduler
 from youtube_uploader import upload_youtube_video
 from utils.helpers import get_app_dir, get_ffmpeg_path, get_ytdlp_path
 
@@ -55,11 +51,12 @@ _UPLOAD_LOGGER = logging.getLogger("web_klip.youtube_upload")
 _CLIP_LOCKS = {}
 _CLIP_LOCKS_GUARD = threading.Lock()
 _CLIP_META_CACHE = {}  # (user_id, clip_id) -> meta_path; avoids glob scan
+_CLIP_CANCEL_EVENTS = {}
+_CLIP_CANCEL_GUARD = threading.Lock()
 _CLIP_META_CACHE_GUARD = threading.Lock()
 _ACTIVE_CLIP_STATUSES = {"render_queued", "rendering", "scheduled", "uploading", "needs_facecam"}
 _UPLOAD_LEASE_SECONDS = 3600
 _RENDER_LEASE_SECONDS = 3600
-_PREVIEW_SCHEDULER = RenderScheduler(max_workers=max(1, int(os.environ.get("KLIPKLOP_RENDER_WORKERS", "1"))))
 
 
 def _queue_position_for(manager):
@@ -739,7 +736,9 @@ class WebJobManager:
     def _source_geometry(source):
         try:
             probe = Path(get_ffmpeg_path()).with_name("ffprobe.exe" if os.name == "nt" else "ffprobe")
-            result = subprocess.run([str(probe), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,sample_aspect_ratio,display_aspect_ratio:stream_tags=rotate", "-of", "json", str(source)], capture_output=True, text=True, timeout=15)
+            from clipper_ffmpeg import _FFMPEG_PROCESS_LOCK
+            with _FFMPEG_PROCESS_LOCK:
+                result = subprocess.run([str(probe), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,sample_aspect_ratio,display_aspect_ratio:stream_tags=rotate", "-of", "json", str(source)], capture_output=True, text=True, timeout=15)
             stream = (json.loads(result.stdout).get("streams") or [{}])[0]
             width, height = int(stream.get("width") or 0), int(stream.get("height") or 0)
             if width <= 0 or height <= 0:
@@ -814,12 +813,18 @@ class WebJobManager:
         if not meta_path:
             return None
         names = {"source": "source.mp4", "draft": "draft.mp4", "final": "master.mp4", "thumbnail": "thumbnail.jpg"}
-        if artifact == "preview" and re.fullmatch(r"[0-9a-f]{12}", str(preview_id or "")):
-            target = meta_path.parent / f"preview-{preview_id}.mp4"
-        else:
-            name = names.get(str(artifact or ""))
-            target = meta_path.parent / name if name else None
-        return target if target and target.is_file() else None
+        name = names.get(str(artifact or ""))
+        if not name:
+            return None
+        target = (meta_path.parent / name).resolve()
+        root = meta_path.parent.resolve()
+        if root not in target.parents and target != root / name:
+            # ensure resolved path stays under clip dir
+            try:
+                target.relative_to(root)
+            except ValueError:
+                return None
+        return target if target.is_file() else None
 
     def list_clips(self):
         clips = []
@@ -857,6 +862,20 @@ class WebJobManager:
         with _CLIP_LOCKS_GUARD:
             return _CLIP_LOCKS.setdefault(key, threading.RLock())
 
+    def _cancel_event(self, clip_id):
+        key = (self.user_id or str(self.app_dir.resolve()), str(clip_id or ""))
+        with _CLIP_CANCEL_GUARD:
+            event = _CLIP_CANCEL_EVENTS.get(key)
+            if event is None:
+                event = threading.Event()
+                _CLIP_CANCEL_EVENTS[key] = event
+            return event
+
+    def _reset_cancel_event(self, clip_id):
+        event = self._cancel_event(clip_id)
+        event.clear()
+        return event
+
     def _locked_clip_meta(self, clip_id):
         lock = self._clip_lock(clip_id)
         lock.acquire()
@@ -873,12 +892,25 @@ class WebJobManager:
             self._write_json_atomic(meta_path, current)
             return current
 
+
+    def _safe_transcript_path(self, clip_dir, metadata):
+        name = Path(str(metadata.get("transcript_path") or "transcript.json")).name
+        if name != "transcript.json":
+            name = "transcript.json"
+        target = (Path(clip_dir) / name).resolve()
+        root = Path(clip_dir).resolve()
+        try:
+            target.relative_to(root)
+        except ValueError:
+            return root / "transcript.json"
+        return target
+
     def get_clip(self, clip_id):
         meta_path, meta = self._clip_meta(str(clip_id or ""))
         if not meta_path or not (meta_path.parent / "draft.mp4").is_file() and not (meta_path.parent / "master.mp4").is_file():
             return {"status": "error", "message": "Klip tidak ditemukan"}
         view = self._clip_view(meta_path, meta)
-        transcript_path = meta_path.parent / str(meta.get("transcript_path") or "transcript.json")
+        transcript_path = self._safe_transcript_path(meta_path.parent, meta)
         try:
             transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
             settings = self._render_settings({}, meta, require_gaming_roi=False)
@@ -1135,11 +1167,20 @@ class WebJobManager:
         source = meta_path.parent / "source.mp4"
         if not source.is_file():
             return None, "Source klip tidak ditemukan"
-        seek = max(0.0, self._as_float(seek_seconds, 0.0))
+        try:
+            seek = float(seek_seconds)
+        except (TypeError, ValueError):
+            return None, "Waktu frame tidak valid"
+        if seek != seek or seek in (float("inf"), float("-inf")):  # NaN/inf
+            return None, "Waktu frame tidak valid"
+        seek = max(0.0, seek)
         duration = self._as_float(metadata.get("duration_seconds"), 0.0)
         if duration > 0:
             seek = min(seek, max(0.0, duration - 0.05))
+        else:
+            seek = min(seek, 3600.0)
         import tempfile
+        from clipper_ffmpeg import _FFMPEG_PROCESS_LOCK
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as handle:
             target = Path(handle.name)
         try:
@@ -1151,7 +1192,8 @@ class WebJobManager:
                 "-q:v", "3",
                 str(target),
             ]
-            result = subprocess.run(cmd, capture_output=True, timeout=20)
+            with _FFMPEG_PROCESS_LOCK:
+                result = subprocess.run(cmd, capture_output=True, timeout=20)
             if result.returncode != 0 or not target.is_file() or target.stat().st_size < 32:
                 return None, "Frame gagal diekstrak"
             return target.read_bytes(), None
@@ -1161,6 +1203,8 @@ class WebJobManager:
             target.unlink(missing_ok=True)
 
     def render_clip(self, payload, preview=False):
+        if preview:
+            return {"status": "error", "message": "Preview akurat dihapus di V3. Gunakan render final."}
         clip_id = str(payload.get("clip_id") or "")
         lock, meta_path, metadata = self._locked_clip_meta(clip_id)
         try:
@@ -1181,7 +1225,7 @@ class WebJobManager:
                 if not geometry.get("is_landscape"):
                     return {"status": "error", "message": "Mode gaming hanya mendukung source landscape."}
             if settings["subtitle"].get("enabled"):
-                transcript_path = meta_path.parent / str(metadata.get("transcript_path") or "transcript.json")
+                transcript_path = self._safe_transcript_path(meta_path.parent, metadata)
                 try:
                     transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
                     if not transcript.get("words") and not transcript.get("segments"):
@@ -1189,22 +1233,11 @@ class WebJobManager:
                 except (OSError, ValueError, TypeError, json.JSONDecodeError):
                     return {"status": "error", "message": "Subtitle bertimestamp tidak tersedia untuk klip ini"}
             if "hook_text" in payload:
-                metadata["hook_text"] = str(payload.get("hook_text") or "").strip()[:180]
-            if preview:
-                revision = int(metadata.get("render_revision", 0))
-                tts_config = self._hook_tts_config()
-                snapshot = {"settings": settings, "hook_text": metadata.get("hook_text", ""), "tts": {"model": tts_config["tts_model"], "voice": tts_config["tts_voice"]}, "revision": revision, "source": self._file_identity(meta_path.parent / "source.mp4"), "transcript": self._file_identity(meta_path.parent / "transcript.json"), "versions": [SCENE_BUILDER_VERSION, CUE_BUILDER_VERSION, PREVIEW_PROFILE_VERSION]}
-                digest = hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode("utf-8")).hexdigest()[:12]
-                output = meta_path.parent / f"preview-{digest}.mp4"
-                if output.is_file():
-                    return {"status": "cached", "preview_id": digest, "stream_url": self._preview_url(clip_id, digest, output)}
-                attempt = RenderAttempt(self.user_id or str(self.app_dir.resolve()), clip_id, digest, snapshot, digest, "preview_fast")
-                frozen_meta = dict(metadata)
-                def run_preview(_attempt, cancelled, progress):
-                    self._render_preview_file(meta_path, frozen_meta, settings, output, cancelled, progress)
-                    return self._preview_url(clip_id, digest, output)
-                _PREVIEW_SCHEDULER.submit(attempt, run_preview, priority=20)
-                return {"status": "queued", "preview_id": digest}
+                raw = str(payload.get("hook_text") or "").strip()
+                if len(raw.split()) > 8:
+                    return {"status": "error", "message": "Hook maksimal 8 kata"}
+                from visual_style import normalize_hook_text
+                metadata["hook_text"] = normalize_hook_text(raw)
             acquired = _GLOBAL_RENDER_LOCK.acquire(blocking=False)
             if not acquired:
                 return {"status": "error", "message": "Render lain sedang berjalan"}
@@ -1214,6 +1247,7 @@ class WebJobManager:
             attempt_id = uuid.uuid4().hex
             base_revision = int(metadata.get("render_revision", 0))
             queued_at = datetime.now(timezone.utc).isoformat()
+            self._reset_cancel_event(clip_id)
             metadata.update(status="render_queued", attempt_id=attempt_id, render_base_revision=base_revision, render_queued_at=queued_at, render_settings=settings, render_error="", render_progress=0.0, render_stage="Menunggu render", render_started_at=None, render_elapsed_seconds=0.0)
             self._write_json_atomic(meta_path, metadata)
             output = meta_path.parent / f"master.{attempt_id}.tmp.mp4"
@@ -1234,29 +1268,6 @@ class WebJobManager:
             return {}
         stat = path.stat()
         return {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
-
-    @staticmethod
-    def _preview_url(clip_id, preview_id, output):
-        return f"/api/clip/media?clip_id={quote(clip_id)}&artifact=preview&preview_id={preview_id}&v={int(Path(output).stat().st_mtime_ns)}"
-
-    def preview_status(self, clip_id, preview_id):
-        status = _PREVIEW_SCHEDULER.status(self.user_id or str(self.app_dir.resolve()), str(clip_id or ""), str(preview_id or ""))
-        return status or {"status": "error", "message": "Preview tidak ditemukan"}
-
-    def cancel_preview(self, payload):
-        cancelled = _PREVIEW_SCHEDULER.cancel(self.user_id or str(self.app_dir.resolve()), str(payload.get("clip_id") or ""), str(payload.get("preview_id") or ""))
-        return {"status": "ok"} if cancelled else {"status": "error", "message": "Preview tidak dapat dibatalkan"}
-
-    def _render_preview_file(self, meta_path, metadata, settings, output, cancelled, progress):
-        if cancelled.is_set():
-            raise InterruptedError()
-        progress("Menyiapkan video", 0.1)
-        core = LocalClipRenderer(ffmpeg_path=get_ffmpeg_path(), output_dir=str(meta_path.parent.parent), watermark_settings=settings["watermark"], credit_watermark_settings=settings["credit_watermark"], hook_style_settings={**settings["hook_style"], "blur_background": settings["blur_background"]}, subtitle_style=settings["subtitle"], video_quality=settings["video_quality"], landscape_blur=settings["landscape_blur"], screen_size=settings["screen_size"], progress_callback=lambda stage, value=None: progress(str(stage), 0.1 + max(0.0, min(1.0, self._as_float(value, 0.0))) * 0.85), cancel_check=cancelled.is_set, **self._hook_tts_config())
-        core.render_existing_clip(meta_path.parent, metadata, settings, output, preview=True)
-        if cancelled.is_set():
-            Path(output).unlink(missing_ok=True)
-            raise InterruptedError()
-        progress("Menyusun video", 1.0)
 
     def _render_clip_file(self, meta_path, metadata, settings, output, _commit=True, render_lock_held=False):
         started = time.monotonic()
@@ -1286,7 +1297,12 @@ class WebJobManager:
             claimed = update_render({"needs_edit", "render_error", "render_queued", "rendering"}, lambda current: current.update(status="rendering", render_progress=0.0, render_stage="Memulai render", render_started_at=started_at, render_elapsed_seconds=0.0))
             if claimed is None:
                 return
-            core = LocalClipRenderer(ffmpeg_path=get_ffmpeg_path(), output_dir=str(meta_path.parent.parent), watermark_settings=settings["watermark"], credit_watermark_settings=settings["credit_watermark"], hook_style_settings={**settings["hook_style"], "blur_background": settings["blur_background"]}, subtitle_style=settings["subtitle"], video_quality=settings["video_quality"], landscape_blur=settings["landscape_blur"], screen_size=settings["screen_size"], progress_callback=persist_progress, cancel_check=lambda: False, **self._hook_tts_config())
+            if self._cancel_event(metadata.get("clip_id")).is_set():
+                update_render({"rendering"}, lambda current: current.update(status="cancelled", render_stage="Dibatalkan", render_error="", render_progress=0.0, render_elapsed_seconds=round(time.monotonic() - started, 3)))
+                Path(output).unlink(missing_ok=True)
+                return
+            cancel_event = self._cancel_event(metadata.get("clip_id"))
+            core = LocalClipRenderer(ffmpeg_path=get_ffmpeg_path(), output_dir=str(meta_path.parent.parent), watermark_settings=settings["watermark"], credit_watermark_settings=settings["credit_watermark"], hook_style_settings={**settings["hook_style"], "blur_background": settings["blur_background"]}, subtitle_style=settings["subtitle"], video_quality=settings["video_quality"], landscape_blur=settings["landscape_blur"], screen_size=settings["screen_size"], progress_callback=persist_progress, cancel_check=cancel_event.is_set, **self._hook_tts_config())
             if hasattr(core, "convert_to_portrait_with_progress"):
                 convert_portrait = core.convert_to_portrait_with_progress
                 core.convert_to_portrait_with_progress = lambda input_path, output_path, callback: convert_portrait(input_path, output_path, lambda value: (persist_progress("Menyiapkan video", value * 0.45), callback(value)))
@@ -1331,17 +1347,9 @@ class WebJobManager:
             if render_lock_held:
                 _GLOBAL_RENDER_LOCK.release()
 
-    def save_clip_defaults(self, payload):
-        meta_path, metadata = self._clip_meta(str(payload.get("clip_id") or ""))
-        if not meta_path:
-            return {"status": "error", "message": "Klip tidak ditemukan"}
-        settings = self._render_settings(payload, metadata)
-        result = self.save_settings(settings)
-        return {"status": result.get("status"), "settings": settings}
-
     def _upload_text(self, payload, metadata):
         title = str(payload.get("title") if "title" in payload else metadata.get("title") or "").strip()[:100]
-        description = str(payload.get("description") if "description" in payload else metadata.get("description") or "").strip()
+        description = str(payload.get("description") if "description" in payload else metadata.get("description") or "").strip()[:5000]
         metadata.update(title=title, description=description)
         return title, description
 
@@ -1470,36 +1478,19 @@ class WebJobManager:
             lock.release()
         return self.render_clip({"clip_id": clip_id, "hook_text": hook}, preview=False)
 
-    def edit_clip_again(self, payload):
-        clip_id = str(payload.get("clip_id") or "")
-        lock, meta_path, metadata = self._locked_clip_meta(clip_id)
-        try:
-            if not meta_path:
-                return {"status": "error", "message": "Klip tidak ditemukan"}
-            if metadata.get("status") in {"uploading", "rendering", "render_queued"}:
-                return {"status": "error", "message": "Klip sedang diproses"}
-            upload = metadata.pop("youtube_upload", None)
-            if isinstance(upload, dict) and upload.get("status") == "scheduled":
-                metadata["pending_youtube_upload"] = upload
-            elif isinstance(upload, dict) and upload.get("status") == "uploaded":
-                history = list(metadata.get("youtube_upload_history") or [])
-                if not any(item.get("attempt_id") and item.get("attempt_id") == upload.get("attempt_id") or item.get("video_id") and item.get("video_id") == upload.get("video_id") for item in history if isinstance(item, dict)):
-                    history.append(upload)
-                metadata["youtube_upload_history"] = history
-            metadata.update(status="needs_edit", render_error="", render_progress=0.0, render_stage="")
-            self._write_json_atomic(meta_path, metadata)
-            return {"status": "ok"}
-        finally:
-            lock.release()
-
     def cancel_clip_process(self, payload):
         clip_id = str(payload.get("clip_id") or "")
         lock, meta_path, metadata = self._locked_clip_meta(clip_id)
         try:
             if not meta_path or metadata.get("status") not in {"render_queued", "rendering"}:
                 return {"status": "error", "message": "Proses klip tidak dapat dibatalkan"}
+            self._cancel_event(clip_id).set()
             metadata.update(status="cancelled", render_stage="Dibatalkan", render_error="", render_progress=0.0)
             self._write_json_atomic(meta_path, metadata)
+            for temp in meta_path.parent.glob("master.*.tmp.mp4"):
+                temp.unlink(missing_ok=True)
+            for temp in meta_path.parent.glob("preview-*.mp4"):
+                temp.unlink(missing_ok=True)
             return {"status": "cancelled", "clip_id": clip_id}
         finally:
             lock.release()
@@ -1519,6 +1510,8 @@ class WebJobManager:
             cache_key = (self.user_id or str(self.app_dir.resolve()), clip_id)
             with _CLIP_META_CACHE_GUARD:
                 _CLIP_META_CACHE.pop(cache_key, None)
+            with _CLIP_CANCEL_GUARD:
+                _CLIP_CANCEL_EVENTS.pop(cache_key, None)
             return {"status": "deleted"}
         finally:
             lock.release()
@@ -1762,12 +1755,13 @@ class WebJobManager:
         return f"{prompt or AutoClipperCore.get_default_prompt()}{viral}{user}"
 
     def _as_float(self, value, default=0.0):
-        if value is None:
-            return default
         try:
-            return float(value)
-        except (ValueError, TypeError):
+            number = float(value)
+        except (TypeError, ValueError):
             return default
+        if number != number or number in (float("inf"), float("-inf")):
+            return default
+        return number
 
     def _as_int(self, value, default=0):
         try:
