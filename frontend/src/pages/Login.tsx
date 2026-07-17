@@ -128,10 +128,6 @@ export default function Login() {
                 </div>
               </div>
 
-              <div className="flex justify-end">
-                <button type="button" className="p-0 text-xs font-medium text-primary transition-opacity hover:opacity-80">Lupa password?</button>
-              </div>
-
               {error && (
                 <div className="rounded-lg bg-destructive/10 p-3 text-sm font-medium text-destructive border border-destructive/20">
                   {error}

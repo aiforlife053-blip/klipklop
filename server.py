@@ -123,6 +123,9 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/status":
             self._json(self._manager().status())
+        elif parsed.path == "/api/modes":
+            from layout_modes import V3_MODES, V3_OUTPUT_WIDTH, V3_OUTPUT_HEIGHT
+            self._json({"modes": list(V3_MODES), "output": {"width": V3_OUTPUT_WIDTH, "height": V3_OUTPUT_HEIGHT}})
         elif parsed.path == "/api/settings":
             self._json(self._manager().get_settings())
         elif parsed.path == "/api/clips":
@@ -134,6 +137,8 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             params = parse_qs(parsed.query)
             result = self._manager().preview_status(params.get("clip_id", [""])[0], params.get("preview_id", [""])[0])
             self._json(result, 404 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/clip/frame":
+            self._serve_clip_frame(parsed.query)
         elif parsed.path == "/api/clip/media":
             self._serve_clip_media(parsed.query)
         elif parsed.path == "/api/download":
@@ -201,6 +206,9 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/clip/gaming/detect":
             result = self._manager().detect_gaming_facecam(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/clip/facecam":
+            result = self._manager().submit_facecam_roi(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/clip/preview":
             result = self._manager().render_clip(payload, preview=True)
             self._json(result, 400 if result.get("status") == "error" else 200)
@@ -225,11 +233,17 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/clip/upload":
             result = self._manager().upload_clip_now(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/clip/hook":
+            result = self._manager().update_hook_text(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/clip/edit":
             result = self._manager().edit_clip_again(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/clip/delete":
             result = self._manager().delete_clip(payload)
+            self._json(result, 400 if result.get("status") == "error" else 200)
+        elif parsed.path == "/api/clip/cancel":
+            result = self._manager().cancel_clip_process(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/stop":
             self._json(self._manager().stop())
@@ -530,18 +544,72 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         if not url:
             self._json({"status": "error", "message": "Missing URL"}, 400)
             return
-        
-        req = Request(f"https://www.youtube.com/oembed?url={quote(url)}&format=json")
+        host = (urlparse(url).hostname or "").lower()
+        if host not in {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}:
+            self._json({"status": "error", "message": "URL YouTube tidak valid"}, 400)
+            return
+
+        title = author = thumbnail = ""
+        width = height = 0
         try:
+            req = Request(f"https://www.youtube.com/oembed?url={quote(url)}&format=json")
             with urlopen(req, timeout=5) as res:
                 data = json.loads(res.read().decode())
-                self._json({
-                    "title": data.get("title", ""),
-                    "author": data.get("author_name", ""),
-                    "thumbnail": data.get("thumbnail_url", "")
-                })
-        except Exception as e:
-            self._json({"status": "error", "message": str(e)}, 500)
+                title = data.get("title", "") or ""
+                author = data.get("author_name", "") or ""
+                thumbnail = data.get("thumbnail_url", "") or ""
+                width = int(data.get("width") or 0)
+                height = int(data.get("height") or 0)
+        except Exception:
+            pass
+
+        # Prefer yt-dlp geometry when available (oembed often lacks reliable orientation)
+        try:
+            from utils.helpers import get_ytdlp_path, is_ytdlp_module_available
+            if is_ytdlp_module_available():
+                import yt_dlp
+                with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True, "noplaylist": True}) as ydl:
+                    info = ydl.extract_info(url, download=False) or {}
+                width = int(info.get("width") or width or 0)
+                height = int(info.get("height") or height or 0)
+                title = title or str(info.get("title") or "")
+                author = author or str(info.get("uploader") or info.get("channel") or "")
+                thumbnail = thumbnail or str(info.get("thumbnail") or "")
+            else:
+                ytdlp = get_ytdlp_path()
+                if ytdlp and ytdlp != "yt_dlp_module":
+                    proc = subprocess.run(
+                        [ytdlp, "--skip-download", "--print", "%(width)s", "--print", "%(height)s", "--print", "%(title)s", "--print", "%(uploader)s", "--print", "%(thumbnail)s", url],
+                        capture_output=True, text=True, timeout=20,
+                    )
+                    if proc.returncode == 0:
+                        lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+                        if len(lines) >= 2:
+                            width = int(float(lines[0] or 0)) if lines[0] not in {"NA", "None"} else width
+                            height = int(float(lines[1] or 0)) if lines[1] not in {"NA", "None"} else height
+                        if len(lines) >= 3 and not title:
+                            title = lines[2]
+                        if len(lines) >= 4 and not author:
+                            author = lines[3]
+                        if len(lines) >= 5 and not thumbnail:
+                            thumbnail = lines[4]
+        except Exception:
+            pass
+
+        is_landscape = bool(width and height and width > height)
+        is_portrait = bool(width and height and height > width)
+        self._json({
+            "title": title,
+            "author": author,
+            "author_name": author,
+            "thumbnail": thumbnail,
+            "thumbnail_url": thumbnail,
+            "width": width,
+            "height": height,
+            "is_landscape": is_landscape,
+            "is_portrait": is_portrait,
+            "orientation": "landscape" if is_landscape else ("portrait" if is_portrait else "unknown"),
+        })
 
     def _static(self, path):
         """Serve static files with allowlist for security"""
@@ -593,6 +661,25 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._download(encoded)
         else:
             self._stream_video(encoded)
+
+    def _serve_clip_frame(self, query):
+        params = parse_qs(query, keep_blank_values=True)
+        clip_id = params.get("clip_id", [""])[0]
+        seek = params.get("t", params.get("seek", ["0"]))[0]
+        raw, error = self._manager().extract_clip_frame(clip_id, seek)
+        if error or not raw:
+            self._json({"status": "error", "message": error or "Frame gagal diekstrak"}, 404)
+            return
+        self.send_response(200)
+        self._add_security_headers()
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Cache-Control", "private, max-age=30")
+        self.end_headers()
+        try:
+            self.wfile.write(raw)
+        except (ConnectionAbortedError, BrokenPipeError, ConnectionResetError, OSError):
+            pass
 
     def _stream_video(self, query):
         """Stream video inline with Range request support for browser playback."""

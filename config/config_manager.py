@@ -26,7 +26,8 @@ class ConfigManager:
                 with open(self.config_file, "r", encoding="utf-8") as f:
                     config = json.load(f)
             except json.JSONDecodeError:
-                backup = self.config_file.with_suffix(".invalid.json")
+                from datetime import datetime as _dt
+                backup = self.config_file.with_name(f"{self.config_file.stem}.invalid.{_dt.now().strftime('%Y%m%d%H%M%S')}.json")
                 self.config_file.replace(backup)
                 return self.load()
             dirty = False
@@ -56,7 +57,6 @@ class ConfigManager:
             "subtitle": {"enabled": True, "color": "#00BFFF", "text_color": "#FFFFFF", "size": 0.04, "position_x": 0.5, "position_y": 0.85, "text_transform": "none", "bg_color": "#000000", "bg_opacity": 0.0, "font_family": "Plus Jakarta Sans", "font_weight": 800, "outline_color": "#000000", "outline_thickness": 1.0},
 
                 "subtitle_position": "auto",
-                "repliz": {"access_key": "", "secret_key": ""},
                 "gpu_acceleration": {"enabled": False},
                 "watermark": {
                     "enabled": False,
@@ -163,10 +163,6 @@ class ConfigManager:
             "subtitle_style": {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360},
             "subtitle": {"enabled": True, "color": "#00BFFF", "text_color": "#FFFFFF", "size": 0.04, "position_x": 0.5, "position_y": 0.85, "text_transform": "none", "bg_color": "#000000", "bg_opacity": 0.0, "font_family": "Plus Jakarta Sans", "font_weight": 800, "outline_color": "#000000", "outline_thickness": 1.0},
             "subtitle_position": "auto",
-            "repliz": {
-                "access_key": "",
-                "secret_key": ""
-            },
             "gpu_acceleration": {
                 "enabled": False
             },

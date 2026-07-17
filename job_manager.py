@@ -10,7 +10,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from urllib.error import HTTPError
@@ -25,8 +25,16 @@ from openai import OpenAI
 
 from clipper_core import AutoClipperCore, LocalClipRenderer
 from config.config_manager import ConfigManager
-from config.editor_defaults import CUE_BUILDER_VERSION, PREVIEW_PROFILE_VERSION, SCENE_BUILDER_VERSION, editor_defaults
+from config.editor_defaults import CUE_BUILDER_VERSION, PREVIEW_PROFILE_VERSION, SCENE_BUILDER_VERSION, editor_defaults, v3_locked_render_settings
 from gaming_layout import DETECTOR_VERSION, FACE_NOT_FOUND_MESSAGE, GamingLayoutError, detect_facecam, validate_roi
+from layout_modes import (
+    V3_MODES,
+    LayoutModeError,
+    validate_mode,
+    validate_orientation,
+    is_legal_transition,
+    validate_facecam_overlap,
+)
 from subtitle_cues import build_subtitle_cues
 from render_scheduler import RenderAttempt, RenderScheduler
 from youtube_uploader import upload_youtube_video
@@ -46,7 +54,9 @@ _RENDER_LOGGER = logging.getLogger("web_klip.renderer")
 _UPLOAD_LOGGER = logging.getLogger("web_klip.youtube_upload")
 _CLIP_LOCKS = {}
 _CLIP_LOCKS_GUARD = threading.Lock()
-_ACTIVE_CLIP_STATUSES = {"render_queued", "rendering", "scheduled", "uploading"}
+_CLIP_META_CACHE = {}  # (user_id, clip_id) -> meta_path; avoids glob scan
+_CLIP_META_CACHE_GUARD = threading.Lock()
+_ACTIVE_CLIP_STATUSES = {"render_queued", "rendering", "scheduled", "uploading", "needs_facecam"}
 _UPLOAD_LEASE_SECONDS = 3600
 _RENDER_LEASE_SECONDS = 3600
 _PREVIEW_SCHEDULER = RenderScheduler(max_workers=max(1, int(os.environ.get("KLIPKLOP_RENDER_WORKERS", "1"))))
@@ -124,6 +134,7 @@ class WebJobManager:
         self._cancel_requested = False
         self._timed_out = False
         self._active_url = ""
+        self._v3_mode = None
 
     def _request_timeout(self):
         self._timed_out = True
@@ -140,6 +151,15 @@ class WebJobManager:
         if not self._is_url(url):
             return {"status": "error", "message": "YouTube URL validation error: empty or invalid URL"}
 
+        # V3: validate layout mode if provided
+        v3_mode = None
+        if "mode" in payload:
+            try:
+                v3_mode = validate_mode(payload.get("mode"))
+            except LayoutModeError as exc:
+                return {"status": "error", "message": str(exc)}
+        self._v3_mode = v3_mode
+
         # Check for job timeout
         if self._job_start_time and (datetime.now() - self._job_start_time).total_seconds() > self._job_timeout:
             self._status = "idle"
@@ -153,6 +173,9 @@ class WebJobManager:
             
         if "settings" in payload and isinstance(payload["settings"], dict):
             self.save_settings(self._settings_from_start_payload(payload))
+        elif "video_quality" in payload:
+            # V3 form sends quality at top-level without style settings
+            self.save_settings({"video_quality": payload.get("video_quality")})
             
         requested_clips = self._as_int(payload.get("num_clips"), 1)
         num_clips = requested_clips if requested_clips in {1, 3, 5} else 1
@@ -160,11 +183,13 @@ class WebJobManager:
         add_hook = self._as_bool(payload.get("add_hook", True), True)
         subtitle_language = str(payload.get("subtitle_language", "id")).strip()[:10]
         instruction = str(payload.get("instruction", "")).strip()[:1000]
-        landscape_blur = self._as_bool(payload.get("landscape_blur", self._config().config.get("landscape_blur", True)), True)
-        source_credit = self._as_bool(payload.get("source_credit", True), True)
-        screen_size = str(payload.get("screen_size", "9:16"))
-        if screen_size not in {"9:16", "16:9"}:
-            screen_size = "9:16"
+        # V3 locked: blur off, portrait screen, captions/hook on
+        landscape_blur = False
+        source_credit = True
+        add_captions = True
+        add_hook = True
+        screen_size = "9:16"
+        subtitle_language = "id"
         with self._lock:
             if self.thread and self.thread.is_alive():
                 return {"status": "busy", "message": "Processing is already running"}
@@ -180,6 +205,8 @@ class WebJobManager:
             self._add_log(f"URL accepted: {url}")
             self._add_log(f"Requested clips: {num_clips}, subtitles: {'on' if add_captions else 'off'}, hook: {'on' if add_hook else 'off'}, language: {subtitle_language}, screen: {screen_size}, blur: {'on' if landscape_blur else 'off'}, source credit: {'on' if source_credit else 'off'}")
             self._add_log(f"Subtitles: {'ON' if add_captions else 'OFF'}")
+            if v3_mode:
+                self._add_log(f"V3 layout mode: {v3_mode}")
             args = (url, num_clips, add_captions, add_hook, subtitle_language, instruction, landscape_blur, self._make_run_dir(url), screen_size, source_credit)
             expected_args = self._run.__code__.co_argcount - int(hasattr(self._run, "__self__"))
             if expected_args == 6:
@@ -227,6 +254,7 @@ class WebJobManager:
             "url": self._active_url,
             "queue_position": _queue_position_for(self) if st == "queued" else None,
             "logs": self._logs[-500:],
+            "v3_modes": list(V3_MODES),
         }
 
     def stop(self):
@@ -774,6 +802,8 @@ class WebJobManager:
                 "elapsed_seconds": meta.get("render_elapsed_seconds", 0.0),
                 "error": meta.get("render_error", ""),
             },
+            "needs_facecam": meta.get("status") == "needs_facecam",
+            "gaming_detection": meta.get("gaming_detection") if isinstance(meta.get("gaming_detection"), dict) else {},
             "youtube_upload": meta.get("youtube_upload"),
             "youtube_upload_history": meta.get("youtube_upload_history", []),
             "thumbnail_url": media_url("thumbnail") if thumbnail.is_file() else "",
@@ -797,15 +827,28 @@ class WebJobManager:
             meta = self._read_json(meta_path)
             if not meta.get("clip_id"):
                 continue
-            if not (meta_path.parent / "draft.mp4").is_file() and not (meta_path.parent / "master.mp4").is_file():
+            has_media = (meta_path.parent / "draft.mp4").is_file() or (meta_path.parent / "master.mp4").is_file()
+            if not has_media and meta.get("status") != "needs_facecam":
                 continue
             clips.append(self._clip_view(meta_path, meta))
         return {"status": "ok", "clips": sorted(clips, key=lambda item: (item["created_at"], item["clip_id"]), reverse=True)}
 
     def _clip_meta(self, clip_id):
+        cache_key = (self.user_id or str(self.app_dir.resolve()), str(clip_id))
+        with _CLIP_META_CACHE_GUARD:
+            cached = _CLIP_META_CACHE.get(cache_key)
+        if cached and cached.is_file():
+            meta = self._read_json(cached)
+            if meta.get("clip_id") == clip_id:
+                return cached, meta
+            # stale cache entry — clean up
+            with _CLIP_META_CACHE_GUARD:
+                _CLIP_META_CACHE.pop(cache_key, None)
         for meta_path in self._output_root().glob("*/**/data.json"):
             meta = self._read_json(meta_path)
             if meta.get("clip_id") == clip_id:
+                with _CLIP_META_CACHE_GUARD:
+                    _CLIP_META_CACHE[cache_key] = meta_path
                 return meta_path, meta
         return None, None
 
@@ -869,57 +912,83 @@ class WebJobManager:
         return defaults
 
     def _render_settings(self, payload, metadata, require_gaming_roi=True):
-        defaults = self._editor_defaults()
-        supplied = payload.get("settings") if isinstance(payload.get("settings"), dict) else metadata.get("render_settings") if isinstance(metadata.get("render_settings"), dict) else {}
-        snapshot = metadata.get("draft_settings") if isinstance(metadata.get("draft_settings"), dict) else {}
-        snapshot_blur = snapshot.get("blur_background") if isinstance(snapshot.get("blur_background"), dict) else {}
-        defaults["blur_background"] = {**snapshot_blur}
-        settings = {key: {**defaults.get(key, {}), **(supplied.get(key) if isinstance(supplied.get(key), dict) else {})} for key in defaults}
-        settings["hook_style"]["enabled"] = self._as_bool(settings["hook_style"].get("enabled"), False)
-        settings["subtitle"]["enabled"] = self._as_bool(settings["subtitle"].get("enabled"), False)
-        settings["watermark"]["enabled"] = self._as_bool(settings["watermark"].get("enabled"), False)
-        settings["credit_watermark"]["enabled"] = self._as_bool(settings["credit_watermark"].get("enabled"), False)
-        ranges = {
-            "hook_style": {"font_size": (0.01, 0.1), "outline_thickness": (0, 6), "position_x": (0, 1), "position_y": (0, 1)},
-            "subtitle": {"size": (0.01, 0.1), "outline_thickness": (0, 6), "position_x": (0, 1), "position_y": (0, 1)},
-            "watermark": {"scale": (0.1, 2), "opacity": (0, 1), "position_x": (0, 1), "position_y": (0, 1)},
-            "credit_watermark": {"size": (0.01, 0.1), "opacity": (0, 1), "position_x": (0, 1), "position_y": (0, 1)},
-            "blur_background": {"scale": (1, 2), "zoom": (1, 3), "strength": (0, 100)},
-        }
-        for section, fields in ranges.items():
-            for field, (minimum, maximum) in fields.items():
-                fallback = defaults.get(section, {}).get(field, minimum)
-                settings[section][field] = max(minimum, min(maximum, self._as_float(settings[section].get(field), fallback)))
-        for section in ("hook_style", "subtitle"):
-            if settings[section].get("font_family") not in {"Plus Jakarta Sans", "Poppins"}:
-                settings[section]["font_family"] = "Plus Jakarta Sans"
-            weight = self._as_int(settings[section].get("font_weight"), 800)
-            settings[section]["font_weight"] = min((400, 500, 600, 700, 800), key=lambda item: abs(item - weight))
-        for section, fields in {"hook_style": ("text_color", "outline_color"), "subtitle": ("text_color", "color", "outline_color"), "credit_watermark": ("color",)}.items():
-            for field in fields:
-                value = str(settings[section].get(field) or "").upper()
-                settings[section][field] = value if re.fullmatch(r"#[0-9A-F]{6}", value) else str(defaults.get(section, {}).get(field) or "#FFFFFF")
-        settings["credit_watermark"]["text"] = str(settings["credit_watermark"].get("text") or "")[:120]
-        settings["landscape_blur"] = self._as_bool(settings["blur_background"].get("enabled"), self._as_bool(snapshot.get("landscape_blur"), False))
-        settings["video_quality"] = str(snapshot.get("video_quality") or "720")
-        settings["screen_size"] = "16:9" if str(snapshot.get("screen_size")) == "16:9" else "9:16"
-        layout = settings.get("video_layout", {})
-        mode = str(layout.get("mode") or "normal")
-        if mode not in {"normal", "gaming"}:
+        """Return locked V3 visuals; client may choose layout/ROI, never style."""
+        supplied = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
+        stored = metadata.get("render_settings") if isinstance(metadata.get("render_settings"), dict) else {}
+        draft = metadata.get("draft_settings") if isinstance(metadata.get("draft_settings"), dict) else {}
+        selected = supplied or stored
+        selected_layout = selected.get("video_layout") if isinstance(selected.get("video_layout"), dict) else {}
+        mode = str(selected_layout.get("mode") or metadata.get("v3_mode") or self._v3_mode or "normal")
+        if mode == "vertical_full":
             mode = "normal"
-        settings["video_layout"] = {"mode": mode}
+        if mode not in {"normal", "gaming", "split_middle"}:
+            mode = "normal"
+        locked_input = {"video_layout": {"mode": mode, **selected_layout}}
+        settings = v3_locked_render_settings(locked_input)
+        settings["video_quality"] = str(draft.get("video_quality") or "1080")
+        settings["screen_size"] = "9:16"
+        settings["landscape_blur"] = False
+        settings["watermark"]["enabled"] = False
+        settings["blur_background"]["enabled"] = False
         if mode == "gaming":
-            settings["screen_size"] = "9:16"
             detected = metadata.get("gaming_detection") if isinstance(metadata.get("gaming_detection"), dict) else {}
-            roi_source = layout if all(key in layout for key in ("facecam_x", "facecam_y", "facecam_width", "facecam_height")) else detected.get("facecam")
-            roi = validate_roi({"x": roi_source.get("facecam_x", roi_source.get("x")), "y": roi_source.get("facecam_y", roi_source.get("y")), "width": roi_source.get("facecam_width", roi_source.get("width")), "height": roi_source.get("facecam_height", roi_source.get("height"))} if isinstance(roi_source, dict) else None)
+            roi_source = selected_layout if all(key in selected_layout for key in ("facecam_x", "facecam_y", "facecam_width", "facecam_height")) else detected.get("facecam")
+            roi = validate_roi({
+                "x": roi_source.get("facecam_x", roi_source.get("x")),
+                "y": roi_source.get("facecam_y", roi_source.get("y")),
+                "width": roi_source.get("facecam_width", roi_source.get("width")),
+                "height": roi_source.get("facecam_height", roi_source.get("height")),
+            } if isinstance(roi_source, dict) else None)
             if not roi:
                 if require_gaming_roi:
                     raise GamingLayoutError(FACE_NOT_FOUND_MESSAGE)
                 return settings
-            confidence = self._as_float(layout.get("facecam_confidence", detected.get("confidence")), 0.0)
-            settings["video_layout"].update(facecam_x=roi["x"], facecam_y=roi["y"], facecam_width=roi["width"], facecam_height=roi["height"], facecam_confidence=max(0.0, min(1.0, confidence)))
+            confidence = self._as_float(selected_layout.get("facecam_confidence", detected.get("confidence")), 0.0)
+            settings["video_layout"].update(
+                facecam_x=roi["x"], facecam_y=roi["y"],
+                facecam_width=roi["width"], facecam_height=roi["height"],
+                facecam_confidence=max(0.0, min(1.0, confidence)),
+            )
         return settings
+
+    def _auto_render_run(self, run_dir):
+        """Render each staged clip independently. Source/transcript/TTS caches are reused."""
+        results = []
+        for meta_path in sorted(Path(run_dir).rglob("data.json")):
+            metadata = self._read_json(meta_path)
+            clip_id = str(metadata.get("clip_id") or "")
+            if not clip_id or metadata.get("status") == "needs_facecam":
+                continue
+            if (meta_path.parent / "master.mp4").is_file() and metadata.get("status") == "ready_to_schedule":
+                results.append({"clip_id": clip_id, "status": "cached"})
+                continue
+            output = meta_path.parent / "master.auto.tmp.mp4"
+            try:
+                settings = self._render_settings({}, metadata)
+                metadata.update(status="rendering", render_error="", render_stage="Merender final", render_progress=0.0)
+                self._write_json_atomic(meta_path, metadata)
+                renderer = LocalClipRenderer(
+                    ffmpeg_path=get_ffmpeg_path(), output_dir=str(meta_path.parent.parent),
+                    watermark_settings=settings["watermark"], credit_watermark_settings=settings["credit_watermark"],
+                    hook_style_settings={**settings["hook_style"], "blur_background": settings["blur_background"]},
+                    subtitle_style=settings["subtitle"], video_quality="1080", landscape_blur=False,
+                    screen_size="9:16", progress_callback=lambda _stage, _value=None: None,
+                    cancel_check=lambda: self._cancel_requested, **self._hook_tts_config(),
+                )
+                renderer.render_existing_clip(meta_path.parent, metadata, settings, output, preview=False)
+                if not output.is_file() or output.stat().st_size < 1000:
+                    raise RuntimeError("Final render gagal")
+                os.replace(output, meta_path.parent / "master.mp4")
+                metadata.update(status="ready_to_schedule", render_error="", render_stage="Selesai", render_progress=1.0, render_revision=int(metadata.get("render_revision", 0)) + 1)
+                self._write_json_atomic(meta_path, metadata)
+                results.append({"clip_id": clip_id, "status": "ready_to_schedule"})
+            except Exception as exc:
+                output.unlink(missing_ok=True)
+                metadata.update(status="render_error", render_error=str(exc), render_stage="Render gagal", render_progress=0.0)
+                self._write_json_atomic(meta_path, metadata)
+                self._add_log(f"Clip {clip_id[:8]} render failed: {exc}", "Error")
+                results.append({"clip_id": clip_id, "status": "render_error", "error": str(exc)})
+        return results
 
     def detect_gaming_facecam(self, payload):
         if not isinstance(payload, dict):
@@ -946,6 +1015,150 @@ class WebJobManager:
             return {"status": "ok", "facecam": facecam, "confidence": detected["confidence"], "cached": False}
         finally:
             lock.release()
+
+    def prepare_gaming_layout(self, clip_id, minimum_confidence=0.62):
+        """Run facecam detect; mark needs_facecam on low confidence so job survives restart."""
+        lock, meta_path, metadata = self._locked_clip_meta(str(clip_id or ""))
+        try:
+            if not meta_path:
+                return {"status": "error", "message": "Klip tidak ditemukan"}
+            source = meta_path.parent / "source.mp4"
+            if not source.is_file():
+                return {"status": "error", "message": "Source klip tidak ditemukan"}
+            identity = {**self._file_identity(source), "detector_version": DETECTOR_VERSION}
+            try:
+                detected = detect_facecam(source, minimum_confidence=minimum_confidence)
+            except GamingLayoutError as exc:
+                metadata["status"] = "needs_facecam"
+                metadata["layout_error"] = str(exc)
+                metadata.pop("gaming_detection", None)
+                self._write_json_atomic(meta_path, metadata)
+                return {"status": "needs_facecam", "message": str(exc), "clip_id": clip_id}
+            facecam = {key: detected[key] for key in ("x", "y", "width", "height")}
+            if not validate_facecam_overlap(facecam, detected["source_width"], detected["source_height"]):
+                # Still usable if gameplay_crop shifts; store but flag low confidence path for manual if needed
+                pass
+            metadata["gaming_detection"] = {
+                "source": identity,
+                "facecam": facecam,
+                "confidence": detected["confidence"],
+            }
+            metadata["status"] = "needs_edit" if metadata.get("status") == "needs_facecam" else metadata.get("status", "needs_edit")
+            metadata.pop("layout_error", None)
+            self._write_json_atomic(meta_path, metadata)
+            return {
+                "status": "ok",
+                "facecam": facecam,
+                "confidence": detected["confidence"],
+                "clip_id": clip_id,
+            }
+        finally:
+            lock.release()
+
+    def submit_facecam_roi(self, payload):
+        """Accept manual facecam ROI for needs_facecam clips. No filesystem paths from client."""
+        if not isinstance(payload, dict):
+            return {"status": "error", "message": "Payload facecam tidak valid"}
+        clip_id = str(payload.get("clip_id") or "")
+        lock, meta_path, metadata = self._locked_clip_meta(clip_id)
+        should_render = False
+        response = None
+        try:
+            if not meta_path:
+                return {"status": "error", "message": "Klip tidak ditemukan"}
+            if metadata.get("status") not in {"needs_facecam", "needs_edit", "render_error"}:
+                return {"status": "error", "message": "Klip tidak menunggu pemilihan facecam"}
+            source = meta_path.parent / "source.mp4"
+            if not source.is_file():
+                return {"status": "error", "message": "Source klip tidak ditemukan"}
+            roi = validate_roi({
+                "x": payload.get("x", payload.get("facecam_x")),
+                "y": payload.get("y", payload.get("facecam_y")),
+                "width": payload.get("width", payload.get("facecam_width")),
+                "height": payload.get("height", payload.get("facecam_height")),
+            })
+            if not roi:
+                return {"status": "error", "message": "ROI facecam tidak valid"}
+            geometry = metadata.get("source_geometry") if isinstance(metadata.get("source_geometry"), dict) else self._source_geometry(source)
+            source_w = int(geometry.get("width") or 0)
+            source_h = int(geometry.get("height") or 0)
+            if source_w <= 0 or source_h <= 0:
+                return {"status": "error", "message": "Geometry source tidak tersedia"}
+            if source_w <= source_h:
+                return {"status": "error", "message": "Mode gaming hanya mendukung source landscape."}
+            if not validate_facecam_overlap(roi, source_w, source_h):
+                return {"status": "error", "message": "Facecam overlap area gameplay tengah. Geser ke tepi frame."}
+            identity = {**self._file_identity(source), "detector_version": DETECTOR_VERSION}
+            confidence = max(0.0, min(1.0, self._as_float(payload.get("confidence"), 1.0)))
+            metadata["gaming_detection"] = {
+                "source": identity,
+                "facecam": roi,
+                "confidence": confidence,
+                "manual": True,
+            }
+            # V3: ROI saved → queue final render immediately
+            if metadata.get("status") == "needs_facecam":
+                metadata["status"] = "needs_edit"
+            metadata.pop("layout_error", None)
+            self._write_json_atomic(meta_path, metadata)
+            should_render = True
+            response = {"status": "ok", "facecam": roi, "confidence": confidence, "clip_status": metadata["status"]}
+        finally:
+            lock.release()
+        if should_render and response is not None:
+            render_result = self.render_clip({
+                "clip_id": clip_id,
+                "settings": {
+                    "video_layout": {
+                        "mode": "gaming",
+                        "facecam_x": response["facecam"]["x"],
+                        "facecam_y": response["facecam"]["y"],
+                        "facecam_width": response["facecam"]["width"],
+                        "facecam_height": response["facecam"]["height"],
+                        "facecam_confidence": response["confidence"],
+                    }
+                },
+            }, preview=False)
+            response["render"] = render_result
+            if render_result.get("status") in {"queued", "cached"}:
+                response["clip_status"] = "render_queued" if render_result.get("status") == "queued" else response["clip_status"]
+            elif render_result.get("status") == "error":
+                response["message"] = render_result.get("message") or "ROI disimpan, render gagal diantrikan"
+            return response
+        return response or {"status": "error", "message": "Payload facecam tidak valid"}
+
+    def extract_clip_frame(self, clip_id, seek_seconds=0.0):
+        """Return JPEG bytes for source frame at seek time. Ownership via _clip_meta."""
+        meta_path, metadata = self._clip_meta(str(clip_id or ""))
+        if not meta_path:
+            return None, "Klip tidak ditemukan"
+        source = meta_path.parent / "source.mp4"
+        if not source.is_file():
+            return None, "Source klip tidak ditemukan"
+        seek = max(0.0, self._as_float(seek_seconds, 0.0))
+        duration = self._as_float(metadata.get("duration_seconds"), 0.0)
+        if duration > 0:
+            seek = min(seek, max(0.0, duration - 0.05))
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as handle:
+            target = Path(handle.name)
+        try:
+            cmd = [
+                get_ffmpeg_path(), "-y",
+                "-ss", f"{seek:.3f}",
+                "-i", str(source),
+                "-frames:v", "1",
+                "-q:v", "3",
+                str(target),
+            ]
+            result = subprocess.run(cmd, capture_output=True, timeout=20)
+            if result.returncode != 0 or not target.is_file() or target.stat().st_size < 32:
+                return None, "Frame gagal diekstrak"
+            return target.read_bytes(), None
+        except (OSError, subprocess.SubprocessError):
+            return None, "Frame gagal diekstrak"
+        finally:
+            target.unlink(missing_ok=True)
 
     def render_clip(self, payload, preview=False):
         clip_id = str(payload.get("clip_id") or "")
@@ -1145,8 +1358,12 @@ class WebJobManager:
             if scheduled_at.tzinfo is not None:
                 scheduled_at = scheduled_at.astimezone(ZoneInfo("Asia/Jakarta")).replace(tzinfo=None)
             scheduled_utc = scheduled_at.replace(tzinfo=ZoneInfo("Asia/Jakarta")).astimezone(timezone.utc)
-            if scheduled_utc <= datetime.now(timezone.utc):
+            now_utc = datetime.now(timezone.utc)
+            min_utc = now_utc + timedelta(minutes=10)
+            if scheduled_utc <= now_utc:
                 return {"status": "error", "message": "Waktu upload harus setelah sekarang"}
+            if scheduled_utc < min_utc:
+                return {"status": "error", "message": "Jadwal minimal 10 menit dari sekarang (WIB)"}
             title, description = self._upload_text(payload, metadata)
             upload = {"status": "scheduled", "scheduled_at": scheduled_utc.isoformat(), "title": title, "description": description, "privacy": "public", "render_revision": int(metadata.get("render_revision", 0))}
             metadata.update(status="scheduled", youtube_upload=upload)
@@ -1176,14 +1393,18 @@ class WebJobManager:
             if not meta_path or metadata.get("status") != "upload_error":
                 return {"status": "error", "message": "Upload klip tidak dapat diulang"}
             upload = dict(metadata.get("youtube_upload") or {})
+            # V3: back to schedule panel only — no immediate re-upload
             metadata["status"] = "ready_to_schedule"
             metadata.pop("youtube_upload", None)
+            if upload:
+                metadata["pending_youtube_upload"] = {
+                    "title": upload.get("title", metadata.get("title", "")),
+                    "description": upload.get("description", metadata.get("description", "")),
+                }
             self._write_json_atomic(meta_path, metadata)
+            return {"status": "ready", "clip_status": "ready_to_schedule"}
         finally:
             lock.release()
-        if self._as_bool(payload.get("upload_now"), False):
-            return self.upload_clip_now({"clip_id": clip_id, "title": upload.get("title", metadata.get("title", "")), "description": upload.get("description", metadata.get("description", ""))})
-        return {"status": "ready"}
 
     def _upload_claim(self, clip_id, allowed_statuses, payload=None):
         lock, meta_path, metadata = self._locked_clip_meta(clip_id)
@@ -1221,19 +1442,33 @@ class WebJobManager:
             return True
 
     def upload_clip_now(self, payload):
-        claim = self._upload_claim(str(payload.get("clip_id") or ""), {"ready_to_schedule"}, payload)
-        if claim is None:
-            return {"status": "error", "message": "Klip final belum siap diupload"}
-        meta_path, attempt_id, revision, upload = claim
+        # V3: immediate public upload removed — schedule WIB only
+        return {"status": "error", "message": "Upload langsung dinonaktifkan. Jadwalkan minimal 10 menit dari sekarang (WIB)."}
+
+    def update_hook_text(self, payload):
+        """Edit hook text only, then queue locked final re-render."""
+        if not isinstance(payload, dict):
+            return {"status": "error", "message": "Payload hook tidak valid"}
+        clip_id = str(payload.get("clip_id") or "")
+        raw_hook = str(payload.get("hook_text") or "").strip()
+        if len(raw_hook.split()) > 8:
+            return {"status": "error", "message": "Hook maksimal 8 kata"}
+        from visual_style import normalize_hook_text
+        hook = normalize_hook_text(raw_hook)
+        lock, meta_path, metadata = self._locked_clip_meta(clip_id)
         try:
-            result = upload_youtube_video(meta_path.parent / "master.mp4", upload.get("title", ""), upload.get("description", ""), "public", self.user_id)
-        except Exception as exc:
-            self._complete_upload(meta_path, attempt_id, revision)
-            _UPLOAD_LOGGER.exception("immediate upload failed clip=%s error=%s", str(payload.get("clip_id") or "")[:12], type(exc).__name__)
-            return {"status": "error", "message": "Upload YouTube gagal. Coba lagi."}
-        if not self._complete_upload(meta_path, attempt_id, revision, result):
-            return {"status": "error", "message": "Status upload telah berubah"}
-        return {"status": "ok", **result}
+            if not meta_path:
+                return {"status": "error", "message": "Klip tidak ditemukan"}
+            if metadata.get("status") not in {"ready_to_schedule", "render_error", "needs_edit", "upload_error"}:
+                return {"status": "error", "message": "Hook tidak bisa diedit pada status ini"}
+            if metadata.get("status") == "upload_error":
+                metadata.pop("youtube_upload", None)
+            metadata["hook_text"] = hook
+            metadata["status"] = "needs_edit"
+            self._write_json_atomic(meta_path, metadata)
+        finally:
+            lock.release()
+        return self.render_clip({"clip_id": clip_id, "hook_text": hook}, preview=False)
 
     def edit_clip_again(self, payload):
         clip_id = str(payload.get("clip_id") or "")
@@ -1257,6 +1492,18 @@ class WebJobManager:
         finally:
             lock.release()
 
+    def cancel_clip_process(self, payload):
+        clip_id = str(payload.get("clip_id") or "")
+        lock, meta_path, metadata = self._locked_clip_meta(clip_id)
+        try:
+            if not meta_path or metadata.get("status") not in {"render_queued", "rendering"}:
+                return {"status": "error", "message": "Proses klip tidak dapat dibatalkan"}
+            metadata.update(status="cancelled", render_stage="Dibatalkan", render_error="", render_progress=0.0)
+            self._write_json_atomic(meta_path, metadata)
+            return {"status": "cancelled", "clip_id": clip_id}
+        finally:
+            lock.release()
+
     def delete_clip(self, payload):
         clip_id = str(payload.get("clip_id") or "")
         lock, meta_path, metadata = self._locked_clip_meta(clip_id)
@@ -1269,6 +1516,9 @@ class WebJobManager:
                 shutil.rmtree(meta_path.parent)
             except OSError:
                 return {"status": "error", "message": "Klip gagal dihapus"}
+            cache_key = (self.user_id or str(self.app_dir.resolve()), clip_id)
+            with _CLIP_META_CACHE_GUARD:
+                _CLIP_META_CACHE.pop(cache_key, None)
             return {"status": "deleted"}
         finally:
             lock.release()
@@ -1356,7 +1606,23 @@ class WebJobManager:
             core.process(url, num_clips=num_clips, add_captions=add_captions, add_hook=add_hook)
             if self._cancel_requested:
                 raise InterruptedError("Stopped")
-            self._write_run_meta(run_dir, url, {**self._summarize_run(run_dir), "video_quality": quality, "landscape_blur": landscape_blur, "screen_size": screen_size, "add_hook": add_hook, "add_captions": add_captions, "subtitle_language": subtitle_language, "status": "staged", "file_exists": True})
+            layout_mode = getattr(self, "_v3_mode", None) or str(cfg.get("video_layout", {}).get("mode", "normal"))
+            if layout_mode == "gaming":
+                for meta_path in sorted(run_dir.rglob("data.json")):
+                    meta = self._read_json(meta_path)
+                    clip_id = meta.get("clip_id")
+                    if not clip_id:
+                        continue
+                    result = self.prepare_gaming_layout(clip_id)
+                    if result.get("status") == "needs_facecam":
+                        self._add_log(f"Facecam low confidence for {clip_id[:8]}… — awaiting manual ROI")
+                    elif result.get("status") == "ok":
+                        self._add_log(f"Facecam auto-detected for {clip_id[:8]}… conf={result.get('confidence', 0):.2f}")
+            # V3: auto final render after analysis (skip needs_edit editor stage)
+            if not self._cancel_requested:
+                self._add_log("Auto-rendering final clips…")
+                self._auto_render_run(run_dir)
+            self._write_run_meta(run_dir, url, {**self._summarize_run(run_dir), "video_quality": quality, "landscape_blur": False, "screen_size": "9:16", "add_hook": True, "add_captions": True, "subtitle_language": subtitle_language, "status": "staged", "file_exists": True, "v3_mode": layout_mode if layout_mode in V3_MODES or layout_mode == "gaming" else None})
             self._enforce_retention()
             self._status = "complete"
             self._message = "Complete"

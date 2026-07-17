@@ -14,10 +14,12 @@ import requests
 
 from clipper_shared import SUBPROCESS_FLAGS, SubtitleNotFoundError, TimedTranscript, timed_segments_to_prompt, validate_timed_transcript
 from clipper_base import ClipperBase
+from config.editor_defaults import HARD_CLIP_MAX, HARD_CLIP_MIN, TARGET_CLIP_MAX, TARGET_CLIP_MIN
+from visual_style import normalize_hook_text
 
-# Clip duration constraints (in seconds)
-MIN_CLIP_DURATION = 10
-MAX_CLIP_DURATION = 120
+# V3 clip duration contract (seconds)
+MIN_CLIP_DURATION = HARD_CLIP_MIN
+MAX_CLIP_DURATION = HARD_CLIP_MAX
 MAX_GROQ_UPLOAD_BYTES = 20 * 1024 * 1024
 
 
@@ -67,15 +69,19 @@ Jika harus memilih, utamakan EMOSI & KONFLIK dibanding edukasi netral.
 ATURAN DURASI (KRITIS – TIDAK BOLEH DILANGGAR)
 ==============================================
 
-* Setiap clip mengikuti konteks cerita, tidak wajib 60 detik.
-* Maksimum durasi: 120 detik.
+* Target durasi tiap clip: 50–70 detik.
+* Minimum absolut: 40 detik.
+* Maksimum absolut: 70 detik.
 * Hitung durasi dari timestamp transcript.
 * JANGAN estimasi berdasarkan panjang teks.
 
-Jika durasi < 10 detik:
-→ PERPANJANG dengan konteks sebelum atau sesudahnya.
+Jika momen inti < 50 detik:
+→ PERPANJANG konteks sebelum/sesudah sampai 50–70 detik.
 
-Jika durasi > 120 detik:
+Jika momen inti < 40 detik:
+→ PERPANJANG minimal sampai 40 detik (target tetap 50–70).
+
+Jika durasi > 70 detik:
 → Pangkas bagian yang tidak relevan TANPA merusak alur cerita.
 
 ==================================================
@@ -91,7 +97,7 @@ Lakukan salah satu atau kombinasi berikut:
 
 DILARANG:
 
-* Menghasilkan clip < 10 detik
+* Menghasilkan clip < 40 detik
 * Mengurangi jumlah clip
 * Mengabaikan timestamp asli
 * Mengarang timestamp
@@ -119,7 +125,7 @@ Setiap object HARUS memiliki:
 3. "title" (string) → Maks 60 karakter, padat & click-worthy
 4. "description" (string) → Maks 150 karakter, jelaskan kenapa viral
 5. "virality_score" (integer) → 1–10 (HARUS ANGKA, BUKAN STRING)
-6. "hook_text" (string) → Maks 15 kata
+6. "hook_text" (string) → Bahasa Indonesia, maks 8 kata, maks 2 baris
 
 DILARANG:
 
@@ -161,15 +167,16 @@ HOOK TEXT (HARUS TAJAM & MENJUAL)
 
 WAJIB:
 
-* Maksimal 15 kata
-* Bahasa Indonesia casual
-* Maksimal 1 emoji yang relevan, idealnya di akhir; tanpa emoji jika tidak cocok
-* WAJIB menyebut NAMA ORANG yang berbicara
+* Bahasa Indonesia
+* Maksimal 8 kata
+* Maksimal 2 baris
+* Tanpa emoji
+* Boleh tanpa nama orang jika memakan kuota kata
 * Harus berupa kutipan, statement tajam, atau punchline
 
 Contoh benar:
-"Andre Taulany: Gua hampir bangkrut gara-gara ini"
-"Deddy Corbuzier: Banyak podcaster cuma pura-pura sukses"
+"Gua hampir bangkrut gara-gara ini"
+"Banyak podcaster cuma pura-pura sukses"
 
 Hook harus bisa berdiri sendiri sebagai headline viral.
 
@@ -180,11 +187,12 @@ SELF-VALIDATION (WAJIB SEBELUM RETURN)
 Periksa:
 
 1. Jumlah segment = {num_clips} ?
-2. Semua durasi 10–120 detik ?
+2. Semua durasi 40–70 detik (target 50–70) ?
 3. Semua punya tepat 6 field ?
 4. virality_score berupa integer 1–10 ?
-5. Tidak ada field lain ?
-6. Tidak ada teks di luar JSON ?
+5. hook_text ≤ 8 kata ?
+6. Tidak ada field lain ?
+7. Tidak ada teks di luar JSON ?
 
 Jika ada kesalahan → PERBAIKI sebelum output.
 
@@ -281,7 +289,7 @@ Transcript:
         import random
         seed = random.randint(1000, 9999)
         variety_hint = f"\n\n[SISTEM: Generate dengan variasi baru (Seed: {seed}). Prioritaskan segmen/timestamp yang BERBEDA dari yang biasanya paling jelas. Cari hidden gems atau momen unik yang sebelumnya mungkin terlewat.]"
-        duration_hint = "\n\n[SISTEM: Timestamp WAJIB berupa rentang cerita lengkap 45-90 detik. Jangan pilih satu kalimat pendek. Jika momen inti pendek, mulai 20-30 detik sebelum momen dan akhiri 30-60 detik setelahnya.]"
+        duration_hint = f"\n\n[SISTEM: Timestamp WAJIB target {TARGET_CLIP_MIN}-{TARGET_CLIP_MAX} detik (minimum {HARD_CLIP_MIN}, maksimum {HARD_CLIP_MAX}). Jangan pilih satu kalimat pendek. Jika momen inti pendek, perluas konteks sebelum/sesudah. hook_text Bahasa Indonesia max 8 kata.]"
         prompt += variety_hint + duration_hint
 
         # Use OpenAI-compatible API for all providers
@@ -371,8 +379,15 @@ Transcript:
             end_seconds = self.parse_timestamp(h["end_time"])
             duration = end_seconds - start_seconds
             if duration < MIN_CLIP_DURATION:
-                start_seconds = max(0, start_seconds - 25)
-                end_seconds = min(start_seconds + 75, end_seconds + 45)
+                # Expand toward target 50–70s window
+                need = max(TARGET_CLIP_MIN, MIN_CLIP_DURATION) - duration
+                pad_before = min(25.0, need * 0.4)
+                pad_after = need - pad_before
+                start_seconds = max(0, start_seconds - pad_before)
+                end_seconds = end_seconds + pad_after
+                # Clamp to hard max
+                if end_seconds - start_seconds > MAX_CLIP_DURATION:
+                    end_seconds = start_seconds + MAX_CLIP_DURATION
                 h["start_time"] = self.format_timestamp(start_seconds)
                 h["end_time"] = self.format_timestamp(end_seconds)
                 duration = end_seconds - start_seconds
@@ -390,6 +405,7 @@ Transcript:
                 self.log(f"  ⚠ Missing description for '{h.get('title', 'Unknown')}', using title")
             if "hook_text" not in h:
                 h["hook_text"] = h.get("title", "Highlight")
+            h["hook_text"] = normalize_hook_text(h.get("hook_text") or h.get("title") or "Highlight")
             
             if duration > MAX_CLIP_DURATION:
                 h["end_time"] = self.format_timestamp(self.parse_timestamp(h["start_time"]) + MAX_CLIP_DURATION)
@@ -427,8 +443,8 @@ Transcript:
         cursor = 0.0
         while len(out) < count and cursor < total_end:
             start = cursor
-            end = min(start + 45, total_end)
-            cursor += 45
+            end = min(start + TARGET_CLIP_MIN, total_end)
+            cursor += TARGET_CLIP_MIN
             if end - start < MIN_CLIP_DURATION:
                 continue
             if any(start < u_end and end > u_start for u_start, u_end in used):
@@ -440,6 +456,7 @@ Transcript:
                 "end_time": self.format_timestamp(end),
                 "duration_seconds": round(end - start, 1),
                 "virality_score": 4,
+                "hook_text": normalize_hook_text(f"Highlight tambahan {len(out) + 1}"),
             }
             out.append(item)
             used.append((start, end))

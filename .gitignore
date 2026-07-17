@@ -8,6 +8,7 @@ error.log
 __pycache__/
 *.pyc
 .pytest_cache/
+.venv/
 .env
 bin/
 ffmpeg/

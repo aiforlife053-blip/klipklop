@@ -341,6 +341,8 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
                         add_captions=add_captions, add_hook=add_hook, pre_cut=True,
                         caption_transcript=caption_transcript,
                     )
+            except Exception as exc:
+                self.log(f"  Clip {idx} failed: {exc}")
             finally:
                 try:
                     Path(clip_source).unlink(missing_ok=True)
@@ -381,8 +383,8 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
                 try:
                     future.result()
                 except Exception as exc:
+                    # V3: one clip failure must not stop the batch
                     self.log(f"  Clip {clip_idx} failed: {exc}")
-                    raise
                 if self.is_cancelled():
                     executor.shutdown(wait=False, cancel_futures=True)
                     break

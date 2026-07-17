@@ -29,7 +29,7 @@ from subtitle_cues import build_subtitle_cues
 
 def test_static_subtitle_cues_remove_rolling_caption_overlap():
     cues = build_subtitle_cues({"duration": 8.0, "words": [], "segments": [{"text": "lama", "start": 0.0, "end": 4.0}, {"text": "baru", "start": 2.0, "end": 6.0}, {"text": "terbaru", "start": 4.0, "end": 8.0}]})
-    assert [(cue["text"], cue["start"], cue["end"]) for cue in cues] == [("lama", 0.0, 2.0), ("baru", 2.0, 4.0), ("terbaru", 4.0, 8.0)]
+    assert [(cue["text"], cue["start"], cue["end"]) for cue in cues] == [("LAMA", 0.0, 2.0), ("BARU", 2.0, 4.0), ("TERBARU", 4.0, 8.0)]
 
 
 def test_new_config_enables_subtitles_by_default(tmp_path):
@@ -728,14 +728,14 @@ class InstantJobManager(mod.WebJobManager):
         self.thread = None
 
 
-def test_enable_captions_alias_can_disable_captions(tmp_path):
+def test_start_persists_top_level_video_quality(tmp_path):
     manager = InstantJobManager(app_dir=tmp_path)
-    result = manager.start({"url": "https://www.youtube.com/watch?v=abc", "enable_captions": False})
+    result = manager.start({"url": "https://www.youtube.com/watch?v=abc", "video_quality": "2160"})
     thread = manager.thread
-    assert result == {"status": "queued", "queue_position": 1}
     if thread:
         thread.join(1)
-    assert manager.captured["add_captions"] is False
+    assert result == {"status": "queued", "queue_position": 1}
+    assert manager.get_settings()["video_quality"] == "2160"
 
 
 def test_num_clips_accepts_allowed_values(tmp_path):
@@ -799,14 +799,14 @@ class LegacySevenArgJobManager(mod.WebJobManager):
         self.thread = None
 
 
-def test_legacy_seven_arg_run_gets_landscape_blur_enabled(tmp_path):
+def test_legacy_seven_arg_run_gets_landscape_blur_forced_off(tmp_path):
     manager = LegacySevenArgJobManager(app_dir=tmp_path)
     result = manager.start({"url": "https://www.youtube.com/watch?v=abc", "add_captions": False, "landscape_blur": True})
     thread = manager.thread
     if thread:
         thread.join(1)
     assert result == {"status": "queued", "queue_position": 1}
-    assert manager.captured["landscape_blur"] is True
+    assert manager.captured["landscape_blur"] is False
 
 
 def test_nested_provider_settings_are_supported(tmp_path):
@@ -1000,16 +1000,16 @@ def test_editor_defaults_enable_subtitles_and_use_larger_foreground(tmp_path):
     manager = mod.WebJobManager(app_dir=tmp_path)
     defaults = manager._editor_defaults_local()
     assert defaults["subtitle"]["enabled"] is True
-    assert defaults["subtitle"]["text_transform"] == "none"
+    assert defaults["subtitle"]["text_transform"] == "uppercase"
     assert defaults["blur_background"]["scale"] == 1.6
-    assert defaults["blur_background"]["strength"] == 10
+    assert defaults["blur_background"]["enabled"] is False
 
 
-def test_render_settings_use_clip_input_without_mutating_defaults(tmp_path):
+def test_render_settings_ignore_client_style_without_mutating_defaults(tmp_path):
     manager = mod.WebJobManager(app_dir=tmp_path)
     settings = manager._render_settings({"settings": {"hook_style": {"enabled": True, "position_y": 0.3}}}, {})
     assert settings["hook_style"]["enabled"] is True
-    assert settings["hook_style"]["position_y"] == 0.3
+    assert settings["hook_style"]["position_y"] == 0.22
     assert manager.get_settings()["hook_style"]["position_y"] != 0.3
 
 
@@ -1018,8 +1018,8 @@ def test_render_settings_use_draft_snapshot_after_defaults_change(tmp_path):
     manager.save_settings({"video_quality": "480", "blur_background": {"enabled": False, "strength": 1}})
     metadata = {"draft_settings": {"landscape_blur": True, "blur_background": {"enabled": True, "strength": 30}, "video_quality": "1080", "screen_size": "9:16"}}
     settings = manager._render_settings({}, metadata)
-    assert settings["landscape_blur"] is True
-    assert settings["blur_background"]["strength"] == 30
+    assert settings["landscape_blur"] is False
+    assert settings["blur_background"]["enabled"] is False
     assert settings["video_quality"] == "1080"
 
 
@@ -1049,7 +1049,8 @@ def test_preview_uses_local_renderer_without_ai_provider(tmp_path, monkeypatch):
     clip_dir = tmp_path / "output" / "run" / "clip"
     clip_dir.mkdir(parents=True)
     (clip_dir / "source.mp4").write_bytes(b"source")
-    (clip_dir / "data.json").write_text(json.dumps({"clip_id": "preview", "status": "needs_edit", "render_revision": 0, "draft_settings": {"landscape_blur": True, "blur_background": {"enabled": True}, "video_quality": "1080", "screen_size": "9:16"}}), encoding="utf-8")
+    (clip_dir / "transcript.json").write_text(json.dumps({"duration": 1, "words": [{"word": "tes", "start": 0, "end": 1}], "segments": []}), encoding="utf-8")
+    (clip_dir / "data.json").write_text(json.dumps({"clip_id": "preview", "status": "needs_edit", "render_revision": 0, "transcript_path": "transcript.json", "draft_settings": {"landscape_blur": True, "blur_background": {"enabled": True}, "video_quality": "1080", "screen_size": "9:16"}}), encoding="utf-8")
     captured = {}
 
     class Renderer:
@@ -1110,29 +1111,28 @@ def test_clip_upload_lifecycle_uses_clip_id_without_client_path(tmp_path, monkey
     (clip_dir / "master.mp4").write_bytes(b"x")
     (clip_dir / "data.json").write_text(json.dumps({"clip_id": "ready", "status": "ready_to_schedule", "title": "Judul"}), encoding="utf-8")
     monkeypatch.setattr(mod, "upload_youtube_video", lambda *_args: {"video_id": "id", "url": "https://youtube.test/id"})
+    # V3: immediate upload disabled — schedule only
     result = manager.upload_clip_now({"clip_id": "ready", "title": "Judul baru", "description": "Deskripsi"})
-    assert result["status"] == "ok"
+    assert result["status"] == "error"
+    assert "Jadwalkan" in result["message"] or "10 menit" in result["message"]
     metadata = json.loads((clip_dir / "data.json").read_text(encoding="utf-8"))
-    assert metadata["status"] == "uploaded"
-    assert metadata["title"] == "Judul baru"
-    assert metadata["description"] == "Deskripsi"
-    assert metadata["youtube_upload"]["video_id"] == "id"
+    assert metadata["status"] == "ready_to_schedule"
+    assert "youtube_upload" not in metadata
 
 
 def test_render_settings_normalize_untrusted_editor_values(tmp_path):
     manager = mod.WebJobManager(app_dir=tmp_path)
     metadata = {"draft_settings": {"landscape_blur": True, "blur_background": {"enabled": True}, "video_quality": "1080"}}
     settings = manager._render_settings({"settings": {"hook_style": {"font_family": "Invalid", "font_weight": 999, "font_size": 99, "text_color": "bad", "position_x": -2}, "blur_background": {"zoom": 99, "strength": -1}}}, metadata)
-    assert settings["hook_style"]["font_family"] == "Plus Jakarta Sans"
-    assert settings["hook_style"]["font_weight"] == 800
-    assert settings["hook_style"]["font_size"] == 0.1
-    assert settings["hook_style"]["position_x"] == 0
+    assert settings["hook_style"]["font_family"] == "Poppins"
+    assert settings["hook_style"]["font_weight"] == 700
+    assert settings["hook_style"]["font_size"] == 0.056
+    assert settings["hook_style"]["position_x"] == 0.5
     assert settings["hook_style"]["text_color"].startswith("#")
-    assert settings["blur_background"]["zoom"] == 3
-    assert settings["blur_background"]["strength"] == 0
+    assert settings["blur_background"]["enabled"] is False
 
 
-def test_upload_error_retry_can_upload_immediately(tmp_path, monkeypatch):
+def test_upload_error_retry_returns_to_schedule_panel(tmp_path, monkeypatch):
     manager = mod.WebJobManager(app_dir=tmp_path)
     clip_dir = tmp_path / "output" / "run" / "clip"
     clip_dir.mkdir(parents=True)
@@ -1142,10 +1142,10 @@ def test_upload_error_retry_can_upload_immediately(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "upload_youtube_video", lambda *_args: {"video_id": "retried", "url": "https://youtube.test/retried"})
     result = manager.retry_clip_upload({"clip_id": "retry", "upload_now": True})
     saved = json.loads((clip_dir / "data.json").read_text(encoding="utf-8"))
-    assert result["status"] == "ok"
-    assert saved["status"] == "uploaded"
-    assert saved["youtube_upload"]["title"] == "Judul retry"
-    assert saved["youtube_upload"]["video_id"] == "retried"
+    assert result["status"] == "ready"
+    assert saved["status"] == "ready_to_schedule"
+    assert "youtube_upload" not in saved
+    assert saved["pending_youtube_upload"]["title"] == "Judul retry"
 
 
 def test_clip_views_expose_separate_files_render_and_upload_details(tmp_path):
@@ -1257,35 +1257,21 @@ def test_cancel_retry_edit_and_delete_follow_strict_lifecycle(tmp_path, monkeypa
     assert result == {"status": "error", "message": "Klip gagal dihapus"}
 
 
-def test_concurrent_upload_claim_allows_one_attempt(tmp_path, monkeypatch):
+def test_upload_now_disabled_rejects_immediate_publish(tmp_path, monkeypatch):
     manager = mod.WebJobManager(app_dir=tmp_path)
     clip_dir = tmp_path / "output" / "run" / "clip"
     clip_dir.mkdir(parents=True)
     (clip_dir / "master.mp4").write_bytes(b"final")
     meta_path = clip_dir / "data.json"
     meta_path.write_text(json.dumps({"clip_id": "claim", "status": "ready_to_schedule", "render_revision": 3}), encoding="utf-8")
-    entered = threading.Event()
-    release = threading.Event()
     uploads = []
-
-    def upload(*_args):
-        uploads.append(1)
-        entered.set()
-        release.wait(2)
-        return {"video_id": "one", "url": "https://youtube.test/one"}
-
-    monkeypatch.setattr(mod, "upload_youtube_video", upload)
-    results = []
-    first = threading.Thread(target=lambda: results.append(manager.upload_clip_now({"clip_id": "claim"})))
-    first.start()
-    assert entered.wait(1)
-    second = threading.Thread(target=lambda: results.append(manager.upload_clip_now({"clip_id": "claim"})))
-    second.start()
-    second.join(1)
-    release.set()
-    first.join(1)
-    assert len(uploads) == 1
-    assert sorted(result["status"] for result in results) == ["error", "ok"]
+    monkeypatch.setattr(mod, "upload_youtube_video", lambda *_args: uploads.append(1) or {"video_id": "one", "url": "https://youtube.test/one"})
+    first = manager.upload_clip_now({"clip_id": "claim"})
+    second = manager.upload_clip_now({"clip_id": "claim"})
+    assert first["status"] == "error"
+    assert second["status"] == "error"
+    assert uploads == []
+    assert json.loads(meta_path.read_text(encoding="utf-8"))["status"] == "ready_to_schedule"
 
 
 def test_stale_render_completion_cannot_replace_newer_attempt(tmp_path, monkeypatch):
@@ -1359,13 +1345,18 @@ def test_upload_history_is_append_only_across_edits(tmp_path, monkeypatch):
     manager.edit_clip_again({"clip_id": "history"})
     edited = json.loads(meta_path.read_text(encoding="utf-8"))
     assert [item["video_id"] for item in edited["youtube_upload_history"]] == ["older", "old"]
-    edited.update(status="ready_to_schedule", render_revision=2)
+    # V3: re-schedule after edit instead of immediate upload
+    edited.update(status="ready_to_schedule", render_revision=2, title="Baru", description="Desc")
     meta_path.write_text(json.dumps(edited), encoding="utf-8")
-    monkeypatch.setattr(mod, "upload_youtube_video", lambda *_args: {"video_id": "new", "url": "https://youtube.test/new"})
-    manager.upload_clip_now({"clip_id": "history"})
+    from datetime import datetime as dt, timedelta as td
+    from zoneinfo import ZoneInfo
+    future = (dt.now(ZoneInfo("Asia/Jakarta")) + td(minutes=15)).replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M")
+    result = manager.schedule_clip_upload({"clip_id": "history", "scheduled_at": future, "title": "Baru", "description": "Desc"})
+    assert result["status"] == "scheduled"
     saved = json.loads(meta_path.read_text(encoding="utf-8"))
     assert [item["video_id"] for item in saved["youtube_upload_history"]] == ["older", "old"]
-    assert saved["youtube_upload"]["video_id"] == "new"
+    assert saved["status"] == "scheduled"
+    assert saved["youtube_upload"]["title"] == "Baru"
 
 
 def test_retention_skips_active_clip_sessions(tmp_path):
@@ -1920,13 +1911,13 @@ def test_saved_gaming_default_allows_loading_legacy_clip_without_detection(tmp_p
     assert result["defaults"]["video_layout"] == {"mode": "gaming"}
 
 
-def test_gaming_forces_nine_by_sixteen_while_normal_preserves_draft_screen_size(tmp_path):
+def test_v3_all_modes_force_nine_by_sixteen(tmp_path):
     manager = mod.WebJobManager(app_dir=tmp_path)
     metadata = {"draft_settings": {"screen_size": "16:9"}, "gaming_detection": {"facecam": {"x": 0.1, "y": 0.1, "width": 0.2, "height": 0.2}, "confidence": 0.9}}
     gaming = manager._render_settings({"settings": {"video_layout": {"mode": "gaming"}}}, metadata)
     normal = manager._render_settings({"settings": {"video_layout": {"mode": "normal"}}}, metadata)
     assert gaming["screen_size"] == "9:16"
-    assert normal["screen_size"] == "16:9"
+    assert normal["screen_size"] == "9:16"
 
 
 def test_gaming_render_without_detection_is_rejected(tmp_path):
@@ -1978,9 +1969,10 @@ def test_gaming_preview_cache_changes_with_roi(tmp_path, monkeypatch):
     clip_dir.mkdir(parents=True)
     source = clip_dir / "source.mp4"
     source.write_bytes(b"source")
+    (clip_dir / "transcript.json").write_text(json.dumps({"duration": 1, "words": [{"word": "tes", "start": 0, "end": 1}], "segments": []}), encoding="utf-8")
     identity = {**manager._file_identity(source), "detector_version": mod.DETECTOR_VERSION}
     facecam = {"x": 0.02, "y": 0.03, "width": 0.3, "height": 0.4}
-    metadata = {"clip_id": "cache", "status": "needs_edit", "render_revision": 0, "source_geometry": {"width": 1920, "height": 1080, "is_landscape": True}, "gaming_detection": {"source": identity, "facecam": facecam, "confidence": 0.9}}
+    metadata = {"clip_id": "cache", "status": "needs_edit", "render_revision": 0, "transcript_path": "transcript.json", "source_geometry": {"width": 1920, "height": 1080, "is_landscape": True}, "gaming_detection": {"source": identity, "facecam": facecam, "confidence": 0.9}}
     (clip_dir / "data.json").write_text(json.dumps(metadata), encoding="utf-8")
 
     class Renderer:
@@ -1998,6 +1990,58 @@ def test_gaming_preview_cache_changes_with_roi(tmp_path, monkeypatch):
     changed["settings"]["video_layout"]["facecam_x"] = 0.04
     second = manager.render_clip(changed, preview=True)
     assert first["preview_id"] != second["preview_id"]
+
+
+def test_prepare_gaming_layout_sets_needs_facecam_on_low_confidence(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "source.mp4").write_bytes(b"source")
+    meta_path = clip_dir / "data.json"
+    meta_path.write_text(json.dumps({"clip_id": "nf", "status": "needs_edit", "title": "NF"}), encoding="utf-8")
+    monkeypatch.setattr(
+        mod,
+        "detect_facecam",
+        lambda _path, minimum_confidence=0.62: (_ for _ in ()).throw(mod.GamingLayoutError(mod.FACE_NOT_FOUND_MESSAGE)),
+    )
+    result = manager.prepare_gaming_layout("nf")
+    assert result["status"] == "needs_facecam"
+    saved = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert saved["status"] == "needs_facecam"
+    listed = manager.list_clips()
+    assert any(item["clip_id"] == "nf" and item["status"] == "needs_facecam" for item in listed["clips"])
+
+
+def test_submit_facecam_roi_rejects_overlap_and_accepts_valid(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    monkeypatch.setattr(manager, "render_clip", lambda *_args, **_kwargs: {"status": "queued", "attempt_id": "test"})
+
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "source.mp4").write_bytes(b"source")
+    (clip_dir / "transcript.json").write_text(json.dumps({"duration": 1, "words": [{"word": "tes", "start": 0, "end": 1}], "segments": []}), encoding="utf-8")
+    meta_path = clip_dir / "data.json"
+    meta_path.write_text(json.dumps({
+        "clip_id": "roi",
+        "status": "needs_facecam",
+        "transcript_path": "transcript.json",
+        "source_geometry": {"width": 1920, "height": 1080, "is_landscape": True},
+    }), encoding="utf-8")
+    bad = manager.submit_facecam_roi({"clip_id": "roi", "x": 0.4, "y": 0.1, "width": 0.3, "height": 0.3})
+    assert bad["status"] == "error"
+    ok = manager.submit_facecam_roi({"clip_id": "roi", "x": 0.02, "y": 0.03, "width": 0.18, "height": 0.2})
+    assert ok["status"] == "ok"
+    saved = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert saved["status"] in {"needs_edit", "render_queued", "rendering", "ready_to_schedule", "render_error"}
+    assert saved["gaming_detection"]["manual"] is True
+    assert saved["gaming_detection"]["facecam"]["x"] == pytest.approx(0.02)
+    assert ok.get("render", {}).get("status") in {"queued", "error", "cached"}
+
+
+def test_extract_clip_frame_requires_owned_clip(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    raw, error = manager.extract_clip_frame("missing")
+    assert raw is None and error
 
 
 if __name__ == "__main__":

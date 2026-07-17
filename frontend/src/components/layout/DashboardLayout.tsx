@@ -82,10 +82,14 @@ export default function DashboardLayout() {
       }
     };
     fetchSettings();
+  }, [refreshStatus]);
 
+  useEffect(() => {
+    const active = status?.status && ['queued', 'running', 'stopping'].includes(status.status);
+    if (!active) return;
     const interval = setInterval(() => void refreshStatus(), 2000);
     return () => clearInterval(interval);
-  }, [refreshStatus]);
+  }, [status?.status, refreshStatus]);
 
   const handleLogout = async () => {
     try {
@@ -124,7 +128,7 @@ export default function DashboardLayout() {
               to="/preview"
               className={`rounded-full px-4 py-2 text-sm transition-colors ${activeTab === 'preview' ? 'bg-primary/15 font-medium text-primary' : 'text-muted hover:bg-secondary hover:text-foreground'}`}
             >
-              Preview Editor
+              Preview
             </Link>
           </nav>
           <div className="flex items-center gap-2">
@@ -177,7 +181,7 @@ export default function DashboardLayout() {
         <nav className="flex items-center gap-1 overflow-x-auto border-t border-line px-4 py-2 md:hidden" aria-label="Navigasi mobile">
           <Link to="/" className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm ${activeTab === 'home' || activeTab === '' ? 'bg-primary/15 font-medium text-primary' : 'text-muted'}`}>Dashboard</Link>
           <Link to="/console" className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm ${activeTab === 'console' ? 'bg-primary/15 font-medium text-primary' : 'text-muted'}`}>Konsol</Link>
-          <Link to="/preview" className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm ${activeTab === 'preview' ? 'bg-primary/15 font-medium text-primary' : 'text-muted'}`}>Preview Editor</Link>
+          <Link to="/preview" className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm ${activeTab === 'preview' ? 'bg-primary/15 font-medium text-primary' : 'text-muted'}`}>Preview</Link>
         </nav>
       </header>
 
