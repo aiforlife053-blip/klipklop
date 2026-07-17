@@ -74,14 +74,8 @@ class PortraitMixin(ClipperBase):
         return final if final else stabilized
 
     def convert_to_portrait_with_progress(self, input_path: str, output_path: str, progress_callback):
-        """Convert landscape to 9:16 portrait with speaker tracking and progress (router method)"""
-        if getattr(self, "landscape_blur", False) and self._is_landscape(input_path):
-            self.log("  Using moving blur background")
-            return self.convert_to_portrait_blur_with_progress(input_path, output_path, progress_callback)
-        if self.face_tracking_mode == "center":
-            self.log("  Using explicit black background")
-            return self.convert_to_portrait_center(input_path, output_path, progress_callback)
-        self.log("  Using OpenCV (Fast Mode)")
+        """V3: speaker-tracking OpenCV only. Blur/black-contain routes removed."""
+        self.log("  Using OpenCV speaker tracking")
         return self.convert_to_portrait_opencv_with_progress(input_path, output_path, progress_callback)
 
     def _is_landscape(self, input_path: str) -> bool:
@@ -99,83 +93,6 @@ class PortraitMixin(ClipperBase):
             return max(1.0, frames / fps) if fps > 0 else 60.0
         finally:
             cap.release()
-
-    def _portrait_filter(self, width: int, height: int, blur_enabled: bool) -> tuple[list[str], str]:
-        if not blur_enabled:
-            return ([f"color=c=black:s={width}x{height}[bg]", f"[0:v]scale={width}:{height}:force_original_aspect_ratio=decrease,setsar=1[fg]", "[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v0]"], "v0")
-        blur_settings = getattr(self, "blur_background_settings", {}) or {}
-        zoom = max(1.0, min(3.0, float(blur_settings.get("zoom", 1.08) or 1.08)))
-        strength = max(0, min(100, int(blur_settings.get("strength", 30))))
-        scale = max(1.0, min(2.0, float(blur_settings.get("scale", 1.6) or 1.6)))
-        foreground_width, foreground_height = int(round(width * scale)), int(round(width * 9 / 16 * scale))
-        blur_radius = int(round((strength / 340 * width) * 0.75))
-        blur_filter = f"boxblur={blur_radius}:{blur_radius}," if blur_radius else ""
-        return ([f"[0:v]scale=320:{int(round(320 * height / width))}:force_original_aspect_ratio=increase,{blur_filter}scale={int(round(width * zoom))}:{int(round(height * zoom))}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1,colorchannelmixer=rr=0.6:gg=0.6:bb=0.6[bg]", f"[0:v]scale={foreground_width}:{foreground_height}:force_original_aspect_ratio=increase,crop={foreground_width}:{foreground_height},setsar=1[fg]", "[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v0]"], "v0")
-
-    def _preview_blur_filter(self, width: int, height: int) -> str:
-        blur_settings = getattr(self, "blur_background_settings", {}) or {}
-        zoom = max(1.0, min(3.0, float(blur_settings.get("zoom", 1.08) or 1.08)))
-        strength = max(0, min(100, int(blur_settings.get("strength", 30))))
-        scale = max(1.0, min(2.0, float(blur_settings.get("scale", 1.6) or 1.6)))
-        foreground_width = int(round(width * scale))
-        foreground_height = int(round(width * 9 / 16 * scale))
-        bg_width = int(round(width * zoom))
-        bg_height = int(round(height * zoom))
-        blur_width = 320
-        blur_height = int(round(blur_width * height / width))
-        blur_sigma = strength / 340 * width
-        blur_radius = int(round(blur_sigma * 0.75))
-        blur_filter = f"boxblur={blur_radius}:{blur_radius}," if blur_radius else ""
-        return (
-            f"[0:v]scale={blur_width}:{blur_height}:force_original_aspect_ratio=increase,"
-            f"{blur_filter}scale={bg_width}:{bg_height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height},setsar=1,colorchannelmixer=rr=0.6:gg=0.6:bb=0.6[bg];"
-            f"[0:v]scale={foreground_width}:{foreground_height}:force_original_aspect_ratio=increase,"
-            f"crop={foreground_width}:{foreground_height},setsar=1[fg];"
-            f"[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1"
-        )
-
-    def convert_to_portrait_blur_with_progress(self, input_path: str, output_path: str, progress_callback):
-        width, height = (int(part) for part in getattr(self, "output_resolution", "720:1280").split(":"))
-        filter_complex = self._preview_blur_filter(width, height)
-        cmd = [
-            self.ffmpeg_path,
-            "-y",
-            "-i", input_path,
-            "-filter_complex", filter_complex,
-            *self.get_video_encoder_args(),
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-progress", "pipe:1",
-            output_path,
-        ]
-        self.log(f"  Reframe filter [blur=on]: {filter_complex}")
-        self.run_ffmpeg_with_progress(cmd, self._video_duration(input_path), progress_callback, timeout=getattr(self, "render_timeout", None))
-        if not os.path.exists(output_path):
-            raise Exception("Blur portrait failed: output file not found")
-
-    def convert_to_portrait_center(self, input_path: str, output_path: str, progress_callback):
-        width, height = (int(part) for part in getattr(self, "output_resolution", "720:1280").split(":"))
-        filter_complex = (
-            f"color=c=black:s={width}x{height}[bg];"
-            f"[0:v]scale={width}:{height}:force_original_aspect_ratio=decrease,setsar=1[fg];"
-            f"[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1"
-        )
-        cmd = [
-            self.ffmpeg_path,
-            "-y",
-            "-i", input_path,
-            "-filter_complex", filter_complex,
-            *self.get_video_encoder_args(),
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-progress", "pipe:1",
-            output_path,
-        ]
-        self.log(f"  Reframe filter [blur=off]: {filter_complex}")
-        self.run_ffmpeg_with_progress(cmd, self._video_duration(input_path), progress_callback, timeout=getattr(self, "render_timeout", None))
-        if not os.path.exists(output_path):
-            raise Exception("Black background portrait failed: output file not found")
 
     def convert_to_portrait_opencv_with_progress(self, input_path: str, output_path: str, progress_callback):
         """Convert landscape to 9:16 portrait with active-speaker tracking (OpenCV)."""

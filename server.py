@@ -133,21 +133,13 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/clip":
             result = self._manager().get_clip(parse_qs(parsed.query).get("clip_id", [""])[0])
             self._json(result, 404 if result.get("status") == "error" else 200)
-        elif parsed.path == "/api/clip/preview/status":
-            params = parse_qs(parsed.query)
-            result = self._manager().preview_status(params.get("clip_id", [""])[0], params.get("preview_id", [""])[0])
-            self._json(result, 404 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/clip/frame":
             self._serve_clip_frame(parsed.query)
         elif parsed.path == "/api/clip/media":
             self._serve_clip_media(parsed.query)
-        elif parsed.path == "/api/download":
-            self._download(parsed.query)
-        elif parsed.path == "/api/stream":
-            try:
-                self._stream_video(parsed.query)
-            except (ConnectionResetError, BrokenPipeError):
-                pass
+        elif parsed.path in {"/api/download", "/api/stream"}:
+            # V3: raw path= removed. Only clip_id + artifact via /api/clip/media.
+            self._json({"status": "error", "message": "Gunakan /api/clip/media?clip_id=&artifact="}, 404)
         elif parsed.path == "/api/social/status":
             self._json(is_youtube_connected(self._current_user()))
         elif parsed.path == "/api/activity":
@@ -181,7 +173,7 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         # Different endpoints have different payload size limits
         if parsed.path == "/api/settings":
             payload, err = self._payload(max_size=65536)  # 64KB
-        elif parsed.path in {"/api/cookies", "/api/watermark/upload"}:
+        elif parsed.path == "/api/cookies":
             payload, err = self._payload(max_size=10485760)  # 10MB
         elif parsed.path == "/api/start":
             payload, err = self._payload(max_size=16384)  # 16KB
@@ -198,8 +190,6 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/cookies":
             self._json(self._manager().save_cookies(payload.get("content", payload.get("cookie_text", ""))))
-        elif parsed.path == "/api/watermark/upload":
-            self._upload_watermark(payload)
         elif parsed.path == "/api/start":
             result = self._manager().start(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
@@ -209,17 +199,8 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/clip/facecam":
             result = self._manager().submit_facecam_roi(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
-        elif parsed.path == "/api/clip/preview":
-            result = self._manager().render_clip(payload, preview=True)
-            self._json(result, 400 if result.get("status") == "error" else 200)
-        elif parsed.path == "/api/clip/preview/cancel":
-            result = self._manager().cancel_preview(payload)
-            self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path in {"/api/clip/render", "/api/clip/render/retry"}:
             result = self._manager().render_clip(payload)
-            self._json(result, 400 if result.get("status") == "error" else 200)
-        elif parsed.path == "/api/clip/defaults":
-            result = self._manager().save_clip_defaults(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/clip/schedule":
             result = self._manager().schedule_clip_upload(payload)
@@ -235,9 +216,6 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/clip/hook":
             result = self._manager().update_hook_text(payload)
-            self._json(result, 400 if result.get("status") == "error" else 200)
-        elif parsed.path == "/api/clip/edit":
-            result = self._manager().edit_clip_again(payload)
             self._json(result, 400 if result.get("status") == "error" else 200)
         elif parsed.path == "/api/clip/delete":
             result = self._manager().delete_clip(payload)
@@ -302,29 +280,6 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         else:
             self._json({"status": "error", "message": "Not found"}, 404)
 
-
-    def _upload_watermark(self, payload):
-        name = Path(str(payload.get("name") or "watermark.png")).name
-        suffix = Path(name).suffix.lower()
-        if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
-            self._json({"status": "error", "message": "Format watermark harus PNG/JPG/WEBP"}, 400)
-            return
-        try:
-            raw = base64.b64decode(str(payload.get("content") or ""), validate=True)
-        except Exception:
-            self._json({"status": "error", "message": "File watermark invalid"}, 400)
-            return
-        if not raw or len(raw) > 400_000:
-            self._json({"status": "error", "message": "Watermark maksimal 400KB"}, 400)
-            return
-        folder = self._manager().app_dir / "watermark"
-        folder.mkdir(parents=True, exist_ok=True)
-        target = folder / f"watermark{suffix}"
-        target.write_bytes(raw)
-        cfg_mgr = self._manager()._config()
-        cfg_mgr.config.setdefault("watermark", {})["image_path"] = str(target.resolve())
-        cfg_mgr.save()
-        self._json({"status": "ok", "asset": "watermark", "image_path": str(target.resolve())})
 
     def _access_token(self):
         for part in self.headers.get("Cookie", "").split(";"):
@@ -656,11 +611,15 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         if not target:
             self._json({"status": "error", "message": "Artifact klip tidak ditemukan"}, 404)
             return
+        # Internal only: path resolved by manager ownership, not client-supplied.
         encoded = f"path={quote(str(target))}"
-        if params.get("download", [""])[0] == "1":
-            self._download(encoded)
-        else:
-            self._stream_video(encoded)
+        try:
+            if params.get("download", [""])[0] == "1":
+                self._download(encoded, allow_text=False)
+            else:
+                self._stream_video(encoded)
+        except (ConnectionResetError, BrokenPipeError):
+            pass
 
     def _serve_clip_frame(self, query):
         params = parse_qs(query, keep_blank_values=True)
@@ -770,14 +729,16 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             except (ConnectionAbortedError, BrokenPipeError, ConnectionResetError, OSError):
                 pass
 
-    def _download(self, query):
+    def _download(self, query, allow_text=False):
         path = parse_qs(query, keep_blank_values=True).get("path", [""])[0]
         if not path:
             self._json({"status": "error", "message": "Missing path"}, 400)
             return
         target = Path(path).resolve()
         output_root = Path(self._manager().get_settings()["output_dir"] or str(self._manager().output_dir)).resolve()
-        allowed = {".mp4", ".webm", ".mkv", ".mov", ".avi", ".mp3", ".wav", ".json", ".srt", ".ass", ".txt", ".vtt", ".jpg", ".jpeg", ".png"}
+        media = {".mp4", ".webm", ".mkv", ".mov", ".avi", ".mp3", ".wav", ".jpg", ".jpeg", ".png"}
+        text = {".json", ".srt", ".ass", ".txt", ".vtt"} if allow_text else set()
+        allowed = media | text
         if not target.exists() or output_root not in target.parents or target.suffix.lower() not in allowed:
             self._json({"status": "error", "message": "File not found"}, 404)
             return

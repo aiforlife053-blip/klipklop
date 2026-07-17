@@ -904,52 +904,6 @@ def test_hook_wrap_uses_preview_width():
     assert lines == ["JUDUL VIDEO VIRAL BIKIN PENASARAN"]
 
 
-def test_blur_filter_matches_preview_geometry():
-    harness = object.__new__(PortraitMixin)
-    harness.blur_background_settings = {"zoom": 1.08, "strength": 3, "scale": 1.5}
-    filter_graph = harness._preview_blur_filter(720, 1280)
-    assert "scale=1080:608:force_original_aspect_ratio=increase" in filter_graph
-    assert "crop=1080:608,setsar=1[fg]" in filter_graph
-    assert "boxblur=" in filter_graph
-    assert "scale=320:569" in filter_graph
-    assert "colorchannelmixer=rr=0.6:gg=0.6:bb=0.6" in filter_graph
-    assert "overlay=(W-w)/2:(H-h)/2,setsar=1" in filter_graph
-    harness.blur_background_settings["strength"] = 0
-    assert "boxblur=" not in harness._preview_blur_filter(720, 1280)
-
-
-def test_blur_off_uses_explicit_black_background(tmp_path):
-    harness = object.__new__(PortraitMixin)
-    harness.ffmpeg_path = "ffmpeg"
-    harness.output_resolution = "720:1280"
-    harness.log = lambda *_args: None
-    harness._video_duration = lambda _path: 1.0
-    harness.get_video_encoder_args = lambda: ["-c:v", "libx264"]
-    captured = {}
-    harness.run_ffmpeg_with_progress = lambda command, *_args, **_kwargs: captured.update(command=command) or Path(command[-1]).write_bytes(b"x")
-    harness.convert_to_portrait_center("source.mp4", str(tmp_path / "draft.mp4"), lambda _progress: None)
-    graph = captured["command"][captured["command"].index("-filter_complex") + 1]
-    assert "color=c=black:s=720x1280[bg]" in graph
-    assert "force_original_aspect_ratio=decrease" in graph
-    assert "-an" not in captured["command"]
-    assert captured["command"][captured["command"].index("-c:a") + 1] == "aac"
-
-
-def test_blur_portrait_preserves_audio(tmp_path):
-    harness = object.__new__(PortraitMixin)
-    harness.ffmpeg_path = "ffmpeg"
-    harness.output_resolution = "720:1280"
-    harness.blur_background_settings = {"enabled": True, "strength": 30}
-    harness.log = lambda *_args: None
-    harness._video_duration = lambda _path: 1.0
-    harness.get_video_encoder_args = lambda: ["-c:v", "libx264"]
-    captured = {}
-    harness.run_ffmpeg_with_progress = lambda command, *_args, **_kwargs: captured.update(command=command) or Path(command[-1]).write_bytes(b"x")
-    harness.convert_to_portrait_blur_with_progress("source.mp4", str(tmp_path / "draft.mp4"), lambda _progress: None)
-    assert "-an" not in captured["command"]
-    assert captured["command"][captured["command"].index("-c:a") + 1] == "aac"
-
-
 def test_high_resolution_caps_parallel_cpu_workers():
     assert mod.WebJobManager._parallel_workers_for_quality(3, "720") == 3
     assert mod.WebJobManager._parallel_workers_for_quality(3, "1080") == 2
@@ -1044,38 +998,14 @@ def test_legacy_clip_view_probes_and_persists_source_geometry(tmp_path, monkeypa
     assert json.loads(meta_path.read_text(encoding="utf-8"))["source_geometry"]["width"] == 820
 
 
-def test_preview_uses_local_renderer_without_ai_provider(tmp_path, monkeypatch):
+def test_preview_render_removed_in_v3(tmp_path):
     manager = mod.WebJobManager(app_dir=tmp_path)
     clip_dir = tmp_path / "output" / "run" / "clip"
     clip_dir.mkdir(parents=True)
     (clip_dir / "source.mp4").write_bytes(b"source")
-    (clip_dir / "transcript.json").write_text(json.dumps({"duration": 1, "words": [{"word": "tes", "start": 0, "end": 1}], "segments": []}), encoding="utf-8")
-    (clip_dir / "data.json").write_text(json.dumps({"clip_id": "preview", "status": "needs_edit", "render_revision": 0, "transcript_path": "transcript.json", "draft_settings": {"landscape_blur": True, "blur_background": {"enabled": True}, "video_quality": "1080", "screen_size": "9:16"}}), encoding="utf-8")
-    captured = {}
-
-    class Renderer:
-        def __init__(self, **kwargs):
-            captured.update(kwargs)
-
-        def render_existing_clip(self, _clip_dir, _metadata, _settings, output, preview=False):
-            captured["preview"] = preview
-            output.write_bytes(b"x" * 1000)
-
-    monkeypatch.setattr(mod, "LocalClipRenderer", Renderer)
+    (clip_dir / "data.json").write_text(json.dumps({"clip_id": "preview", "status": "needs_edit"}), encoding="utf-8")
     result = manager.render_clip({"clip_id": "preview", "settings": {"subtitle": {"enabled": False}}}, preview=True)
-    assert result["status"] == "queued"
-    assert result["preview_id"]
-    for _ in range(100):
-        status = manager.preview_status("preview", result["preview_id"])
-        if status.get("state") in {"ready", "error", "cancelled"}:
-            break
-        time.sleep(0.01)
-    assert status["state"] == "ready"
-    assert "artifact=preview" in status["stream_url"]
-    assert "preview_id=" in status["stream_url"]
-    assert captured["preview"] is True
-    assert captured["video_quality"] == "1080"
-    assert "ai_providers" not in captured
+    assert result == {"status": "error", "message": "Preview akurat dihapus di V3. Gunakan render final."}
 
 
 def test_failed_final_render_preserves_existing_master(tmp_path, monkeypatch):
@@ -1242,11 +1172,6 @@ def test_cancel_retry_edit_and_delete_follow_strict_lifecycle(tmp_path, monkeypa
     assert json.loads(meta_path.read_text(encoding="utf-8"))["status"] == "ready_to_schedule"
     meta_path.write_text(json.dumps({"clip_id": "lifecycle", "status": "upload_error", "youtube_upload": {"status": "error"}}), encoding="utf-8")
     assert manager.retry_clip_upload({"clip_id": "lifecycle"})["status"] == "ready"
-    meta_path.write_text(json.dumps({"clip_id": "lifecycle", "status": "uploaded", "youtube_upload": {"status": "uploaded", "video_id": "old"}}), encoding="utf-8")
-    assert manager.edit_clip_again({"clip_id": "lifecycle"})["status"] == "ok"
-    edited = json.loads(meta_path.read_text(encoding="utf-8"))
-    assert edited["status"] == "needs_edit"
-    assert edited["youtube_upload_history"][0]["video_id"] == "old"
     for state in ("rendering", "render_queued", "scheduled", "uploading"):
         meta_path.write_text(json.dumps({"clip_id": "lifecycle", "status": state}), encoding="utf-8")
         assert manager.delete_clip({"clip_id": "lifecycle"})["status"] == "error"
@@ -1311,52 +1236,6 @@ def test_recovery_marks_stale_upload_and_render_states(tmp_path):
         paths.append(path)
     manager.recover_stale_clip_operations()
     assert [json.loads(path.read_text(encoding="utf-8"))["status"] for path in paths] == ["upload_error", "render_error", "render_error"]
-
-
-def test_scheduled_edit_preserves_schedule_and_uploads_latest_revision(tmp_path, monkeypatch):
-    manager = mod.WebJobManager(app_dir=tmp_path)
-    clip_dir = tmp_path / "output" / "run" / "clip"
-    clip_dir.mkdir(parents=True)
-    (clip_dir / "master.mp4").write_bytes(b"final")
-    meta_path = clip_dir / "data.json"
-    scheduled = {"status": "scheduled", "scheduled_at": "2000-01-01T00:00:00+00:00", "title": "Pending", "description": "Text", "privacy": "public", "render_revision": 1}
-    meta_path.write_text(json.dumps({"clip_id": "scheduled-edit", "status": "scheduled", "render_revision": 1, "youtube_upload": scheduled}), encoding="utf-8")
-    assert manager.edit_clip_again({"clip_id": "scheduled-edit"})["status"] == "ok"
-    pending = json.loads(meta_path.read_text(encoding="utf-8"))
-    assert pending["pending_youtube_upload"] == scheduled
-    pending.update(status="ready_to_schedule", render_revision=2)
-    meta_path.write_text(json.dumps(pending), encoding="utf-8")
-    revisions = []
-    monkeypatch.setattr(mod, "upload_youtube_video", lambda *_args: revisions.append(json.loads(meta_path.read_text(encoding="utf-8"))["youtube_upload"]["render_revision"]) or {"video_id": "latest", "url": "https://youtube.test/latest"})
-    manager.process_due_youtube_uploads()
-    saved = json.loads(meta_path.read_text(encoding="utf-8"))
-    assert revisions == [2]
-    assert saved["youtube_upload"]["title"] == "Pending"
-
-
-def test_upload_history_is_append_only_across_edits(tmp_path, monkeypatch):
-    manager = mod.WebJobManager(app_dir=tmp_path)
-    clip_dir = tmp_path / "output" / "run" / "clip"
-    clip_dir.mkdir(parents=True)
-    (clip_dir / "master.mp4").write_bytes(b"final")
-    meta_path = clip_dir / "data.json"
-    old = {"status": "uploaded", "video_id": "old", "render_revision": 1}
-    meta_path.write_text(json.dumps({"clip_id": "history", "status": "uploaded", "render_revision": 1, "youtube_upload": old, "youtube_upload_history": [{"status": "uploaded", "video_id": "older", "render_revision": 0}]}), encoding="utf-8")
-    manager.edit_clip_again({"clip_id": "history"})
-    edited = json.loads(meta_path.read_text(encoding="utf-8"))
-    assert [item["video_id"] for item in edited["youtube_upload_history"]] == ["older", "old"]
-    # V3: re-schedule after edit instead of immediate upload
-    edited.update(status="ready_to_schedule", render_revision=2, title="Baru", description="Desc")
-    meta_path.write_text(json.dumps(edited), encoding="utf-8")
-    from datetime import datetime as dt, timedelta as td
-    from zoneinfo import ZoneInfo
-    future = (dt.now(ZoneInfo("Asia/Jakarta")) + td(minutes=15)).replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M")
-    result = manager.schedule_clip_upload({"clip_id": "history", "scheduled_at": future, "title": "Baru", "description": "Desc"})
-    assert result["status"] == "scheduled"
-    saved = json.loads(meta_path.read_text(encoding="utf-8"))
-    assert [item["video_id"] for item in saved["youtube_upload_history"]] == ["older", "old"]
-    assert saved["status"] == "scheduled"
-    assert saved["youtube_upload"]["title"] == "Baru"
 
 
 def test_retention_skips_active_clip_sessions(tmp_path):
@@ -1926,7 +1805,7 @@ def test_gaming_render_without_detection_is_rejected(tmp_path):
     clip_dir.mkdir(parents=True)
     (clip_dir / "source.mp4").write_bytes(b"source")
     (clip_dir / "data.json").write_text(json.dumps({"clip_id": "gaming", "status": "needs_edit", "source_geometry": {"width": 1920, "height": 1080, "is_landscape": True}}), encoding="utf-8")
-    result = manager.render_clip({"clip_id": "gaming", "settings": {"video_layout": {"mode": "gaming"}, "subtitle": {"enabled": False}}}, preview=True)
+    result = manager.render_clip({"clip_id": "gaming", "settings": {"video_layout": {"mode": "gaming"}, "subtitle": {"enabled": False}}}, preview=False)
     assert result == {"status": "error", "message": mod.FACE_NOT_FOUND_MESSAGE}
 
 
@@ -1963,33 +1842,16 @@ def test_detect_gaming_facecam_rejects_invalid_payload_and_portrait(tmp_path, mo
     assert result == {"status": "error", "message": "Mode gaming hanya mendukung source landscape."}
 
 
-def test_gaming_preview_cache_changes_with_roi(tmp_path, monkeypatch):
+def test_clip_artifact_rejects_path_traversal_and_unknown_names(tmp_path):
     manager = mod.WebJobManager(app_dir=tmp_path)
     clip_dir = tmp_path / "output" / "run" / "clip"
     clip_dir.mkdir(parents=True)
-    source = clip_dir / "source.mp4"
-    source.write_bytes(b"source")
-    (clip_dir / "transcript.json").write_text(json.dumps({"duration": 1, "words": [{"word": "tes", "start": 0, "end": 1}], "segments": []}), encoding="utf-8")
-    identity = {**manager._file_identity(source), "detector_version": mod.DETECTOR_VERSION}
-    facecam = {"x": 0.02, "y": 0.03, "width": 0.3, "height": 0.4}
-    metadata = {"clip_id": "cache", "status": "needs_edit", "render_revision": 0, "transcript_path": "transcript.json", "source_geometry": {"width": 1920, "height": 1080, "is_landscape": True}, "gaming_detection": {"source": identity, "facecam": facecam, "confidence": 0.9}}
-    (clip_dir / "data.json").write_text(json.dumps(metadata), encoding="utf-8")
-
-    class Renderer:
-        def __init__(self, **_kwargs):
-            pass
-
-        def render_existing_clip(self, _clip_dir, _metadata, _settings, output, preview=False):
-            output.write_bytes(b"x" * 1000)
-
-    monkeypatch.setattr(mod, "LocalClipRenderer", Renderer)
-    monkeypatch.setattr(mod._PREVIEW_SCHEDULER, "submit", lambda *_args, **_kwargs: None)
-    base = {"clip_id": "cache", "settings": {"subtitle": {"enabled": False}, "video_layout": {"mode": "gaming", "facecam_x": 0.02, "facecam_y": 0.03, "facecam_width": 0.3, "facecam_height": 0.4, "facecam_confidence": 0.9}}}
-    first = manager.render_clip(base, preview=True)
-    changed = json.loads(json.dumps(base))
-    changed["settings"]["video_layout"]["facecam_x"] = 0.04
-    second = manager.render_clip(changed, preview=True)
-    assert first["preview_id"] != second["preview_id"]
+    (clip_dir / "master.mp4").write_bytes(b"final")
+    (clip_dir / "data.json").write_text(json.dumps({"clip_id": "art"}), encoding="utf-8")
+    assert manager.clip_artifact("art", "final").name == "master.mp4"
+    assert manager.clip_artifact("art", "../master.mp4") is None
+    assert manager.clip_artifact("art", "preview", "../../etc/passwd") is None
+    assert manager.clip_artifact("missing", "final") is None
 
 
 def test_prepare_gaming_layout_sets_needs_facecam_on_low_confidence(tmp_path, monkeypatch):
