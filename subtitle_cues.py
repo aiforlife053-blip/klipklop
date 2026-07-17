@@ -1,6 +1,7 @@
 from typing import Literal, TypedDict
 
 from clipper_shared import TimedTranscript, validate_timed_transcript
+from visual_style import sanitize_subtitle_text, sanitize_subtitle_token
 
 
 class CueWord(TypedDict):
@@ -45,17 +46,38 @@ def non_overlapping_segments(segments):
     return result
 
 
-def build_subtitle_cues(transcript: TimedTranscript, text_transform: str = "none") -> list[SubtitleCue]:
+def build_subtitle_cues(transcript: TimedTranscript, text_transform: str = "uppercase") -> list[SubtitleCue]:
     transcript = validate_timed_transcript(transcript)
     if not transcript["words"]:
-        return [{"start": segment["start"], "end": segment["end"], "text": _transform(segment["text"], text_transform), "words": [], "active_word_indexes": [], "capability": "static_segments"} for segment in non_overlapping_segments(transcript["segments"])]
-    words = [{"text": _transform(word["word"], text_transform), "start": word["start"], "end": word["end"]} for word in transcript["words"]]
+        return [
+            {
+                "start": segment["start"],
+                "end": segment["end"],
+                "text": _transform(sanitize_subtitle_text(segment["text"]), text_transform),
+                "words": [],
+                "active_word_indexes": [],
+                "capability": "static_segments",
+            }
+            for segment in non_overlapping_segments(transcript["segments"])
+        ]
+    words = []
+    for word in transcript["words"]:
+        text = _transform(sanitize_subtitle_token(word["word"]), text_transform)
+        if not text:
+            continue
+        words.append({"text": text, "start": word["start"], "end": word["end"]})
     chunks, chunk = [], []
     for index, word in enumerate(words):
         chunk.append(word)
         next_word = words[index + 1] if index + 1 < len(words) else None
         remaining = len(words) - index - 1
-        should_flush = len(chunk) >= 3 and (not next_word or word["text"].rstrip().endswith((".", ",", "?", "!")) or next_word["start"] - word["end"] > 0.45 or len(chunk) >= (4 if remaining == 3 else 5))
+        # V3: groups of 3–5 words; only ? ! , are kept as punctuation breakers
+        should_flush = len(chunk) >= 3 and (
+            not next_word
+            or word["text"].rstrip().endswith((",", "?", "!"))
+            or next_word["start"] - word["end"] > 0.45
+            or len(chunk) >= (4 if remaining == 3 else 5)
+        )
         if should_flush:
             chunks.append(chunk)
             chunk = []
@@ -64,6 +86,24 @@ def build_subtitle_cues(transcript: TimedTranscript, text_transform: str = "none
     cues: list[SubtitleCue] = []
     for chunk in chunks:
         cue_start, cue_end = chunk[0]["start"], chunk[-1]["end"]
-        cue_words = [{"text": word["text"], "start": word["start"], "end": word["end"], "active_from": cue_start if index == 0 else chunk[index - 1]["end"], "active_until": word["end"] if index < len(chunk) - 1 else cue_end} for index, word in enumerate(chunk)]
-        cues.append({"start": cue_start, "end": cue_end, "text": " ".join(word["text"] for word in chunk), "words": cue_words, "active_word_indexes": list(range(len(cue_words))), "capability": "word_highlight"})
+        cue_words = [
+            {
+                "text": word["text"],
+                "start": word["start"],
+                "end": word["end"],
+                "active_from": cue_start if index == 0 else chunk[index - 1]["end"],
+                "active_until": word["end"] if index < len(chunk) - 1 else cue_end,
+            }
+            for index, word in enumerate(chunk)
+        ]
+        cues.append(
+            {
+                "start": cue_start,
+                "end": cue_end,
+                "text": " ".join(word["text"] for word in chunk),
+                "words": cue_words,
+                "active_word_indexes": list(range(len(cue_words))),
+                "capability": "word_highlight",
+            }
+        )
     return cues

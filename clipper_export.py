@@ -18,10 +18,15 @@ from clipper_shared import SUBPROCESS_FLAGS, TimedTranscript, _hex_to_rgb, valid
 from clipper_base import ClipperBase
 from gaming_layout import GamingLayoutError, build_gaming_filtergraph, validate_roi
 from subtitle_cues import non_overlapping_segments
+from config.editor_defaults import HOOK_PAUSE_SECONDS, HOOK_SLIDE_SECONDS
+from visual_style import normalize_hook_text, sanitize_subtitle_token
 from utils.logger import debug_log
 
 
 def _write_json_atomic(path, data):
+    # ponytail: duplicates job_manager._write_json_atomic (which has retry).
+    # Export path writes once per clip — no concurrent access, retry not needed.
+    # Merge into clipper_shared if a 3rd caller appears.
     path = Path(path)
     temporary = path.with_name(f"{path.stem}.{uuid.uuid4().hex}.tmp")
     temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -134,15 +139,15 @@ class ExportMixin(ClipperBase):
         from PIL import Image, ImageDraw, ImageFont
 
         style = self.hook_style_settings or {}
-        font_size_frac = float(style.get("font_size", 0.05))
+        font_size_frac = float(style.get("font_size", 0.056))
         root = Path(__file__).resolve().parent
-        font_family = str(style.get("font_family") or "Plus Jakarta Sans")
-        font_weight = max(100, min(900, int(style.get("font_weight") or 800)))
+        font_family = "Poppins"
+        font_weight = max(100, min(900, int(style.get("font_weight") or 700)))
         family_fonts = {
             "Plus Jakarta Sans": root / "fonts" / "PlusJakartaSans.ttf",
             "Poppins": root / "fonts" / ("Poppins-Bold.ttf" if font_weight >= 600 else "Poppins-Regular.ttf"),
         }
-        font_candidates = [str(family_fonts.get(font_family, family_fonts["Plus Jakarta Sans"])), str(family_fonts["Plus Jakarta Sans"])]
+        font_candidates = [str(family_fonts["Poppins"]), str(family_fonts["Plus Jakarta Sans"])]
         font_px = max(1, int(max(16, font_size_frac * 500) / 340 * width))
         font = None
         for candidate in font_candidates:
@@ -157,16 +162,18 @@ class ExportMixin(ClipperBase):
                 continue
         if font is None:
             font = ImageFont.load_default()
-        lines = self._wrap_preview_text(str(hook_text), font, int(width * 0.9))
+        display_text = normalize_hook_text(hook_text)
+        lines = [line for line in display_text.split("\n") if line.strip()] or self._wrap_preview_text(display_text, font, int(width * 0.9))
+        lines = lines[:2]
         line_height = int(font_px * 1.2)
         total_height = line_height * len(lines)
         center_x = float(style.get("position_x", 0.5)) * width
-        center_y = float(style.get("position_y", 0.2)) * height
+        center_y = float(style.get("position_y", 0.22)) * height
         block_top = center_y - total_height / 2
         outline_width = max(0, int(round(float(style.get("outline_thickness", 1.5)) / 340 * width)))
-        weight_width = max(0, int(round((font_weight - 400) / 200 * width / 340))) if font_family == "Poppins" else 0
+        weight_width = max(0, int(round((font_weight - 400) / 200 * width / 340)))
         stroke_width = outline_width + weight_width
-        text_color = _hex_to_rgb(str(style.get("text_color") or "#FFD700"))
+        text_color = _hex_to_rgb(str(style.get("text_color") or "#FFFFFF"))
         outline_color = _hex_to_rgb(str(style.get("outline_color") or "#000000"))
         overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
@@ -178,26 +185,30 @@ class ExportMixin(ClipperBase):
         overlay.save(output_path, "PNG")
 
     def _create_credit_overlay(self, width: int, height: int, output_path: Path):
-        from PIL import Image, ImageDraw, ImageFilter, ImageFont
+        from PIL import Image, ImageDraw, ImageFont
 
         settings = self.credit_watermark_settings or {}
-        size = float(settings.get("size", 0.03))
-        opacity = float(settings.get("opacity", 0.7))
+        size = float(settings.get("size", 0.028))
+        opacity = float(settings.get("opacity", 0.85))
         font_size = self._scale_from_preview_width(size, 320, width, minimum=max(10, int(round(10 / 340 * width))))
-        font = ImageFont.truetype(str(Path(__file__).resolve().parent / "fonts" / "PlusJakartaSans.ttf"), font_size)
+        root = Path(__file__).resolve().parent
+        font_path = root / "fonts" / "Poppins-Bold.ttf"
+        if not font_path.is_file():
+            font_path = root / "fonts" / "PlusJakartaSans.ttf"
+        font = ImageFont.truetype(str(font_path), font_size)
         if hasattr(font, "set_variation_by_axes"):
             font.set_variation_by_axes([600])
         channel = self.channel_name if self.channel_name and self.channel_name != "{channel}" else "Local Video"
-        text = str(settings.get("text") or "sc : {channel}").replace("{channel}", channel)
+        channel = re.sub(r"^@+", "", str(channel).strip()) or "channel"
+        text = "sc: @" + channel
         overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        shadow = Image.new("RGBA", overlay.size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
-        shadow_draw = ImageDraw.Draw(shadow)
         bbox = draw.textbbox((0, 0), text, font=font)
-        text_x = float(settings.get("position_x", 0.5)) * width - (bbox[2] - bbox[0]) / 2 - bbox[0]
-        text_y = float(settings.get("position_y", 0.95)) * height - (bbox[3] - bbox[1]) / 2 - bbox[1]
-        shadow_draw.text((text_x, text_y + width / 340), text, font=font, fill=(0, 0, 0, int(255 * 0.5 * opacity)))
-        overlay.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(3 / 340 * width)))
+        # Top-right small credit
+        margin_x = width * 0.04
+        margin_y = height * 0.035
+        text_x = width - margin_x - (bbox[2] - bbox[0]) - bbox[0]
+        text_y = margin_y - bbox[1]
         draw.text((text_x, text_y), text, font=font, fill=(*_hex_to_rgb(str(settings.get("color") or "#FFFFFF")), int(255 * opacity)))
         overlay.save(output_path, "PNG")
 
@@ -275,7 +286,12 @@ class ExportMixin(ClipperBase):
             inputs.append(str(hook_overlay))
             filters.append(f"[{input_index}:v]format=rgba[hook]")
             hook_duration = intro_duration if intro_duration > 0 else max(1.0, min(10.0, float((self.hook_style_settings or {}).get("duration", 5.0))))
-            filters.append(f"[{current}][hook]overlay=0:0:enable='between(t,0,{hook_duration:.3f})'[v{layer}]")
+            if intro_duration > 0:
+                slide_start = max(0.0, hook_duration - HOOK_SLIDE_SECONDS)
+                x_expr = f"if(lt(t\\,{slide_start:.3f})\\,0\\,-min(1\\,(t-{slide_start:.3f})/{HOOK_SLIDE_SECONDS:.3f})*main_w)"
+                filters.append(f"[{current}][hook]overlay=x='{x_expr}':y=0:enable='between(t,0,{hook_duration:.3f})'[v{layer}]")
+            else:
+                filters.append(f"[{current}][hook]overlay=0:0:enable='between(t,0,{hook_duration:.3f})'[v{layer}]")
             current = f"v{layer}"
             layer += 1
         if ass_file:
@@ -317,7 +333,7 @@ class ExportMixin(ClipperBase):
             current = "vscaled"
         filters.append(f"[{current}]format=yuv420p[vout]")
         if tts_index is not None and intro_duration > 0:
-            filters.append(f"[{tts_index}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,atrim=duration={intro_duration:.3f},asetpts=PTS-STARTPTS[atts]")
+            filters.append(f"[{tts_index}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,apad=pad_dur={HOOK_PAUSE_SECONDS + HOOK_SLIDE_SECONDS:.3f},atrim=duration={intro_duration:.3f},asetpts=PTS-STARTPTS[atts]")
             if audio_source:
                 filters.append(f"[{audio_index}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[aoriginal]")
             else:
@@ -499,11 +515,17 @@ class ExportMixin(ClipperBase):
                     pass
 
     def render_existing_clip(self, clip_dir: Path, metadata: dict, settings: dict, output_path: Path, preview: bool = False):
-        self.watermark_settings = settings.get("watermark", {})
-        self.credit_watermark_settings = settings.get("credit_watermark", {})
-        self.hook_style_settings = settings.get("hook_style", {})
-        self.blur_background_settings = settings.get("blur_background", {})
-        self.subtitle_style = settings.get("subtitle", {})
+        # V3 locked style: ignore client blur/watermark toggles
+        watermark_settings = {**(settings.get("watermark") or {}), "enabled": False}
+        credit_settings = {**(settings.get("credit_watermark") or {}), "enabled": True, "text": "sc: @{channel}"}
+        hook_settings = {**(settings.get("hook_style") or {}), "enabled": True, "font_family": "Poppins"}
+        subtitle_settings = {**(settings.get("subtitle") or {}), "enabled": True, "text_transform": "uppercase", "font_family": "Poppins", "color": "#FFD400", "text_color": "#FFFFFF", "outline_color": "#000000", "shadow": 0}
+        blur_settings = {**(settings.get("blur_background") or {}), "enabled": False}
+        self.watermark_settings = watermark_settings
+        self.credit_watermark_settings = credit_settings
+        self.hook_style_settings = hook_settings
+        self.blur_background_settings = blur_settings
+        self.subtitle_style = subtitle_settings
         source_file = clip_dir / "source.mp4"
         if not source_file.is_file():
             raise ValueError("Source klip tidak tersedia")
@@ -514,51 +536,39 @@ class ExportMixin(ClipperBase):
         temporary = [hook_overlay, credit_overlay]
         try:
             source_width, source_height, duration = self._probe_render_input(str(source_file))
-            layout = settings.get("video_layout", {})
-            if layout.get("mode") == "gaming":
-                quality_widths = {"480": 540, "720": 720, "1080": 1080, "1440": 1440, "2160": 2160}
-                width = quality_widths.get(str(getattr(self, "video_quality", "720")), 720)
-                height = width * 16 // 9
-            else:
-                width, height = self._render_size()
+            layout = settings.get("video_layout", {}) or {}
+            # Final V3 output locked 1080x1920
+            width, height = 1080, 1920
             portrait_filters = None
             if layout.get("mode") == "gaming":
                 roi = validate_roi({"x": layout.get("facecam_x"), "y": layout.get("facecam_y"), "width": layout.get("facecam_width"), "height": layout.get("facecam_height")})
                 if not roi:
                     raise GamingLayoutError("Facecam tidak ditemukan. Gunakan video dengan facecam yang terlihat jelas, lalu coba lagi.")
                 portrait_filters, _ = build_gaming_filtergraph(source_width, source_height, width, height, roi)
-            hook = settings.get("hook_style", {})
-            tts_source, intro_duration = None, 0.0
-            if hook.get("enabled"):
-                tts_source, intro_duration = self._generate_hook_tts(metadata.get("hook_text") or metadata.get("title", ""), clip_dir)
-            if layout.get("mode") == "gaming":
-                pass
-            elif getattr(self, "screen_size", "9:16") != "16:9":
-                blur = bool(settings.get("blur_background", {}).get("enabled")) and source_width > source_height
-                portrait_filters, _ = self._portrait_filter(width, height, blur)
             else:
-                width, height = self._render_size()
-            hook = settings.get("hook_style", {})
-            if hook.get("enabled"):
-                self._create_hook_overlay(metadata.get("hook_text") or metadata.get("title", ""), width, height, hook_overlay)
-            subtitle = settings.get("subtitle", {})
-            if subtitle.get("enabled"):
-                if not transcript:
-                    raise ValueError("Transcript subtitle tidak tersedia")
-                ass_file = clip_dir / f"render-{operation_id}.captions.ass"
-                generated_ass = self._create_caption_ass(str(source_file), clip_dir, transcript, intro_duration)
-                os.replace(generated_ass, ass_file)
-                temporary.append(ass_file)
-            credit = settings.get("credit_watermark", {})
-            if credit.get("enabled"):
-                self.channel_name = metadata.get("channel_name", "")
-                self._create_credit_overlay(width, height, credit_overlay)
-            watermark = settings.get("watermark", {})
-            watermark_path = Path(str(watermark.get("image_path") or "")) if watermark.get("enabled") else None
-            if watermark.get("enabled") and (not watermark_path or not watermark_path.is_file()):
-                raise ValueError("Watermark belum tersedia")
-            preview_size = (540, 960) if layout.get("mode") == "gaming" or getattr(self, "screen_size", "9:16") != "16:9" else (854, 480)
-            command = self._build_composite_command(str(source_file), str(output_path), duration, audio_source=str(source_file) if self._has_audio_stream(str(source_file)) else None, hook_overlay=hook_overlay if hook.get("enabled") else None, ass_file=ass_file, watermark_path=watermark_path, credit_overlay=credit_overlay if credit.get("enabled") else None, portrait_filters=portrait_filters, output_size=preview_size if preview else None, profile="preview_fast" if preview else "final", tts_source=tts_source, intro_duration=intro_duration)
+                # No blur — hard crop/center path only
+                portrait_filters, _ = self._portrait_filter(width, height, False)
+            tts_source, intro_duration = None, 0.0
+            tts_source, spoken_duration = self._generate_hook_tts(metadata.get("hook_text") or metadata.get("title", ""), clip_dir)
+            intro_duration = spoken_duration + HOOK_PAUSE_SECONDS + HOOK_SLIDE_SECONDS
+            self._create_hook_overlay(metadata.get("hook_text") or metadata.get("title", ""), width, height, hook_overlay)
+            if not transcript:
+                raise ValueError("Transcript subtitle tidak tersedia")
+            ass_file = clip_dir / f"render-{operation_id}.captions.ass"
+            generated_ass = self._create_caption_ass(str(source_file), clip_dir, transcript, intro_duration)
+            os.replace(generated_ass, ass_file)
+            temporary.append(ass_file)
+            self.channel_name = metadata.get("channel_name", "")
+            self._create_credit_overlay(width, height, credit_overlay)
+            preview_size = (540, 960) if preview else None
+            command = self._build_composite_command(
+                str(source_file), str(output_path), duration,
+                audio_source=str(source_file) if self._has_audio_stream(str(source_file)) else None,
+                hook_overlay=hook_overlay, ass_file=ass_file, watermark_path=None,
+                credit_overlay=credit_overlay, portrait_filters=portrait_filters,
+                output_size=preview_size, profile="preview_fast" if preview else "final",
+                tts_source=tts_source, intro_duration=intro_duration,
+            )
             self.run_ffmpeg_with_progress(command, duration + intro_duration, lambda progress: self.set_progress("Menyusun video", progress), timeout=getattr(self, "render_timeout", 900))
             if not output_path.is_file() or output_path.stat().st_size < 1000:
                 raise RuntimeError("Final render gagal")

@@ -178,103 +178,43 @@ class PortraitMixin(ClipperBase):
             raise Exception("Black background portrait failed: output file not found")
 
     def convert_to_portrait_opencv_with_progress(self, input_path: str, output_path: str, progress_callback):
-        """Convert landscape to 9:16 portrait with speaker tracking and progress (OpenCV)"""
+        """Convert landscape to 9:16 portrait with active-speaker tracking (OpenCV)."""
 
-        debug_log("Starting portrait conversion...")
         debug_log("Starting portrait conversion...")
         debug_log(f"Input: {input_path}")
         debug_log(f"Output: {output_path}")
+        sys.stdout.flush()
+
+        from speaker_tracking import track_crop_positions
+
+        try:
+            tracking = track_crop_positions(input_path)
+        except Exception as exc:
+            raise Exception(f"Speaker tracking failed: {exc}") from exc
+
+        crop_positions = tracking["crop_positions"]
+        crop_w = int(tracking["crop_width"])
+        orig_w = int(tracking["source_width"])
+        orig_h = int(tracking["source_height"])
+        fps = float(tracking["fps"] or 30.0)
+        total_frames = len(crop_positions)
+        out_w, out_h = self._get_target_portrait_dims(orig_w, orig_h)
+        crop_h = orig_h
+
+        if total_frames == 0 or fps == 0:
+            raise Exception(f"Invalid video properties: {total_frames} frames, {fps} fps")
+
+        progress_callback(0.45)
+        debug_log(f"Tracking mode={tracking.get('mode')} frames={total_frames}")
         sys.stdout.flush()
 
         cap = cv2.VideoCapture(input_path)
         if not cap.isOpened():
             raise Exception(f"Failed to open video: {input_path}")
 
-        orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-        debug_log(f"Video: {orig_w}x{orig_h}, {fps}fps, {total_frames} frames")
-        debug_log(f"Video: {orig_w}x{orig_h}, {fps}fps, {total_frames} frames")
-        sys.stdout.flush()
-
-        if total_frames == 0 or fps == 0:
-            cap.release()
-            raise Exception(f"Invalid video properties: {total_frames} frames, {fps} fps")
-
-        # Calculate crop dimensions
-        target_ratio = 9 / 16
-        crop_w = int(orig_h * target_ratio)
-        crop_h = orig_h
-        out_w, out_h = self._get_target_portrait_dims(orig_w, orig_h)
-
-        # Face detector
-        face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-        )
-        use_faces = not face_cascade.empty()
-
-        # First pass: analyze frames (0-40%)
-        debug_log("Pass 1: Analyzing frames...")
-        sys.stdout.flush()
-
-        crop_positions = []
-        current_target = orig_w / 2
-        frame_count = 0
-        last_log_time = 0
-        import time
-
-        while True:
-            # Check for cancellation
-            if self.is_cancelled():
-                cap.release()
-                raise Exception("Cancelled by user")
-
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            if use_faces:
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(50, 50))
-
-                if len(faces) > 0:
-                    # Find largest face
-                    largest = max(faces, key=lambda f: f[2] * f[3])
-                    current_target = largest[0] + largest[2] / 2
-
-            crop_x = int(current_target - crop_w / 2)
-            crop_x = max(0, min(crop_x, orig_w - crop_w))
-            crop_positions.append(crop_x)
-
-            frame_count += 1
-
-            # Update progress more frequently with time-based logging
-            current_time = time.time()
-            if frame_count % 30 == 0 or (current_time - last_log_time) > 2:  # Every 30 frames or 2 seconds
-                progress = (frame_count / total_frames) * 0.4  # 0-40%
-                debug_log(f"Pass 1 progress: {progress*100:.1f}% ({frame_count}/{total_frames} frames)")
-                sys.stdout.flush()
-                progress_callback(progress)
-                last_log_time = current_time
-
-        debug_log(f"Analyzed {frame_count} frames")
-
-        # Stabilize positions
-        crop_positions = self.stabilize_positions(crop_positions)
-        progress_callback(0.45)
-
-        # Second pass: create video (45-85%)
-        debug_log("Pass 2: Creating portrait video...")
-        sys.stdout.flush()  # Force output
-
-        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         temp_video = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
-
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(temp_video, fourcc, fps, (out_w, out_h))
-
         if not out.isOpened():
             cap.release()
             raise Exception(f"Failed to create VideoWriter: {temp_video}")
@@ -282,20 +222,17 @@ class PortraitMixin(ClipperBase):
         frame_idx = 0
         last_log_time = 0
         last_frame_time = time.time()
-        import time
 
         while True:
-            # Check for cancellation
             if self.is_cancelled():
                 cap.release()
                 out.release()
                 try:
                     os.unlink(temp_video)
-                except:
+                except OSError:
                     pass
                 raise Exception("Cancelled by user")
 
-            # Watchdog: check if we're stuck (no frame processed in 30 seconds)
             current_time = time.time()
             if current_time - last_frame_time > 30:
                 cap.release()
@@ -306,23 +243,19 @@ class PortraitMixin(ClipperBase):
             if not ret:
                 break
 
-            last_frame_time = current_time  # Update watchdog timer
-
+            last_frame_time = current_time
             crop_x = crop_positions[frame_idx] if frame_idx < len(crop_positions) else crop_positions[-1]
-            cropped = frame[0:crop_h, crop_x:crop_x+crop_w]
+            crop_x = max(0, min(int(crop_x), max(0, orig_w - crop_w)))
+            cropped = frame[0:crop_h, crop_x:crop_x + crop_w]
             resized = cv2.resize(cropped, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
-
-            # Write frame with error checking
             success = out.write(resized)
             if not success:
                 print(f"[WARNING] Failed to write frame {frame_idx}")
                 sys.stdout.flush()
 
             frame_idx += 1
-
-            # Update progress more frequently and with time-based logging
-            if frame_idx % 30 == 0 or (current_time - last_log_time) > 2:  # Every 30 frames or 2 seconds
-                progress = 0.45 + (frame_idx / total_frames) * 0.4  # 45-85%
+            if frame_idx % 30 == 0 or (current_time - last_log_time) > 2:
+                progress = 0.45 + (frame_idx / max(1, total_frames)) * 0.4
                 debug_log(f"Pass 2 progress: {progress*100:.1f}% ({frame_idx}/{total_frames} frames)")
                 sys.stdout.flush()
                 progress_callback(progress)
@@ -330,29 +263,16 @@ class PortraitMixin(ClipperBase):
 
         debug_log(f"Created {frame_idx} frames")
         sys.stdout.flush()
-
         cap.release()
-        debug_log("Released VideoCapture")
-        sys.stdout.flush()
-
         out.release()
-        debug_log("Released VideoWriter")
-        sys.stdout.flush()
 
-        # Verify temp video was created
         if not os.path.exists(temp_video) or os.path.getsize(temp_video) < 1000:
             raise Exception(f"Failed to create temp video: {temp_video}")
 
-        debug_log(f"Temp video size: {os.path.getsize(temp_video)} bytes")
-        sys.stdout.flush()
-
         progress_callback(0.85)
-
-        # Merge with audio (85-100%) using GPU/CPU encoder
         debug_log("Pass 3: Merging audio...")
         sys.stdout.flush()
 
-        duration = total_frames / fps if fps > 0 else 60
         encoder_args = self.get_video_encoder_args()
         cmd = [
             self.ffmpeg_path, "-y",
@@ -364,32 +284,18 @@ class PortraitMixin(ClipperBase):
             "-shortest",
             output_path
         ]
-
-        # Run without progress parsing for audio merge (quick operation)
-        debug_log(f"Running audio merge command...")
-        sys.stdout.flush()
-
         self.log_ffmpeg_command(cmd, "Portrait Merge Audio (with progress)")
         result = self._run_ffmpeg_subprocess(cmd)
-
         if result.returncode != 0:
             print(f"[FFMPEG ERROR] {result.stderr}")
             sys.stdout.flush()
             raise Exception("Audio merge failed")
 
-        debug_log("Audio merge complete")
-        sys.stdout.flush()
-
         progress_callback(1.0)
         debug_log("Portrait conversion complete")
         sys.stdout.flush()
-
-        # Cleanup temp video
         try:
             os.unlink(temp_video)
-            debug_log("Cleaned up temp video")
-            sys.stdout.flush()
         except Exception as e:
             print(f"[WARNING] Failed to cleanup temp video: {e}")
             sys.stdout.flush()
-

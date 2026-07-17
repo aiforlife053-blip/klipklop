@@ -1,18 +1,109 @@
 from copy import deepcopy
 
-SCENE_BUILDER_VERSION = "scene-v4"
-CUE_BUILDER_VERSION = "cue-v2"
-PREVIEW_PROFILE_VERSION = "preview-v3"
+SCENE_BUILDER_VERSION = "scene-v5"
+CUE_BUILDER_VERSION = "cue-v3"
+PREVIEW_PROFILE_VERSION = "preview-v4"
+VISUAL_PRESET_VERSION = "visual-v3"
+
+# Fixed V3 visual contract — not overridable by client payload.
+V3_OUTPUT_WIDTH = 1080
+V3_OUTPUT_HEIGHT = 1920
+HOOK_MAX_WORDS = 8
+HOOK_MAX_LINES = 2
+HOOK_PAUSE_SECONDS = 0.3
+HOOK_SLIDE_SECONDS = 0.3
+SUBTITLE_WORD_MIN = 3
+SUBTITLE_WORD_MAX = 5
+TARGET_CLIP_MIN = 50
+TARGET_CLIP_MAX = 70
+HARD_CLIP_MIN = 40
+HARD_CLIP_MAX = 70
 
 EDITOR_DEFAULTS = {
-    "watermark": {"enabled": False, "image_path": "", "position_x": 0.85, "position_y": 0.05, "opacity": 0.8, "scale": 0.15},
-    "credit_watermark": {"enabled": False, "text": "sc : {channel}", "color": "#FFFFFF", "size": 0.032, "opacity": 0.55, "position_x": 0.06, "position_y": 0.23},
-    "hook_style": {"enabled": False, "font_size": 0.054, "font_family": "Plus Jakarta Sans", "font_weight": 800, "text_color": "#FFD700", "outline_color": "#000000", "outline_thickness": 1.5, "duration": 5.0, "position_x": 0.5, "position_y": 0.2},
-    "subtitle": {"enabled": True, "color": "#00BFFF", "text_color": "#FFFFFF", "size": 0.04, "position_x": 0.5, "position_y": 0.85, "text_transform": "none", "bg_color": "#000000", "bg_opacity": 0.0, "font_family": "Plus Jakarta Sans", "font_weight": 800, "outline_color": "#000000", "outline_thickness": 1.0},
-    "blur_background": {"enabled": True, "scale": 1.6, "zoom": 1.08, "strength": 10},
+    "watermark": {
+        "enabled": False,
+        "image_path": "",
+        "position_x": 0.85,
+        "position_y": 0.05,
+        "opacity": 0.8,
+        "scale": 0.15,
+    },
+    "credit_watermark": {
+        "enabled": True,
+        "text": "sc: @{channel}",
+        "color": "#FFFFFF",
+        "size": 0.028,
+        "opacity": 0.85,
+        "position_x": 0.82,
+        "position_y": 0.06,
+    },
+    "hook_style": {
+        "enabled": True,
+        "font_size": 0.056,
+        "font_family": "Poppins",
+        "font_weight": 700,
+        "text_color": "#FFFFFF",
+        "outline_color": "#000000",
+        "outline_thickness": 1.5,
+        "duration": 5.0,
+        "position_x": 0.5,
+        "position_y": 0.22,
+        "max_words": HOOK_MAX_WORDS,
+        "max_lines": HOOK_MAX_LINES,
+        "pause_seconds": HOOK_PAUSE_SECONDS,
+        "slide_seconds": HOOK_SLIDE_SECONDS,
+    },
+    "subtitle": {
+        "enabled": True,
+        "color": "#FFD400",
+        "text_color": "#FFFFFF",
+        "size": 0.042,
+        "position_x": 0.5,
+        "position_y": 0.78,
+        "text_transform": "uppercase",
+        "bg_color": "#000000",
+        "bg_opacity": 0.0,
+        "font_family": "Poppins",
+        "font_weight": 700,
+        "outline_color": "#000000",
+        "outline_thickness": 1.0,
+        "shadow": 0,
+        "word_min": SUBTITLE_WORD_MIN,
+        "word_max": SUBTITLE_WORD_MAX,
+    },
+    "blur_background": {"enabled": False, "scale": 1.6, "zoom": 1.08, "strength": 10},
     "video_layout": {"mode": "normal"},
 }
 
 
 def editor_defaults():
     return deepcopy(EDITOR_DEFAULTS)
+
+
+def v3_locked_render_settings(base=None):
+    """Server-side fixed visual preset. Client payload cannot override style fields."""
+    settings = editor_defaults()
+    if isinstance(base, dict):
+        layout = base.get("video_layout") if isinstance(base.get("video_layout"), dict) else {}
+        mode = str(layout.get("mode") or settings["video_layout"]["mode"])
+        if mode in {"normal", "gaming", "vertical_full", "split_middle"}:
+            settings["video_layout"] = {"mode": mode}
+            for key in ("facecam_x", "facecam_y", "facecam_width", "facecam_height", "facecam_confidence"):
+                if key in layout:
+                    settings["video_layout"][key] = layout[key]
+    # Force visual contract
+    settings["watermark"]["enabled"] = False
+    settings["blur_background"]["enabled"] = False
+    settings["credit_watermark"]["enabled"] = True
+    settings["credit_watermark"]["text"] = "sc: @{channel}"
+    settings["hook_style"]["enabled"] = True
+    settings["hook_style"]["font_family"] = "Poppins"
+    settings["subtitle"]["enabled"] = True
+    settings["subtitle"]["text_transform"] = "uppercase"
+    settings["subtitle"]["color"] = "#FFD400"
+    settings["subtitle"]["text_color"] = "#FFFFFF"
+    settings["subtitle"]["outline_color"] = "#000000"
+    settings["subtitle"]["shadow"] = 0
+    settings["subtitle"]["font_family"] = "Poppins"
+    settings["subtitle"]["position_x"] = 0.5
+    return settings

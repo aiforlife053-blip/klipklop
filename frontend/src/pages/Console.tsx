@@ -54,7 +54,7 @@ export default function Console() {
                 const levelClass = isError ? 'text-destructive font-bold' : isSuccess ? 'text-primary font-bold' : 'text-muted';
 
                 return (
-                  <li key={`${index}-${log}`} className="flex flex-col gap-2 rounded-lg px-2 py-1.5 hover:bg-secondary/50 sm:flex-row sm:gap-4">
+                  <li key={index} className="flex flex-col gap-2 rounded-lg px-2 py-1.5 hover:bg-secondary/50 sm:flex-row sm:gap-4">
                     <span className={`min-w-[70px] shrink-0 uppercase ${levelClass}`}>{level}</span>
                     <span className="min-w-0 flex-1 whitespace-pre-wrap break-all leading-relaxed text-foreground/90">{log}</span>
                   </li>
