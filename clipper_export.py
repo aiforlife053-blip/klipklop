@@ -177,7 +177,7 @@ class ExportMixin(ClipperBase):
         }
         font_candidates = [str(family_fonts["Poppins"]), str(family_fonts["Plus Jakarta Sans"])]
         body_px = max(1, int(max(16, font_size_frac * 500) / 340 * width))
-        name_px = max(body_px + 1, int(round(body_px * 1.25)))
+        name_px = max(body_px + 1, int(round(body_px * 1.50)))
         min_hook_px = max(10, int(round(20 / 1080 * width)))
 
         def load_font(size_px: int):
@@ -263,7 +263,7 @@ class ExportMixin(ClipperBase):
                     lines = [flat[index:index + per_line] for index in range(0, len(flat), per_line)]
                 break
             body_px = max(min_hook_px, body_px - max(1, int(round(6 / 1080 * width))))
-            name_px = max(body_px + 1, int(round(body_px * 1.25))) if name_span else body_px
+            name_px = max(body_px + 1, int(round(body_px * 1.50))) if name_span else body_px
             body_font = load_font(body_px)
             name_font = load_font(name_px) if name_span else body_font
 
