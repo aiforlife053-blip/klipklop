@@ -23,6 +23,33 @@ MAX_CLIP_DURATION = HARD_CLIP_MAX
 MAX_GROQ_UPLOAD_BYTES = 20 * 1024 * 1024
 
 
+def ensure_five_hashtags(description: str, *context: str) -> str:
+    text = str(description or "").strip()
+    tags = []
+    for tag in re.findall(r"(?<!\w)#[\w]+", text, flags=re.UNICODE):
+        normalized = "#" + re.sub(r"[^\w]", "", tag[1:], flags=re.UNICODE)
+        if len(normalized) > 1 and normalized.casefold() not in {item.casefold() for item in tags}:
+            tags.append(normalized)
+    body = re.sub(r"(?<!\w)#[\w]+", "", text, flags=re.UNICODE).strip()
+    stopwords = {"yang", "dan", "atau", "dari", "untuk", "dengan", "jadi", "ini", "itu", "ada", "karena", "saat", "bikin", "akhirnya"}
+    words = re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ0-9]+", " ".join(context), flags=re.UNICODE)
+    for word in words:
+        clean = re.sub(r"[^\w]", "", word, flags=re.UNICODE)
+        if len(clean) < 4 or clean.casefold() in stopwords:
+            continue
+        tag = "#" + clean.title()
+        if tag.casefold() not in {item.casefold() for item in tags}:
+            tags.append(tag)
+        if len(tags) == 5:
+            break
+    for tag in ("#Shorts", "#PodcastIndonesia", "#KlipViral", "#VideoViral", "#KontenIndonesia"):
+        if tag.casefold() not in {item.casefold() for item in tags}:
+            tags.append(tag)
+        if len(tags) == 5:
+            break
+    return f"{body}\n\n{' '.join(tags[:5])}".strip()
+
+
 class AiMixin(ClipperBase):
     def get_default_prompt(self=None):
         """Get default system prompt for highlight detection"""
@@ -126,7 +153,7 @@ Setiap object HARUS memiliki:
 3. "title" (string) → Maks 60 karakter, padat & click-worthy
 4. "description" (string) → Maks 150 karakter, jelaskan kenapa viral
 5. "virality_score" (integer) → 1–10 (HARUS ANGKA, BUKAN STRING)
-6. "hook_text" (string) → Bahasa Indonesia, satu kalimat hook lengkap yang akan diucapkan TTS; maksimal 8 kata dan 2 baris visual
+6. "hook_text" (string) → Bahasa Indonesia, maksimal 6 kata; awali [NAMA LENGKAP] dan akhiri ? atau !
 
 Jika segment termasuk momen lucu/komedi, awali description dengan marker internal "[LUCU] ". Marker wajib untuk setiap momen lucu dan dilarang untuk non-komedi. Marker akan dibuang sebelum ditampilkan.
 
@@ -172,19 +199,20 @@ HOOK TEXT (HARUS TAJAM & MENJUAL)
 WAJIB:
 
 * Bahasa Indonesia
-* Maksimal 8 kata dan 2 baris visual
+* Maksimal 6 kata
 * Tanpa emoji
-* Boleh akhiri dengan ? atau ! jika natural; jangan dipaksakan
+* WAJIB akhiri dengan ? atau ! sesuai makna
 * WAJIB satu kalimat utuh, natural, dan enak dibaca
-* Nama orang harus menyatu di dalam kalimat, BUKAN format "Nama: kalimat"
+* Awali dengan nama lengkap orang
+* Nama menjadi baris kuning besar; isi maksimal 3 baris putih
 * Tandai hanya nama orang dengan kurung siku agar render bisa mewarnainya; kurung tidak tampil dan tidak dibaca TTS
 * Harus menarik, membuat penasaran, dan menahan jawaban/payoff utama
 * Utamakan curiosity gap yang jujur; jangan clickbait palsu
 * Bisa berupa statement tajam atau punchline
 
 Contoh benar:
-"TERNYATA [RADITYA DIKA] HAMPIR BANGKRUT GARA-GARA INI"
-"BANYAK PODCASTER DISEBUT [TRETAN MUSLIM] CUMA PURA-PURA SUKSES"
+"[RADITYA DIKA] KEBANYAKAN BACA HARUS FISIOTERAPI!"
+"[RIZKY BILLAR] AKHIRNYA BONGKAR RAHASIA?"
 
 Contoh salah:
 "RADITYA DIKA: GUA HAMPIR BANGKRUT"
@@ -201,7 +229,7 @@ Periksa:
 2. Semua durasi 40–70 detik (target 50–70) ?
 3. Semua punya tepat 6 field ?
 4. virality_score berupa integer 1–10 ?
-5. hook_text satu kalimat utuh maksimal 8 kata, dan nama orang ditandai [NAMA] di dalam kalimat ?
+5. hook_text maksimal 6 kata, diawali nama lengkap bertanda [NAMA], dan berakhir ? atau ! ?
 6. Tidak ada field lain ?
 7. Tidak ada teks di luar JSON ?
 
@@ -301,7 +329,7 @@ Transcript:
         import random
         seed = random.randint(1000, 9999)
         variety_hint = f"\n\n[SISTEM: Generate dengan variasi baru (Seed: {seed}). Prioritaskan segmen/timestamp yang BERBEDA dari yang biasanya paling jelas. Cari hidden gems atau momen unik yang sebelumnya mungkin terlewat.]"
-        duration_hint = f"\n\n[SISTEM: Timestamp WAJIB target {TARGET_CLIP_MIN}-{TARGET_CLIP_MAX} detik (minimum {HARD_CLIP_MIN}, maksimum {HARD_CLIP_MAX}). Jangan pilih satu kalimat pendek. Jika momen inti pendek, perluas konteks sebelum/sesudah. hook_text wajib satu kalimat Indonesia natural maksimal 8 kata dan 2 baris visual; nama orang menyatu di dalam kalimat dan hanya nama ditandai [NAMA], jangan format 'Nama: kalimat'.]"
+        duration_hint = f"\n\n[SISTEM: Timestamp WAJIB target {TARGET_CLIP_MIN}-{TARGET_CLIP_MAX} detik (minimum {HARD_CLIP_MIN}, maksimum {HARD_CLIP_MAX}). Jangan pilih satu kalimat pendek. Jika momen inti pendek, perluas konteks sebelum/sesudah. hook_text maksimal 6 kata; WAJIB diawali [NAMA LENGKAP], nama menjadi baris kuning sedikit lebih besar dan isi maksimal 3 baris putih. WAJIB akhiri ? atau ! sesuai makna; jangan format 'Nama: kalimat'. Setiap description WAJIB diakhiri tepat 5 hashtag yang spesifik dan relevan dengan isi segmen.]"
         prompt += variety_hint + duration_hint
 
         # Use OpenAI-compatible API for all providers
@@ -451,7 +479,13 @@ Transcript:
             reverse=True,
         )
         for highlight in valid:
-            highlight["description"] = re.sub(r"^\s*\[LUCU\]\s*", "", str(highlight.get("description", "")), flags=re.IGNORECASE)
+            description = re.sub(r"^\s*\[LUCU\]\s*", "", str(highlight.get("description", "")), flags=re.IGNORECASE)
+            highlight["description"] = ensure_five_hashtags(
+                description,
+                str(highlight.get("title", "")),
+                str(highlight.get("hook_text", "")),
+                description,
+            )
         return valid[:num_clips]
 
     def _fallback_highlights_from_transcript(self, transcript: str, count: int, used: list) -> list:

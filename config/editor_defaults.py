@@ -8,8 +8,8 @@ VISUAL_PRESET_VERSION = "visual-v3"
 # Fixed V3 visual contract — not overridable by client payload.
 V3_OUTPUT_WIDTH = 1080
 V3_OUTPUT_HEIGHT = 1920
-HOOK_MAX_WORDS = 8
-HOOK_MAX_LINES = 2
+HOOK_MAX_WORDS = 6
+HOOK_MAX_LINES = 4
 HOOK_PAUSE_SECONDS = 0.3
 HOOK_SLIDE_SECONDS = 0.3
 SUBTITLE_WORD_MIN = 3
@@ -33,6 +33,7 @@ EDITOR_DEFAULTS = {
         "text": "sc: @{channel}",
         "color": "#FFFFFF",
         "size": 0.03935185185185185,
+        "letter_spacing": 0.000462962962962963,
         "opacity": 0.45,
         "outline_thickness": 0.0,
         "position_x": 0.82,
@@ -40,15 +41,16 @@ EDITOR_DEFAULTS = {
     },
     "hook_style": {
         "enabled": True,
-        "font_size": 0.068,
+        "font_size": 0.075,
+        "letter_spacing": -0.001388888888888889,
         "font_family": "Poppins",
         "font_weight": 700,
         "text_color": "#FFFFFF",
         "outline_color": "#000000",
-        "outline_thickness": 1.5740740740740742,
+        "outline_thickness": 3.1481481481481484,
         "duration": 5.0,
         "position_x": 0.5,
-        "position_y": 0.22,
+        "position_y": 0.62,
         "max_words": HOOK_MAX_WORDS,
         "max_lines": HOOK_MAX_LINES,
         "pause_seconds": HOOK_PAUSE_SECONDS,
@@ -56,9 +58,9 @@ EDITOR_DEFAULTS = {
     },
     "subtitle": {
         "enabled": True,
-        "color": "#FFFF00",
+        "color": "#2CCDE7",
         "text_color": "#FFFFFF",
-        "size": 0.068,
+        "size": 0.062,
         "position_x": 0.5,
         "position_y": 0.78,
         "text_transform": "uppercase",
@@ -103,7 +105,7 @@ def v3_locked_render_settings(base=None):
     settings["subtitle"]["enabled"] = True
     settings["subtitle"]["text_transform"] = "uppercase"
     settings["subtitle"]["letter_spacing"] = EDITOR_DEFAULTS["subtitle"]["letter_spacing"]
-    settings["subtitle"]["color"] = "#FFFF00"
+    settings["subtitle"]["color"] = "#2CCDE7"
     settings["subtitle"]["text_color"] = "#FFFFFF"
     settings["subtitle"]["outline_color"] = "#000000"
     settings["subtitle"]["shadow"] = 0
@@ -117,10 +119,11 @@ def v3_locked_render_settings(base=None):
     settings["credit_watermark"]["opacity"] = 0.45
     settings["hook_style"]["max_words"] = HOOK_MAX_WORDS
     settings["hook_style"]["max_lines"] = HOOK_MAX_LINES
+    settings["hook_style"]["letter_spacing"] = EDITOR_DEFAULTS["hook_style"]["letter_spacing"]
     mode = settings["video_layout"].get("mode")
     if mode == "vertical_full":
         settings["hook_style"]["font_size"] = 0.075
-        settings["subtitle"]["size"] = 0.068
+        settings["subtitle"]["size"] = 0.062
     if mode in {"split_middle"}:
         settings["subtitle"]["position_y"] = 0.5
     else:

@@ -59,19 +59,19 @@ def test_hook_edit_queues_locked_rerender(tmp_path, monkeypatch):
     result = manager.update_hook_text({"clip_id": "clip", "hook_text": "Ini Hook Baru Yang Sangat Kuat"})
     assert result["status"] == "render_queued"
     saved = json.loads(path.read_text(encoding="utf-8"))
-    assert saved["hook_text"].replace("\n", " ") == "INI HOOK BARU YANG SANGAT KUAT"
-    assert len(saved["hook_text"].splitlines()) <= 2
+    assert saved["hook_text"].replace("\n", " ") == "INI HOOK BARU YANG SANGAT KUAT!"
+    assert len(saved["hook_text"].splitlines()) <= 4
     assert saved["status"] == "needs_edit"
     assert calls == [({"clip_id": "clip", "hook_text": saved["hook_text"]}, False)]
 
 
-def test_hook_edit_rejects_more_than_eight_words(tmp_path, monkeypatch):
+def test_hook_edit_rejects_more_than_six_words(tmp_path, monkeypatch):
     manager = mod.WebJobManager(app_dir=tmp_path)
     path = make_clip(tmp_path)
     calls = []
     monkeypatch.setattr(manager, "render_clip", lambda payload, preview=False: calls.append(payload) or {"status": "render_queued"})
     result = manager.update_hook_text({"clip_id": "clip", "hook_text": "satu dua tiga empat lima enam tujuh delapan sembilan"})
-    assert result == {"status": "error", "message": "Hook maksimal 8 kata"}
+    assert result == {"status": "error", "message": "Hook maksimal 6 kata"}
     saved = json.loads(path.read_text(encoding="utf-8"))
     assert "hook_text" not in saved
     assert calls == []

@@ -19,12 +19,12 @@ from subtitle_cues import build_subtitle_cues
 from visual_style import normalize_hook_text
 
 
-def test_hook_caps_eight_words_two_lines():
+def test_hook_caps_six_words_four_lines():
     text = "Ini adalah hook panjang sekali yang harus dipotong dengan aman sekarang"
     hook = normalize_hook_text(text)
-    assert hook.replace("\n", " ").split() == text.upper().split()[:8]
-    assert len(hook.splitlines()) <= 2
-    assert len(hook.replace("\n", " ").split()) <= 8
+    assert hook.replace("\n", " ").rstrip("!").split() == text.upper().split()[:6]
+    assert len(hook.splitlines()) <= 4
+    assert len(hook.replace("\n", " ").split()) <= 6
     assert hook == hook.upper()
 
 

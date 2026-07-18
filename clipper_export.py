@@ -108,7 +108,7 @@ class ExportMixin(ClipperBase):
     @staticmethod
     def _tts_text(hook_text: str) -> str:
         text = re.sub(r"[^\w\s.,!?;!'\"()\-]", "", hook_tts_text(hook_text), flags=re.UNICODE)
-        return re.sub(r"\s+", " ", text).strip()
+        return re.sub(r"\s+", " ", text.replace(",", " ")).strip()
 
     def _generate_hook_tts(self, hook_text: str, clip_dir: Path) -> tuple[Path, float]:
         import requests
@@ -119,17 +119,18 @@ class ExportMixin(ClipperBase):
         voice = str(getattr(self, "tts_voice", "") or "Fenrir")
         base_url = str(getattr(self, "tts_base_url", "") or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
         spoken_text = self._tts_text(hook_text)
-        # style_v4: stronger direction plus deterministic post-processing below.
+        # style_v6: energetic delivery without sacrificing Indonesian consonants.
         style_prompt = (
             "Ucapkan HANYA teks berikut dalam bahasa Indonesia. "
             "Gaya: kreator pria Indonesia yang spontan, viral, dan langsung menghentak sejak suku kata pertama. "
-            "Pitch rendah-sedang, tempo sangat cepat, tanpa jeda antarkata, punch tajam pada nama dan kata penting. "
+            "Pitch rendah-sedang, tempo cepat, artikulasi jelas. Ucapkan setiap kata secara utuh termasuk konsonan akhir; jangan menambah, menghilangkan, atau mengganti bunyi. "
+            "Ucapkan nama lengkap menyambung langsung ke kata berikutnya; jangan beri jeda atau koma setelah nama. "
             "Gunakan perubahan intonasi yang berani, rasa kaget dan penasaran, volume suara penuh dan dekat mikrofon. "
             "Bukan pembaca berita, bukan iklan formal, bukan robot, jangan datar, "
             "tanpa membacakan instruksi ini.\n\n"
             f"{spoken_text}"
         )
-        digest = hashlib.sha256(f"{model}|{voice}|style_v4|{spoken_text}".encode("utf-8")).hexdigest()[:20]
+        digest = hashlib.sha256(f"{model}|{voice}|style_v6|{spoken_text}".encode("utf-8")).hexdigest()[:20]
         # Shared tenant cache: survives across runs; still keyed by model/voice/style/text.
         output_root = Path(getattr(self, "output_dir", clip_dir))
         cache_dir = output_root.parent / "cache" / "hook-tts"
@@ -178,8 +179,9 @@ class ExportMixin(ClipperBase):
         }
         font_candidates = [str(family_fonts["Poppins"]), str(family_fonts["Plus Jakarta Sans"])]
         body_px = max(1, int(max(16, font_size_frac * 500) / 340 * width))
-        name_px = max(body_px + 1, int(round(body_px * 1.50)))
+        name_px = max(body_px + 1, int(round(body_px * 1.45)))
         min_hook_px = max(10, int(round(20 / 1080 * width)))
+        letter_spacing = float(style.get("letter_spacing", 0.0)) * width
 
         def load_font(size_px: int):
             for candidate in font_candidates:
@@ -212,9 +214,19 @@ class ExportMixin(ClipperBase):
         def measure(word: str, is_name: bool) -> float:
             font = name_font if is_name else body_font
             try:
-                return float(font.getlength(word))
+                width_px = sum(float(font.getlength(char)) for char in word)
             except AttributeError:
-                return float(font.getbbox(word)[2])
+                width_px = sum(float(font.getbbox(char)[2]) for char in word)
+            return width_px + letter_spacing * max(0, len(word) - 1)
+
+        def draw_word(draw, position, word, font, fill, stroke_width, stroke_fill):
+            x, baseline = position
+            for char in word:
+                draw.text((x, baseline), char, font=font, fill=fill, stroke_width=stroke_width, stroke_fill=stroke_fill, anchor="ls")
+                try:
+                    x += float(font.getlength(char)) + letter_spacing
+                except AttributeError:
+                    x += float(font.getbbox(char)[2]) + letter_spacing
 
         def wrap_words(word_list, name_range):
             lines = []
@@ -240,7 +252,12 @@ class ExportMixin(ClipperBase):
                 space_w = float(body_font.getlength(" "))
             except AttributeError:
                 space_w = float(body_font.getbbox(" ")[2])
-            all_lines = wrap_words(words, name_span)
+            if name_span:
+                name_line = [(word, True) for word in words[name_span[0]:name_span[1]]]
+                body_words = words[:name_span[0]] + words[name_span[1]:]
+                all_lines = [name_line, *wrap_words(body_words, None)]
+            else:
+                all_lines = wrap_words(words, None)
             lines = all_lines
             too_many = len(lines) > max_lines
             too_wide = False
@@ -264,45 +281,47 @@ class ExportMixin(ClipperBase):
                     lines = [flat[index:index + per_line] for index in range(0, len(flat), per_line)]
                 break
             body_px = max(min_hook_px, body_px - max(1, int(round(6 / 1080 * width))))
-            name_px = max(body_px + 1, int(round(body_px * 1.50))) if name_span else body_px
+            name_px = max(body_px + 1, int(round(body_px * 1.45))) if name_span else body_px
             body_font = load_font(body_px)
             name_font = load_font(name_px) if name_span else body_font
 
         if not lines:
             lines = [[(plain, False)]]
 
-        line_height = int(max(body_px, name_px) * 1.2)
-        total_height = line_height * len(lines)
+        line_heights = [int(max(name_px if is_name else body_px for _, is_name in line) * 0.98) for line in lines]
+        total_height = sum(line_heights)
         center_x = float(style.get("position_x", 0.5)) * width
-        center_y = float(style.get("position_y", 0.22)) * height
+        center_y = float(style.get("position_y", 0.62)) * height
         block_top = center_y - total_height / 2
         outline_width = max(0, int(round(float(style.get("outline_thickness", 1.0)) / 340 * width)))
         stroke_width = outline_width
         body_color = _hex_to_rgb(str(style.get("text_color") or "#FFFFFF"))
-        name_color = _hex_to_rgb("#FFFF00")
+        name_color = _hex_to_rgb("#2CCDE7")
         outline_color = _hex_to_rgb(str(style.get("outline_color") or "#000000"))
         overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
 
         body_metrics = getattr(body_font, "getmetrics", None)
         name_metrics = getattr(name_font, "getmetrics", None)
-        line_ascent = max(body_metrics()[0], name_metrics()[0]) if body_metrics and name_metrics else max(body_px, name_px)
+        line_top = block_top
         for line_index, line in enumerate(lines):
-            # Align mixed font sizes on one baseline, not one glyph top.
             line_w = 0.0
             for i, (word, is_name) in enumerate(line):
                 line_w += measure(word, is_name)
                 if i:
                     line_w += space_w
             x = center_x - line_w / 2
-            baseline_y = block_top + line_index * line_height + line_ascent
+            uses_name = any(is_name for _, is_name in line)
+            metrics = name_metrics if uses_name else body_metrics
+            baseline_y = line_top + (metrics()[0] if metrics else (name_px if uses_name else body_px))
             for i, (word, is_name) in enumerate(line):
                 font = name_font if is_name else body_font
                 fill = name_color if is_name else body_color
                 bbox = draw.textbbox((0, 0), word, font=font, stroke_width=stroke_width, anchor="ls")
                 text_x = min(max(x, stroke_width - bbox[0]), width - bbox[2] - stroke_width)
-                draw.text((text_x, baseline_y), word, font=font, fill=(*fill, 255), stroke_width=stroke_width, stroke_fill=(*outline_color, 255), anchor="ls")
+                draw_word(draw, (text_x, baseline_y), word, font, (*fill, 255), stroke_width, (*outline_color, 255))
                 x += measure(word, is_name) + space_w
+            line_top += line_heights[line_index]
         overlay.save(output_path, "PNG")
 
     def _create_credit_overlay(self, width: int, height: int, output_path: Path):
@@ -329,18 +348,22 @@ class ExportMixin(ClipperBase):
         overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
         stroke_width = max(0, int(round(float(settings.get("outline_thickness", 0.0)) / 340 * width)))
+        letter_spacing = max(0.0, float(settings.get("letter_spacing", 0.0)) * width)
+        text_width = sum(float(font.getlength(char)) for char in text) + letter_spacing * max(0, len(text) - 1)
         bbox = draw.textbbox((0, 0), text, font=font, stroke_width=stroke_width)
         # Top-right small credit
         margin_x = width * 0.04
         margin_y = height * 0.035
-        text_x = width - margin_x - (bbox[2] - bbox[0]) - bbox[0]
+        text_x = width - margin_x - text_width
         text_y = margin_y - bbox[1]
         color = _hex_to_rgb(str(settings.get("color") or "#FFFFFF"))
         alpha = int(255 * opacity)
-        draw.text(
-            (text_x, text_y), text, font=font, fill=(*color, alpha),
-            stroke_width=stroke_width, stroke_fill=(*color, alpha),
-        )
+        for char in text:
+            draw.text(
+                (text_x, text_y), char, font=font, fill=(*color, alpha),
+                stroke_width=stroke_width, stroke_fill=(*color, alpha),
+            )
+            text_x += float(font.getlength(char)) + letter_spacing
         overlay.save(output_path, "PNG")
 
     def _create_caption_ass(
@@ -652,7 +675,7 @@ class ExportMixin(ClipperBase):
         watermark_settings = {**(settings.get("watermark") or {}), "enabled": False}
         credit_settings = {**(settings.get("credit_watermark") or {}), "enabled": True, "text": "sc: @{channel}"}
         hook_settings = {**(settings.get("hook_style") or {}), "enabled": True, "font_family": "Poppins"}
-        subtitle_settings = {**(settings.get("subtitle") or {}), "enabled": True, "text_transform": "uppercase", "font_family": "Poppins", "font_weight": 700, "color": "#FFFF00", "text_color": "#FFFFFF", "outline_color": "#000000", "shadow": 0}
+        subtitle_settings = {**(settings.get("subtitle") or {}), "enabled": True, "text_transform": "uppercase", "font_family": "Poppins", "font_weight": 700, "color": "#2CCDE7", "text_color": "#FFFFFF", "outline_color": "#000000", "shadow": 0}
         blur_settings = {**(settings.get("blur_background") or {}), "enabled": False}
         self.watermark_settings = watermark_settings
         self.credit_watermark_settings = credit_settings
@@ -788,6 +811,15 @@ class ExportMixin(ClipperBase):
             self.run_ffmpeg_with_progress(command, duration + intro_duration, lambda progress: self.set_progress("Menyusun video", progress), timeout=getattr(self, "render_timeout", 900))
             if not output_path.is_file() or output_path.stat().st_size < 1000:
                 raise RuntimeError("Final render gagal")
+            thumbnail_runner = getattr(self, "_run_probe_subprocess", None)
+            if thumbnail_runner is not None:
+                thumbnail_path = clip_dir / "thumbnail.jpg"
+                result = thumbnail_runner(
+                    [self.ffmpeg_path, "-y", "-i", str(output_path), "-frames:v", "1", "-q:v", "3", str(thumbnail_path)],
+                    capture_output=True,
+                )
+                if result.returncode != 0 or not thumbnail_path.is_file():
+                    self.log("  Thumbnail frame pertama gagal dibuat (non-fatal)")
         finally:
             for path in temporary:
                 Path(path).unlink(missing_ok=True)

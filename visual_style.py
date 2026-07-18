@@ -16,7 +16,6 @@ _TITLE_NAME_RE = re.compile(
     re.IGNORECASE,
 )
 
-
 def marked_hook_name(text: str) -> str:
     """Person name marked by AI as [Name]; markers are internal only."""
     match = _HOOK_MARKED_NAME_RE.search(str(text or ""))
@@ -61,9 +60,11 @@ def normalize_hook_text(text: str, max_words: int = HOOK_MAX_WORDS, max_lines: i
     cleaned = strip_hook_colon(text)
     cleaned = "".join(ch for ch in cleaned if not unicodedata.category(ch).startswith(("S", "C")))
     if not cleaned:
-        return "MOMEN INI WAJIB DITONTON"
+        return "MOMEN INI WAJIB DITONTON!"
     words = _WORD_RE.findall(cleaned)
     words = words[: max(1, int(max_words))]
+    if not words[-1].endswith(("?", "!")):
+        words[-1] += "!"
     plain = " ".join(words).upper()
     max_lines = max(1, int(max_lines))
     if len(words) <= 1 or max_lines <= 1:

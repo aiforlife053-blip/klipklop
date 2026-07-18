@@ -982,7 +982,7 @@ def test_render_settings_ignore_client_style_without_mutating_defaults(tmp_path)
     manager = mod.WebJobManager(app_dir=tmp_path)
     settings = manager._render_settings({"settings": {"hook_style": {"enabled": True, "position_y": 0.3}}}, {})
     assert settings["hook_style"]["enabled"] is True
-    assert settings["hook_style"]["position_y"] == 0.22
+    assert settings["hook_style"]["position_y"] == 0.62
     assert manager.get_settings()["hook_style"]["position_y"] != 0.3
 
 
@@ -1082,7 +1082,7 @@ def test_render_settings_normalize_untrusted_editor_values(tmp_path):
     settings = manager._render_settings({"settings": {"hook_style": {"font_family": "Invalid", "font_weight": 999, "font_size": 99, "text_color": "bad", "position_x": -2}, "blur_background": {"zoom": 99, "strength": -1}}}, metadata)
     assert settings["hook_style"]["font_family"] == "Poppins"
     assert settings["hook_style"]["font_weight"] == 700
-    assert settings["hook_style"]["font_size"] == 0.068  # locked enlarged hook preset
+    assert settings["hook_style"]["font_size"] == 0.075  # locked dense hook preset
     assert settings["hook_style"]["position_x"] == 0.5
     assert settings["hook_style"]["text_color"].startswith("#")
     assert settings["blur_background"]["enabled"] is False
@@ -1424,7 +1424,7 @@ def test_short_ai_highlight_is_expanded(tmp_path):
     core.report_tokens = lambda *_args, **_kwargs: None
     result = core._find_highlights_single("[00:01:00,000 - 00:01:04,000] halo", {"title": "video"}, 1, allow_chunking=False)
     assert result[0]["duration_seconds"] >= 10
-    assert result[0]["hook_text"] == "SHORT"  # visual contract: uppercase hook output
+    assert result[0]["hook_text"] == "SHORT!"  # visual contract: uppercase hook with punctuation
     assert len(result[0]["hook_text"].replace("\n", " ").split()) <= 8
 
 

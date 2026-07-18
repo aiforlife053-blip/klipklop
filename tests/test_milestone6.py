@@ -179,8 +179,8 @@ def test_hook_contract_matches_reference_rules():
     text = "RADIT KEBANYAKAN BACA HARUS FISIOTERAPI BANGET SEKARANG JUGA"
     hook = normalize_hook_text(text)
     words = hook.replace("\n", " ").split()
-    assert words == text.split()
-    assert len(hook.splitlines()) <= 3
+    assert hook.replace("\n", " ").rstrip("!").split() == text.split()[:6]
+    assert len(hook.splitlines()) <= 4
 
 
 def test_gaming_detection_cache_reuses_source_identity(tmp_path, monkeypatch):
@@ -310,7 +310,8 @@ def test_hook_tts_uses_generate_content_audio_response(tmp_path, monkeypatch):
     assert captured["payload"]["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"] == "Fenrir"
     prompt = captured["payload"]["contents"][0]["parts"][0]["text"]
     assert "langsung menghentak" in prompt
-    assert "tanpa jeda antarkata" in prompt
+    assert "tempo cepat, artikulasi jelas" in prompt
+    assert "konsonan akhir" in prompt
     assert output.is_file() and output.stat().st_size > 44
     assert duration == pytest.approx(1.0 / 1.12)
 
