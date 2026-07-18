@@ -70,7 +70,7 @@ def test_segment_only_subtitles_are_split_to_max_three_words():
         "words": [],
         "segments": [{"text": "one two three four five six", "start": 0.0, "end": 6.0}],
     })
-    assert [cue["text"] for cue in cues] == ["one two three", "four five six"]
+    assert [cue["text"] for cue in cues] == ["ONE TWO THREE", "FOUR FIVE SIX"]
     assert all(len(cue["text"].split()) <= 3 for cue in cues)
 
 
@@ -188,7 +188,8 @@ def test_hook_overlay_highlights_inline_name_yellow(tmp_path):
 def test_subtitle_defaults_target_108px_and_bright_yellow():
     sub = EDITOR_DEFAULTS["subtitle"]
     assert sub["color"] == "#FFFF00"
-    assert sub["text_transform"] == "none"
+    assert sub["text_transform"] == "uppercase"
+    assert sub["letter_spacing"] == pytest.approx(2 / 1080)
     assert sub["font_family"] == "Poppins"
     assert sub["font_weight"] == 700
     assert sub["word_min"] == 3
@@ -220,7 +221,7 @@ def test_hook_defaults_max_eight_words_two_lines():
     # size formula: font_size * 500 / 340 * width ≈ 108 @1080 (54px @540)
     px = int(max(16, float(hook["font_size"]) * 500) / 340 * 1080)
     assert 106 <= px <= 110
-    assert hook["outline_thickness"] == 1.0
+    assert hook["outline_thickness"] == pytest.approx(5 * 340 / 1080)
 
 
 def test_sanitize_subtitle_strips_question_comma_period():
@@ -230,7 +231,7 @@ def test_sanitize_subtitle_strips_question_comma_period():
     assert sanitize_subtitle_text("Halo? apa, stop.") == "Halo apa stop"
 
 
-def test_subtitle_cues_are_max_3_words_natural_case_no_punct():
+def test_subtitle_cues_are_max_3_words_uppercase_no_punct():
     words = [
         {"word": "Satu?", "start": 0.0, "end": 0.2},
         {"word": "dua,", "start": 0.2, "end": 0.4},
@@ -249,7 +250,7 @@ def test_subtitle_cues_are_max_3_words_natural_case_no_punct():
         assert "," not in cue["text"]
         assert "." not in cue["text"]
     assert len(cues[0]["text"].split()) == 3
-    assert cues[0]["text"] == "Satu dua tiga"
+    assert cues[0]["text"] == "SATU DUA TIGA"
 
 
 def test_subtitle_cue_holds_through_short_speech_gap():
@@ -304,11 +305,12 @@ def test_v3_locked_settings_force_new_visual_contract():
     assert settings["video_layout"]["mode"] == "split_middle"
 
 
-def test_vertical_full_alone_gets_larger_hook_and_subtitle():
+def test_vertical_full_keeps_larger_hook_but_uses_108px_subtitle():
     vertical = v3_locked_render_settings({"video_layout": {"mode": "vertical_full"}})
     split = v3_locked_render_settings({"video_layout": {"mode": "split_middle"}})
     assert vertical["hook_style"]["font_size"] == 0.075
-    assert vertical["subtitle"]["size"] == 0.075
+    assert vertical["subtitle"]["size"] == 0.068
+    assert vertical["subtitle"]["letter_spacing"] == pytest.approx(2 / 1080)
     assert split["hook_style"]["font_size"] == 0.068
     assert split["subtitle"]["size"] == 0.068
 

@@ -45,7 +45,7 @@ EDITOR_DEFAULTS = {
         "font_weight": 700,
         "text_color": "#FFFFFF",
         "outline_color": "#000000",
-        "outline_thickness": 1.0,
+        "outline_thickness": 1.5740740740740742,
         "duration": 5.0,
         "position_x": 0.5,
         "position_y": 0.22,
@@ -61,7 +61,8 @@ EDITOR_DEFAULTS = {
         "size": 0.068,
         "position_x": 0.5,
         "position_y": 0.78,
-        "text_transform": "none",
+        "text_transform": "uppercase",
+        "letter_spacing": 0.001851851851851852,
         "bg_color": "#000000",
         "bg_opacity": 0.0,
         "font_family": "Poppins",
@@ -101,6 +102,7 @@ def v3_locked_render_settings(base=None):
     settings["hook_style"]["font_family"] = "Poppins"
     settings["subtitle"]["enabled"] = True
     settings["subtitle"]["text_transform"] = "uppercase"
+    settings["subtitle"]["letter_spacing"] = EDITOR_DEFAULTS["subtitle"]["letter_spacing"]
     settings["subtitle"]["color"] = "#FFFF00"
     settings["subtitle"]["text_color"] = "#FFFFFF"
     settings["subtitle"]["outline_color"] = "#000000"
@@ -118,7 +120,7 @@ def v3_locked_render_settings(base=None):
     mode = settings["video_layout"].get("mode")
     if mode == "vertical_full":
         settings["hook_style"]["font_size"] = 0.075
-        settings["subtitle"]["size"] = 0.075
+        settings["subtitle"]["size"] = 0.068
     if mode in {"split_middle"}:
         settings["subtitle"]["position_y"] = 0.5
     else:

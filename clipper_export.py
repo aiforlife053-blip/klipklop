@@ -652,7 +652,7 @@ class ExportMixin(ClipperBase):
         watermark_settings = {**(settings.get("watermark") or {}), "enabled": False}
         credit_settings = {**(settings.get("credit_watermark") or {}), "enabled": True, "text": "sc: @{channel}"}
         hook_settings = {**(settings.get("hook_style") or {}), "enabled": True, "font_family": "Poppins"}
-        subtitle_settings = {**(settings.get("subtitle") or {}), "enabled": True, "text_transform": "none", "font_family": "Poppins", "font_weight": 700, "color": "#FFFF00", "text_color": "#FFFFFF", "outline_color": "#000000", "shadow": 0}
+        subtitle_settings = {**(settings.get("subtitle") or {}), "enabled": True, "text_transform": "uppercase", "font_family": "Poppins", "font_weight": 700, "color": "#FFFF00", "text_color": "#FFFFFF", "outline_color": "#000000", "shadow": 0}
         blur_settings = {**(settings.get("blur_background") or {}), "enabled": False}
         self.watermark_settings = watermark_settings
         self.credit_watermark_settings = credit_settings
@@ -840,6 +840,7 @@ class ExportMixin(ClipperBase):
 
         border_style = 1
         outline = max(0, int(round(float(style.get("outline_thickness", 1.0)) / 340 * width)))
+        letter_spacing = max(0.0, float(style.get("letter_spacing", 0.0)) * width)
         bold = -1 if font_weight >= 600 else 0
 
         ass_content = f"""[Script Info]
@@ -852,7 +853,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{size},{primary_colour},{primary_colour},{outline_colour},{back_colour},{bold},0,0,0,100,100,0,0,{border_style},{outline},0,{alignment},0,0,0,1
+Style: Default,{font},{size},{primary_colour},{primary_colour},{outline_colour},{back_colour},{bold},0,0,0,100,100,{letter_spacing:.2f},0,{border_style},{outline},0,{alignment},0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

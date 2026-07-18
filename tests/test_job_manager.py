@@ -29,7 +29,7 @@ from subtitle_cues import build_subtitle_cues
 
 def test_static_subtitle_cues_remove_rolling_caption_overlap():
     cues = build_subtitle_cues({"duration": 8.0, "words": [], "segments": [{"text": "lama", "start": 0.0, "end": 4.0}, {"text": "baru", "start": 2.0, "end": 6.0}, {"text": "terbaru", "start": 4.0, "end": 8.0}]})
-    assert [(cue["text"], cue["start"], cue["end"]) for cue in cues] == [("lama", 0.0, 2.0), ("baru", 2.0, 4.0), ("terbaru", 4.0, 8.0)]
+    assert [(cue["text"], cue["start"], cue["end"]) for cue in cues] == [("LAMA", 0.0, 2.0), ("BARU", 2.0, 4.0), ("TERBARU", 4.0, 8.0)]
 
 
 def test_new_config_enables_subtitles_by_default(tmp_path):
@@ -886,7 +886,7 @@ def test_ass_subtitle_groups_words_in_dynamic_chunks(tmp_path):
     assert "PlayResX: 720" in text
     assert "Fontname, Fontsize" in text
     assert "Style: Default,Poppins,40,&H0022AA11,&H0022AA11,&H00214365" in text
-    assert ",0,0,0,0,100,100,0,0,1,4,0,5," in text
+    assert ",0,0,0,0,100,100,0.00,0,1,4,0,5," in text
     assert "{\\pos(288,1024)\\b400}" in text
     assert "{\\c&H00563412}" in text
     assert "w0" in text and "w1" in text
@@ -973,7 +973,7 @@ def test_editor_defaults_enable_subtitles_and_use_larger_foreground(tmp_path):
     manager = mod.WebJobManager(app_dir=tmp_path)
     defaults = manager._editor_defaults_local()
     assert defaults["subtitle"]["enabled"] is True
-    assert defaults["subtitle"]["text_transform"] == "none"
+    assert defaults["subtitle"]["text_transform"] == "uppercase"
     assert defaults["blur_background"]["scale"] == 1.6
     assert defaults["blur_background"]["enabled"] is False
 

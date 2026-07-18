@@ -40,8 +40,8 @@ def test_subtitle_contract_uppercase_and_punctuation_filter():
         "segments": [],
     }
     cues = build_subtitle_cues(transcript)
-    assert cues[0]["text"] == "halo dunia! ini"
-    assert cues[1]["text"] == "tes"
+    assert cues[0]["text"] == "HALO DUNIA! INI"
+    assert cues[1]["text"] == "TES"
     assert len(cues[0]["words"]) == 3
 
 
