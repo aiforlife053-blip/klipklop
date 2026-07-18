@@ -21,3 +21,5 @@ token*.json
 upload_queue.json
 
 tokens/
+data/
+backups/

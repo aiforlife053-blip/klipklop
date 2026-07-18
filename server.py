@@ -1,6 +1,4 @@
 import base64
-import hashlib
-import hmac
 import json
 import logging
 import mimetypes
@@ -10,7 +8,6 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
@@ -27,6 +24,7 @@ if sys.version_info < (3, 11) and os.name == "nt" and os.environ.get("KLIPKLOP_P
         raise SystemExit("Python 3.11+ required. Run: py -3.12 server.py")
 
 from job_manager import WebJobManager
+from auth_store import AuthStore
 from social_auth import delete_youtube_token, finish_youtube_oauth, is_youtube_connected, start_youtube_oauth, check_youtube_oauth_status
 from youtube_uploader import delete_youtube_video, list_existing_youtube_videos
 
@@ -34,16 +32,8 @@ from youtube_uploader import delete_youtube_video, list_existing_youtube_videos
 MANAGER = WebJobManager()
 SESSION_COOKIE = "klipklop_session"
 SESSION_TTL = 86400
-_LOCAL_USER_ID = "00000000-0000-4000-8000-000000000001"
-_LOCAL_PASSWORD = os.environ.get("KLIPKLOP_LOCAL_PASSWORD", "admin123")
+AUTH = AuthStore(ROOT / "data" / "auth.sqlite3", SESSION_TTL)
 _SCHEDULER_LOGGER = logging.getLogger("web_klip.scheduler")
-
-
-def _supabase_config():
-    url = os.environ.get("SUPABASE_URL", "")
-    anon_key = os.environ.get("SUPABASE_ANON_KEY", "")
-    secret = os.environ.get("KLIPKLOP_SECRET") or os.environ.get("SESSION_SECRET") or ""
-    return url.rstrip("/"), anon_key, secret
 
 
 _USER_MANAGERS = {}
@@ -293,30 +283,15 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         if cached is not None:
             return cached
         token = self._access_token()
-        url, anon_key, secret = _supabase_config()
-        if not url or "YOUR_" in url or not anon_key or "YOUR_" in anon_key:
-            expected = hmac.new((secret or "klipklop-local-session").encode(), _LOCAL_USER_ID.encode(), hashlib.sha256).hexdigest()
-            self._user_id = _LOCAL_USER_ID if token and hmac.compare_digest(token, expected) else ""
-            return self._user_id
-        if not token:
-            self._user_id = ""
-            return ""
-        request = Request(f"{url}/auth/v1/user", headers={"apikey": anon_key, "Authorization": f"Bearer {token}"})
-        try:
-            with urlopen(request, timeout=10) as response:
-                user_id = str(__import__("uuid").UUID(str(json.loads(response.read().decode()).get("id"))))
-        except Exception:
-            user_id = ""
-        self._user_id = user_id
-        return user_id
+        self._user_id = AUTH.session_user(token)
+        return self._user_id
 
     def _manager(self):
         user_id = self._current_user()
         if not user_id:
             raise PermissionError("Unauthorized")
         with _USER_MANAGERS_LOCK:
-            local_mode = user_id == _LOCAL_USER_ID and not _supabase_config()[0]
-            manager = _USER_MANAGERS.setdefault(user_id, WebJobManager(ROOT / "data" / user_id, user_id=user_id, local_mode=local_mode))
+            manager = _USER_MANAGERS.setdefault(user_id, WebJobManager(ROOT / "data" / user_id, user_id=user_id, local_mode=True))
             _USER_MANAGER_LAST_USED[user_id] = time.monotonic()
             return manager
 
@@ -338,50 +313,25 @@ class WebKlipHandler(BaseHTTPRequestHandler):
             if len(attempts) >= 10:
                 self._json({"status": "error", "message": "Too many login attempts"}, 429)
                 return
-            attempts.append(now)
             _LOGIN_ATTEMPTS[client] = attempts
         payload, err = self._payload(max_size=4096)
         if err is not None:
             self._json(err[0], err[1])
             return
-        url, anon_key, secret = _supabase_config()
         email = str(payload.get("email", "")).strip()
         password = str(payload.get("password", ""))
         if not email or not password:
             self._json({"status": "error", "message": "Email dan password wajib diisi"}, 400)
             return
-        if not url or "YOUR_" in url or not anon_key or "YOUR_" in anon_key:
-            if not hmac.compare_digest(password, _LOCAL_PASSWORD):
-                self._json({"status": "error", "message": "Password lokal salah"}, 401)
-                return
-            token = hmac.new((secret or "klipklop-local-session").encode(), _LOCAL_USER_ID.encode(), hashlib.sha256).hexdigest()
-            self._send_session(token)
+        user_id = AUTH.authenticate(email, password)
+        if not user_id:
+            with _LOGIN_LOCK:
+                _LOGIN_ATTEMPTS.setdefault(client, []).append(now)
+            self._json({"status": "error", "message": "Email atau password salah"}, 401)
             return
-        req = Request(
-            f"{url}/auth/v1/token?grant_type=password",
-            data=json.dumps({"email": email, "password": password}).encode(),
-            headers={"apikey": anon_key, "Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urlopen(req, timeout=15) as res:
-                data = json.loads(res.read().decode())
-        except HTTPError as e:
-            try:
-                error_data = json.loads(e.read().decode())
-                message = error_data.get("msg") or error_data.get("message")
-            except Exception:
-                message = "Email/password salah atau Supabase gagal"
-            self._json({"status": "error", "message": message}, 401)
-            return
-        except Exception:
-            self._json({"status": "error", "message": "Supabase gagal dihubungi"}, 401)
-            return
-        token = str(data.get("access_token") or "")
-        if not token:
-            self._json({"status": "error", "message": "Supabase did not return an access token"}, 401)
-            return
-        self._send_session(token)
+        with _LOGIN_LOCK:
+            _LOGIN_ATTEMPTS.pop(client, None)
+        self._send_session(AUTH.create_session(user_id))
 
     def _send_session(self, token):
         self.send_response(200)
@@ -393,6 +343,7 @@ class WebKlipHandler(BaseHTTPRequestHandler):
         self.wfile.write(b'{"status":"ok"}')
 
     def _logout(self):
+        AUTH.delete_session(self._access_token())
         self.send_response(200)
         self._add_security_headers()
         secure = "; Secure" if _public_mode() else ""

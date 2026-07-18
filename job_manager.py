@@ -835,6 +835,7 @@ class WebJobManager:
         return target if target.is_file() else None
 
     def list_clips(self):
+        self._enforce_clip_limit()
         clips = []
         for meta_path in self._output_root().glob("*/**/data.json"):
             meta = self._read_json(meta_path)
@@ -844,7 +845,7 @@ class WebJobManager:
             if not has_media and meta.get("status") != "needs_facecam":
                 continue
             clips.append(self._clip_view(meta_path, meta))
-        return {"status": "ok", "clips": sorted(clips, key=lambda item: (item["created_at"], item["clip_id"]), reverse=True)}
+        return {"status": "ok", "clips": sorted(clips, key=lambda item: (item["created_at"], item["clip_id"]), reverse=True)[:15]}
 
     def _clip_meta(self, clip_id):
         cache_key = (self.user_id or str(self.app_dir.resolve()), str(clip_id))
@@ -1696,7 +1697,7 @@ class WebJobManager:
                 self._add_log("Auto-rendering final clips…")
                 self._auto_render_run(run_dir)
             self._write_run_meta(run_dir, url, {**self._summarize_run(run_dir), "video_quality": quality, "landscape_blur": False, "screen_size": "9:16", "add_hook": True, "add_captions": True, "subtitle_language": subtitle_language, "status": "staged", "file_exists": True, "v3_mode": layout_mode})
-            self._enforce_retention()
+            self._enforce_clip_limit()
             self._status = "complete"
             self._message = "Complete"
             self._progress = 1.0
@@ -1819,6 +1820,27 @@ class WebJobManager:
             meta.update({"status": "expired", "deleted_at": datetime.now().isoformat(timespec="seconds"), "file_exists": False})
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
             self._add_log(f"Expired old session: {folder.name}")
+
+    def _enforce_clip_limit(self, limit=15):
+        clips = []
+        for meta_path in self._output_root().glob("*/**/data.json"):
+            metadata = self._read_json(meta_path)
+            if metadata.get("clip_id") and metadata.get("status") not in _ACTIVE_CLIP_STATUSES:
+                created = str(metadata.get("created_at") or metadata.get("timestamp") or "")
+                clips.append((created, meta_path.stat().st_mtime, str(metadata["clip_id"]), meta_path))
+        all_count = sum(1 for path in self._output_root().glob("*/**/data.json") if self._read_json(path).get("clip_id"))
+        for _, _, clip_id, meta_path in sorted(clips)[:max(0, all_count - limit)]:
+            with self._clip_lock(clip_id):
+                current = self._read_json(meta_path)
+                if current.get("status") in _ACTIVE_CLIP_STATUSES:
+                    continue
+                try:
+                    shutil.rmtree(meta_path.parent)
+                except OSError:
+                    continue
+                cache_key = (self.user_id or str(self.app_dir.resolve()), clip_id)
+                with _CLIP_META_CACHE_GUARD:
+                    _CLIP_META_CACHE.pop(cache_key, None)
 
     def _public_text(self, value):
         text = str(value or "")
