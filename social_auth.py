@@ -62,6 +62,8 @@ def _token_file(user_id):
 def _save_credentials(user_id, creds):
     target = _token_file(user_id)
     target.write_bytes(_fernet().encrypt(creds.to_json().encode()))
+    with _auth_lock:
+        _channel_cache.pop(_require_user(user_id), None)
 
 
 def _load_credentials(user_id):
@@ -131,7 +133,10 @@ def get_youtube_credentials(user_id):
 
 
 def delete_youtube_token(user_id):
+    user_id = _require_user(user_id)
     _token_file(user_id).unlink(missing_ok=True)
+    with _auth_lock:
+        _channel_cache.pop(user_id, None)
 
 
 def is_youtube_connected(user_id):

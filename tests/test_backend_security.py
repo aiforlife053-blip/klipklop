@@ -97,6 +97,21 @@ class BackendSecurityTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 social_auth.finish_youtube_oauth(state, "code")
 
+    def test_oauth_completion_clears_stale_connection_cache(self):
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {
+            "YOUTUBE_CLIENT_ID": "client",
+            "YOUTUBE_CLIENT_SECRET": "secret",
+            "YOUTUBE_REDIRECT_URI": "https://example.test/api/youtube/callback",
+            "TOKEN_ENCRYPTION_KEY": Fernet.generate_key().decode(),
+        }, clear=False), patch.object(social_auth, "TOKEN_DIR", Path(root)), patch.object(
+            social_auth, "_exchange_code", return_value={"access_token": "access", "refresh_token": "refresh"}
+        ):
+            social_auth._channel_cache[self.user_a] = (float("inf"), {"connected": False})
+            result = social_auth.start_youtube_oauth(self.user_a)
+            state = __import__("urllib.parse").parse.parse_qs(__import__("urllib.parse").parse.urlparse(result["auth_url"]).query)["state"][0]
+            social_auth.finish_youtube_oauth(state, "code")
+            self.assertNotIn(self.user_a, social_auth._channel_cache)
+
     def test_youtube_status_includes_channel_name(self):
         credentials = MagicMock(refresh_token="refresh", expired=False)
         response = {"items": [{"id": "channel-id", "snippet": {"title": "KlipKlop Channel"}}]}
