@@ -70,7 +70,7 @@ def test_segment_only_subtitles_are_split_to_max_three_words():
         "words": [],
         "segments": [{"text": "one two three four five six", "start": 0.0, "end": 6.0}],
     })
-    assert [cue["text"] for cue in cues] == ["ONE TWO THREE", "FOUR FIVE SIX"]
+    assert [cue["text"] for cue in cues] == ["one two three", "four five six"]
     assert all(len(cue["text"].split()) <= 3 for cue in cues)
 
 
@@ -146,6 +146,30 @@ def test_hook_mixed_font_words_share_baseline(tmp_path, monkeypatch):
     assert {anchor for _, _, anchor in first_line} == {"ls"}
 
 
+def test_hook_bold_font_does_not_add_synthetic_outline(tmp_path, monkeypatch):
+    from PIL import ImageDraw
+
+    strokes = []
+    real_draw = ImageDraw.Draw
+
+    class RecordingDraw:
+        def __init__(self, image):
+            self.inner = real_draw(image)
+
+        def textbbox(self, *args, **kwargs):
+            return self.inner.textbbox(*args, **kwargs)
+
+        def text(self, *args, **kwargs):
+            strokes.append(kwargs.get("stroke_width"))
+            return self.inner.text(*args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw, "Draw", RecordingDraw)
+    renderer = object.__new__(LocalClipRenderer)
+    renderer.hook_style_settings = {"font_weight": 700, "outline_thickness": 1.0}
+    renderer._create_hook_overlay("HOOK LEBIH TIPIS", 1080, 1920, tmp_path / "thin.png")
+    assert strokes and set(strokes) == {3}
+
+
 def test_hook_overlay_highlights_inline_name_yellow(tmp_path):
     renderer = object.__new__(LocalClipRenderer)
     renderer.hook_style_settings = {
@@ -164,7 +188,7 @@ def test_hook_overlay_highlights_inline_name_yellow(tmp_path):
 def test_subtitle_defaults_target_108px_and_bright_yellow():
     sub = EDITOR_DEFAULTS["subtitle"]
     assert sub["color"] == "#FFFF00"
-    assert sub["text_transform"] == "uppercase"
+    assert sub["text_transform"] == "none"
     assert sub["font_family"] == "Poppins"
     assert sub["font_weight"] == 700
     assert sub["word_min"] == 3
@@ -196,6 +220,7 @@ def test_hook_defaults_max_eight_words_two_lines():
     # size formula: font_size * 500 / 340 * width ≈ 108 @1080 (54px @540)
     px = int(max(16, float(hook["font_size"]) * 500) / 340 * 1080)
     assert 106 <= px <= 110
+    assert hook["outline_thickness"] == 1.0
 
 
 def test_sanitize_subtitle_strips_question_comma_period():
@@ -205,7 +230,7 @@ def test_sanitize_subtitle_strips_question_comma_period():
     assert sanitize_subtitle_text("Halo? apa, stop.") == "Halo apa stop"
 
 
-def test_subtitle_cues_are_max_3_words_uppercase_no_punct():
+def test_subtitle_cues_are_max_3_words_natural_case_no_punct():
     words = [
         {"word": "Satu?", "start": 0.0, "end": 0.2},
         {"word": "dua,", "start": 0.2, "end": 0.4},
@@ -220,11 +245,11 @@ def test_subtitle_cues_are_max_3_words_uppercase_no_punct():
     for cue in cues:
         n = len(cue["text"].split())
         assert 1 <= n <= 3
-        assert cue["text"] == cue["text"].upper()
         assert "?" not in cue["text"]
         assert "," not in cue["text"]
         assert "." not in cue["text"]
     assert len(cues[0]["text"].split()) == 3
+    assert cues[0]["text"] == "Satu dua tiga"
 
 
 def test_subtitle_cue_holds_through_short_speech_gap():

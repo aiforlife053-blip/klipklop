@@ -202,7 +202,7 @@ class ExportMixin(ClipperBase):
         words = plain.split()
         name_span = find_hook_name_span(words, known_names=known_names, original_text=hook_text)
 
-        stroke_width = max(0, int(round(float(style.get("outline_thickness", 1.5)) / 340 * width))) + max(0, int(round((font_weight - 400) / 200 * width / 340)))
+        stroke_width = max(0, int(round(float(style.get("outline_thickness", 1.0)) / 340 * width)))
         max_text_width = max(40, int(width * 0.86) - 2 * stroke_width)
         max_lines = max(1, int(style.get("max_lines", 3)))
         body_font = load_font(body_px)
@@ -276,9 +276,8 @@ class ExportMixin(ClipperBase):
         center_x = float(style.get("position_x", 0.5)) * width
         center_y = float(style.get("position_y", 0.22)) * height
         block_top = center_y - total_height / 2
-        outline_width = max(0, int(round(float(style.get("outline_thickness", 1.5)) / 340 * width)))
-        weight_width = max(0, int(round((font_weight - 400) / 200 * width / 340)))
-        stroke_width = outline_width + weight_width
+        outline_width = max(0, int(round(float(style.get("outline_thickness", 1.0)) / 340 * width)))
+        stroke_width = outline_width
         body_color = _hex_to_rgb(str(style.get("text_color") or "#FFFFFF"))
         name_color = _hex_to_rgb("#FFFF00")
         outline_color = _hex_to_rgb(str(style.get("outline_color") or "#000000"))
@@ -653,7 +652,7 @@ class ExportMixin(ClipperBase):
         watermark_settings = {**(settings.get("watermark") or {}), "enabled": False}
         credit_settings = {**(settings.get("credit_watermark") or {}), "enabled": True, "text": "sc: @{channel}"}
         hook_settings = {**(settings.get("hook_style") or {}), "enabled": True, "font_family": "Poppins"}
-        subtitle_settings = {**(settings.get("subtitle") or {}), "enabled": True, "text_transform": "uppercase", "font_family": "Poppins", "font_weight": 700, "color": "#FFFF00", "text_color": "#FFFFFF", "outline_color": "#000000", "shadow": 0}
+        subtitle_settings = {**(settings.get("subtitle") or {}), "enabled": True, "text_transform": "none", "font_family": "Poppins", "font_weight": 700, "color": "#FFFF00", "text_color": "#FFFFFF", "outline_color": "#000000", "shadow": 0}
         blur_settings = {**(settings.get("blur_background") or {}), "enabled": False}
         self.watermark_settings = watermark_settings
         self.credit_watermark_settings = credit_settings
