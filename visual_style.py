@@ -7,8 +7,7 @@ import unicodedata
 from config.editor_defaults import HOOK_MAX_LINES, HOOK_MAX_WORDS
 
 _WORD_RE = re.compile(r"\S+")
-# Keep ! only; strip ? , . per user correction.
-_ALLOWED_PUNCT = set("!")
+_ALLOWED_SUBTITLE_PUNCT = set("!")
 # Legacy "Name: body" — keep only for cleanup, not as preferred generate format.
 _HOOK_NAME_SPLIT_RE = re.compile(r"^(.{1,48}?)\s*:\s+(.+)$", re.DOTALL)
 _HOOK_MARKED_NAME_RE = re.compile(r"\[([^\[\]]{1,48})\]")
@@ -174,7 +173,7 @@ def sanitize_subtitle_token(token: str) -> str:
     text = str(token or "")
     out = []
     for ch in text:
-        if ch.isalnum() or ch.isspace() or ch in _ALLOWED_PUNCT or ch in {"\\", "{", "}"}:
+        if ch.isalnum() or ch.isspace() or ch in _ALLOWED_SUBTITLE_PUNCT or ch in {"\\", "{", "}"}:
             out.append(ch)
         elif ch in {".", ",", "?", ";", ":", "\"", "'", "“", "”", "‘", "’", "-", "—", "…"}:
             continue

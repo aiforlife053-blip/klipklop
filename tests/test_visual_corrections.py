@@ -38,6 +38,11 @@ def test_hook_removes_emoji_from_overlay_and_tts():
     assert "😮" not in hook_tts_text(raw)
 
 
+def test_hook_keeps_natural_question_or_exclamation():
+    assert normalize_hook_text("ASILA MAISA DITUDUH SELINGKUHAN?").endswith("?")
+    assert hook_tts_text("TERNYATA DIA BOHONG!").endswith("!")
+
+
 def test_user_hook_above_eight_words_is_rejected_not_truncated():
     with pytest.raises(ValueError, match="maksimal 8 kata"):
         validate_hook_text("satu dua tiga empat lima enam tujuh delapan sembilan")

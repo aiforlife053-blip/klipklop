@@ -308,8 +308,24 @@ def test_hook_tts_uses_generate_content_audio_response(tmp_path, monkeypatch):
     assert captured["url"].endswith("/models/gemini-3.1-flash-tts-preview:generateContent")
     assert captured["payload"]["generationConfig"]["responseModalities"] == ["AUDIO"]
     assert captured["payload"]["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"] == "Fenrir"
+    prompt = captured["payload"]["contents"][0]["parts"][0]["text"]
+    assert "langsung menghentak" in prompt
+    assert "tanpa jeda antarkata" in prompt
     assert output.is_file() and output.stat().st_size > 44
-    assert duration == 1.0
+    assert duration == pytest.approx(1.0 / 1.12)
+
+
+def test_hook_audio_is_faster_and_punchier(tmp_path):
+    renderer = mod.LocalClipRenderer(ffmpeg_path="ffmpeg", output_dir=str(tmp_path))
+    command = renderer._build_composite_command(
+        "source.mp4", "output.mp4", 10,
+        audio_source="source.mp4", tts_source=tmp_path / "hook.wav", intro_duration=3.0,
+    )
+    graph = command[command.index("-filter_complex") + 1]
+    assert "atempo=1.12" in graph
+    assert "acompressor=" in graph
+    assert "volume=5dB" in graph
+    assert "alimiter=" in graph
 
 
 def test_final_renderer_routes_vertical_full_without_removed_legacy_filter(tmp_path, monkeypatch):

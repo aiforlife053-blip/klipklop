@@ -172,8 +172,9 @@ HOOK TEXT (HARUS TAJAM & MENJUAL)
 WAJIB:
 
 * Bahasa Indonesia
-* Maksimal 3 baris visual
+* Maksimal 8 kata dan 2 baris visual
 * Tanpa emoji
+* Boleh akhiri dengan ? atau ! jika natural; jangan dipaksakan
 * WAJIB satu kalimat utuh, natural, dan enak dibaca
 * Nama orang harus menyatu di dalam kalimat, BUKAN format "Nama: kalimat"
 * Tandai hanya nama orang dengan kurung siku agar render bisa mewarnainya; kurung tidak tampil dan tidak dibaca TTS

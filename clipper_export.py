@@ -23,6 +23,7 @@ from visual_style import find_hook_name_span, hook_name_from_title, hook_tts_tex
 from speaker_tracking import detect_split_person_rois, split_rois_are_distinct
 from config.editor_defaults import HOOK_PAUSE_SECONDS, HOOK_SLIDE_SECONDS
 
+HOOK_TTS_TEMPO = 1.12
 
 from utils.logger import debug_log
 
@@ -118,17 +119,17 @@ class ExportMixin(ClipperBase):
         voice = str(getattr(self, "tts_voice", "") or "Fenrir")
         base_url = str(getattr(self, "tts_base_url", "") or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
         spoken_text = self._tts_text(hook_text)
-        # style_v3: shorter, punchier viral delivery; invalidate old cache.
+        # style_v4: stronger direction plus deterministic post-processing below.
         style_prompt = (
             "Ucapkan HANYA teks berikut dalam bahasa Indonesia. "
-            "Gaya: kreator pria Indonesia yang spontan dan seru, pitch rendah-sedang, "
-            "tempo cepat dengan punch kuat di kata penting, energi tinggi sejak kata pertama. "
-            "Gunakan naik-turun intonasi yang hidup, jeda sangat singkat, rasa penasaran dan sedikit nakal. "
+            "Gaya: kreator pria Indonesia yang spontan, viral, dan langsung menghentak sejak suku kata pertama. "
+            "Pitch rendah-sedang, tempo sangat cepat, tanpa jeda antarkata, punch tajam pada nama dan kata penting. "
+            "Gunakan perubahan intonasi yang berani, rasa kaget dan penasaran, volume suara penuh dan dekat mikrofon. "
             "Bukan pembaca berita, bukan iklan formal, bukan robot, jangan datar, "
             "tanpa membacakan instruksi ini.\n\n"
             f"{spoken_text}"
         )
-        digest = hashlib.sha256(f"{model}|{voice}|style_v3|{spoken_text}".encode("utf-8")).hexdigest()[:20]
+        digest = hashlib.sha256(f"{model}|{voice}|style_v4|{spoken_text}".encode("utf-8")).hexdigest()[:20]
         # Shared tenant cache: survives across runs; still keyed by model/voice/style/text.
         output_root = Path(getattr(self, "output_dir", clip_dir))
         cache_dir = output_root.parent / "cache" / "hook-tts"
@@ -162,7 +163,7 @@ class ExportMixin(ClipperBase):
                 handle.setframerate(24000)
                 handle.writeframes(pcm)
             os.replace(temporary, output)
-        return output, self._probe_media_duration(str(output))
+        return output, self._probe_media_duration(str(output)) / HOOK_TTS_TEMPO
 
     def _create_hook_overlay(self, hook_text: str, width: int, height: int, output_path: Path, known_names=None):
         from PIL import Image, ImageDraw, ImageFont
@@ -464,7 +465,7 @@ class ExportMixin(ClipperBase):
             current = "vscaled"
         filters.append(f"[{current}]format=yuv420p[vout]")
         if tts_index is not None and intro_duration > 0:
-            filters.append(f"[{tts_index}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,apad=pad_dur={HOOK_PAUSE_SECONDS + HOOK_SLIDE_SECONDS:.3f},atrim=duration={intro_duration:.3f},asetpts=PTS-STARTPTS[atts]")
+            filters.append(f"[{tts_index}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,atempo={HOOK_TTS_TEMPO:.2f},acompressor=threshold=-18dB:ratio=3:attack=5:release=80:makeup=3dB,volume=5dB,alimiter=limit=0.95,apad=pad_dur={HOOK_PAUSE_SECONDS + HOOK_SLIDE_SECONDS:.3f},atrim=duration={intro_duration:.3f},asetpts=PTS-STARTPTS[atts]")
             if audio_source:
                 filters.append(f"[{audio_index}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[aoriginal]")
             else:
