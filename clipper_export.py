@@ -284,24 +284,24 @@ class ExportMixin(ClipperBase):
         overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
 
+        body_metrics = getattr(body_font, "getmetrics", None)
+        name_metrics = getattr(name_font, "getmetrics", None)
+        line_ascent = max(body_metrics()[0], name_metrics()[0]) if body_metrics and name_metrics else max(body_px, name_px)
         for line_index, line in enumerate(lines):
-            # measure full line width with mixed fonts
+            # Align mixed font sizes on one baseline, not one glyph top.
             line_w = 0.0
             for i, (word, is_name) in enumerate(line):
                 line_w += measure(word, is_name)
                 if i:
                     line_w += space_w
             x = center_x - line_w / 2
-            y = block_top + line_index * line_height
+            baseline_y = block_top + line_index * line_height + line_ascent
             for i, (word, is_name) in enumerate(line):
                 font = name_font if is_name else body_font
                 fill = name_color if is_name else body_color
-                bbox = draw.textbbox((0, 0), word, font=font, stroke_width=stroke_width)
-                text_x = x - bbox[0]
-                text_y = y - bbox[1]
-                # keep stroke inside frame horizontally as much as possible
-                text_x = min(max(text_x, stroke_width - bbox[0]), width - (bbox[2] - bbox[0]) - stroke_width - bbox[0])
-                draw.text((text_x, text_y), word, font=font, fill=(*fill, 255), stroke_width=stroke_width, stroke_fill=(*outline_color, 255))
+                bbox = draw.textbbox((0, 0), word, font=font, stroke_width=stroke_width, anchor="ls")
+                text_x = min(max(x, stroke_width - bbox[0]), width - bbox[2] - stroke_width)
+                draw.text((text_x, baseline_y), word, font=font, fill=(*fill, 255), stroke_width=stroke_width, stroke_fill=(*outline_color, 255), anchor="ls")
                 x += measure(word, is_name) + space_w
         overlay.save(output_path, "PNG")
 

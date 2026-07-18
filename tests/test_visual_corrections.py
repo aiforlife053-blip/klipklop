@@ -110,6 +110,37 @@ def test_hook_overlay_keeps_all_eight_long_words(tmp_path, monkeypatch):
     assert drawn == words.split()
 
 
+def test_hook_mixed_font_words_share_baseline(tmp_path, monkeypatch):
+    from PIL import ImageDraw
+
+    baselines = []
+    real_draw = ImageDraw.Draw
+
+    class RecordingDraw:
+        def __init__(self, image):
+            self.inner = real_draw(image)
+
+        def textbbox(self, *args, **kwargs):
+            return self.inner.textbbox(*args, **kwargs)
+
+        def text(self, xy, text, *args, **kwargs):
+            baselines.append((text, xy[1], kwargs.get("anchor")))
+            return self.inner.text(xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw, "Draw", RecordingDraw)
+    renderer = object.__new__(LocalClipRenderer)
+    renderer.hook_style_settings = {"font_size": 0.075, "max_lines": 2}
+    renderer._create_hook_overlay(
+        "[ASILA MAISA] DITUDUH JADI SELINGKUHAN RIZKY BILLAR",
+        1080,
+        1920,
+        tmp_path / "baseline.png",
+    )
+    first_line = baselines[:4]
+    assert {y for _, y, _ in first_line} == {first_line[0][1]}
+    assert {anchor for _, _, anchor in first_line} == {"ls"}
+
+
 def test_hook_overlay_highlights_inline_name_yellow(tmp_path):
     renderer = object.__new__(LocalClipRenderer)
     renderer.hook_style_settings = {
