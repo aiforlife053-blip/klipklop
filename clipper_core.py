@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -215,15 +216,17 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         self.parallel_workers = max(1, self.parallel_workers)
 
     def _video_cache_dir(self, url: str) -> Path:
+        """Persistent per-video cache for subtitle/metadata only (not unique-per-run)."""
         parsed = urlparse(url)
         video_id = parse_qs(parsed.query).get("v", [""])[0] if parsed.query else ""
-        key = video_id or hashlib.sha1(url.encode("utf-8")).hexdigest()[:16]
-        
-        # User requested to disable caching. We now store "cached" files
-        # in the temp_dir so they are automatically wiped at the end of each run.
-        import uuid
-        unique_key = f"{key}_{uuid.uuid4().hex[:8]}"
-        path = self.temp_dir / unique_key
+        if not video_id:
+            path_part = (parsed.path or "").strip("/")
+            if path_part.startswith(("shorts/", "embed/", "live/")):
+                video_id = path_part.split("/", 1)[1].split("/")[0].split("?")[0]
+            elif path_part:
+                video_id = path_part.split("/")[0].split("?")[0]
+        key = re.sub(r"[^A-Za-z0-9_-]", "", str(video_id or "")) or hashlib.sha1(url.encode("utf-8")).hexdigest()[:16]
+        path = self.cache_dir / key
         path.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -289,14 +292,8 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
                     except Exception:
                         pass
             self.set_progress("Finding highlights...", 0.3)
-            highlights_cache = cache_dir / f"highlights.{self._cache_key(str(num_clips) + getattr(self, 'system_prompt', '') + str(transcript))}.json"
-            if use_sections and highlights_cache.exists():
-                highlights = json.loads(highlights_cache.read_text(encoding="utf-8"))
-                self.log("  ✓ Using cached highlights")
-            else:
-                highlights = self.find_highlights(transcript, video_info, num_clips)
-                if use_sections:
-                    highlights_cache.write_text(json.dumps(highlights, ensure_ascii=False, indent=2), encoding="utf-8")
+            # Always recompute highlights so regenerate stays fresh; only subtitle/info are cached.
+            highlights = self.find_highlights(transcript, video_info, num_clips)
             if self.is_cancelled():
                 return
             if not highlights:

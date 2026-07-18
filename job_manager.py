@@ -41,6 +41,7 @@ GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 GEMINI_MODEL = "gemini-2.5-flash"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 GROQ_MODEL = "whisper-large-v3-turbo"
+SUPPORTED_VIDEO_QUALITIES = frozenset({"480", "720", "1080"})
 _GLOBAL_QUEUE = queue.Queue()
 _GLOBAL_QUEUE_LOCK = threading.Lock()
 _GLOBAL_PENDING = []
@@ -167,7 +168,14 @@ class WebJobManager:
         with self._lock:
             if self.thread and self.thread.is_alive():
                 return {"status": "busy", "message": "Processing is already running"}
-            
+
+        settings_payload = payload.get("settings")
+        if not isinstance(settings_payload, dict):
+            settings_payload = {}
+        requested_quality = str(payload.get("video_quality") or settings_payload.get("video_quality") or "")
+        if requested_quality and requested_quality not in SUPPORTED_VIDEO_QUALITIES:
+            return {"status": "error", "message": "Kualitas video harus 480, 720, atau 1080"}
+
         if "settings" in payload and isinstance(payload["settings"], dict):
             self.save_settings(self._settings_from_start_payload(payload))
         elif "video_quality" in payload:
@@ -456,7 +464,7 @@ class WebJobManager:
         clear_highlight_api_key = bool(payload.get("clear_highlight_api_key", False))
         clear_caption_api_key = bool(payload.get("clear_caption_api_key", False))
         clear_hook_api_key = bool(payload.get("clear_hook_api_key", False))
-        model = str(payload.get("model", provider_payload.get("model", GEMINI_MODEL))).strip() or GEMINI_MODEL
+        model = str(payload.get("model", provider_payload.get("model", cfg_mgr.config.get("model", GEMINI_MODEL)))).strip() or GEMINI_MODEL
         caption_base_url = str(payload.get("caption_base_url", cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("base_url", GROQ_BASE_URL))).strip() or GROQ_BASE_URL
         caption_api_key = str(payload.get("caption_api_key", "")).strip()
         caption_model = str(payload.get("caption_model", cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("model", GROQ_MODEL))).strip() or GROQ_MODEL
@@ -470,7 +478,7 @@ class WebJobManager:
         subtitle_position = str(payload.get("subtitle_position", cfg_mgr.config.get("subtitle_position", "auto")) or "auto")
         if subtitle_position not in {"auto", "top", "middle", "bottom"}:
             subtitle_position = "auto"
-        if video_quality not in {"480", "720", "1080", "1440", "2160"}:
+        if video_quality not in SUPPORTED_VIDEO_QUALITIES:
             video_quality = "720"
         subtitle_style = cfg_mgr.config.get("subtitle_style", {"font": "Plus Jakarta Sans", "size": 58, "bottom_margin": 360})
         if isinstance(payload.get("subtitle_style"), dict):
@@ -957,7 +965,16 @@ class WebJobManager:
             mode = "normal"
         locked_input = {"video_layout": {"mode": mode, **selected_layout}}
         settings = v3_locked_render_settings(locked_input)
-        settings["video_quality"] = str(draft.get("video_quality") or "1080")
+        settings["video_quality"] = str(
+            selected.get("video_quality")
+            or draft.get("video_quality")
+            or metadata.get("video_quality")
+            or stored.get("video_quality")
+            or self._config().config.get("video_quality")
+            or "720"
+        )
+        if settings["video_quality"] not in SUPPORTED_VIDEO_QUALITIES:
+            raise LayoutModeError("Kualitas video harus 480, 720, atau 1080")
         settings["screen_size"] = "9:16"
         settings["landscape_blur"] = False
         settings["watermark"]["enabled"] = False
@@ -997,14 +1014,28 @@ class WebJobManager:
             output = meta_path.parent / "master.auto.tmp.mp4"
             try:
                 settings = self._render_settings({}, metadata)
-                metadata.update(status="rendering", render_error="", render_stage="Merender final", render_progress=0.0)
+                metadata.update(
+                    status="rendering", render_error="", render_stage="Merender final",
+                    render_progress=0.0, render_started_at=datetime.now(timezone.utc).isoformat(),
+                )
                 self._write_json_atomic(meta_path, metadata)
+
+                def persist_progress(stage, progress=None):
+                    with self._clip_lock(clip_id):
+                        current = self._read_json(meta_path)
+                        if current.get("status") != "rendering":
+                            return
+                        current["render_stage"] = self._public_text(stage)[:120]
+                        if progress is not None:
+                            current["render_progress"] = max(0.0, min(1.0, self._as_float(progress, 0.0)))
+                        self._write_json_atomic(meta_path, current)
+
                 renderer = LocalClipRenderer(
                     ffmpeg_path=get_ffmpeg_path(), output_dir=str(meta_path.parent.parent),
                     watermark_settings=settings["watermark"], credit_watermark_settings=settings["credit_watermark"],
                     hook_style_settings={**settings["hook_style"], "blur_background": settings["blur_background"]},
-                    subtitle_style=settings["subtitle"], video_quality="1080", landscape_blur=False,
-                    screen_size="9:16", progress_callback=lambda _stage, _value=None: None,
+                    subtitle_style=settings["subtitle"], video_quality=str(settings.get("video_quality") or "720"), landscape_blur=False,
+                    screen_size="9:16", progress_callback=persist_progress,
                     cancel_check=lambda: self._cancel_requested, **self._hook_tts_config(),
                 )
                 renderer.render_existing_clip(meta_path.parent, metadata, settings, output, preview=False)
@@ -1234,10 +1265,13 @@ class WebJobManager:
                     return {"status": "error", "message": "Subtitle bertimestamp tidak tersedia untuk klip ini"}
             if "hook_text" in payload:
                 raw = str(payload.get("hook_text") or "").strip()
-                if len(raw.split()) > 8:
-                    return {"status": "error", "message": "Hook maksimal 8 kata"}
-                from visual_style import normalize_hook_text
-                metadata["hook_text"] = normalize_hook_text(raw)
+                if not raw:
+                    return {"status": "error", "message": "Hook text kosong"}
+                from visual_style import validate_hook_text
+                try:
+                    metadata["hook_text"] = validate_hook_text(raw)
+                except ValueError as exc:
+                    return {"status": "error", "message": str(exc)}
             acquired = _GLOBAL_RENDER_LOCK.acquire(blocking=False)
             if not acquired:
                 return {"status": "error", "message": "Render lain sedang berjalan"}
@@ -1322,6 +1356,21 @@ class WebJobManager:
                 try:
                     os.replace(output, final)
                     current.update(status="ready_to_schedule", render_revision=base_revision + 1, render_error="", render_progress=1.0, render_stage="Selesai", render_elapsed_seconds=round(time.monotonic() - started, 3))
+                    if isinstance(metadata.get("split_person_rois"), dict):
+                        current["split_person_rois"] = metadata["split_person_rois"]
+                        stored_settings = current.get("render_settings")
+                        if not isinstance(stored_settings, dict):
+                            stored_settings = {}
+                        stored_layout = stored_settings.get("video_layout")
+                        if not isinstance(stored_layout, dict):
+                            stored_layout = {}
+                        current["render_settings"] = {
+                            **stored_settings,
+                            "video_layout": {
+                                **stored_layout,
+                                "person_rois": metadata["split_person_rois"],
+                            },
+                        }
                     pending = current.pop("pending_youtube_upload", None)
                     if isinstance(pending, dict):
                         pending.update(status="scheduled", render_revision=base_revision + 1)
@@ -1459,10 +1508,13 @@ class WebJobManager:
             return {"status": "error", "message": "Payload hook tidak valid"}
         clip_id = str(payload.get("clip_id") or "")
         raw_hook = str(payload.get("hook_text") or "").strip()
-        if len(raw_hook.split()) > 8:
-            return {"status": "error", "message": "Hook maksimal 8 kata"}
-        from visual_style import normalize_hook_text
-        hook = normalize_hook_text(raw_hook)
+        if not raw_hook:
+            return {"status": "error", "message": "Hook text kosong"}
+        from visual_style import validate_hook_text
+        try:
+            hook = validate_hook_text(raw_hook)
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc)}
         lock, meta_path, metadata = self._locked_clip_meta(clip_id)
         try:
             if not meta_path:
@@ -1600,6 +1652,34 @@ class WebJobManager:
             if self._cancel_requested:
                 raise InterruptedError("Stopped")
             layout_mode = getattr(self, "_v3_mode", None) or str(cfg.get("video_layout", {}).get("mode", "normal"))
+            if layout_mode == "normal":
+                layout_mode = "vertical_full"
+            if layout_mode not in V3_MODES and layout_mode != "gaming":
+                layout_mode = "vertical_full"
+            for meta_path in sorted(run_dir.rglob("data.json")):
+                meta = self._read_json(meta_path)
+                if not meta.get("clip_id"):
+                    continue
+                meta["v3_mode"] = layout_mode
+                stored = meta.get("render_settings")
+                if not isinstance(stored, dict):
+                    stored = {}
+                layout = stored.get("video_layout")
+                if not isinstance(layout, dict):
+                    layout = {}
+                mode_for_render = "normal" if layout_mode == "vertical_full" else layout_mode
+                quality = str(cfg.get("video_quality") or "720")
+                meta["video_quality"] = quality
+                draft = meta.get("draft_settings")
+                if not isinstance(draft, dict):
+                    draft = {}
+                meta["draft_settings"] = {**draft, "video_quality": quality, "screen_size": "9:16"}
+                meta["render_settings"] = {
+                    **stored,
+                    "video_quality": quality,
+                    "video_layout": {**layout, "mode": mode_for_render},
+                }
+                self._write_json_atomic(meta_path, meta)
             if layout_mode == "gaming":
                 for meta_path in sorted(run_dir.rglob("data.json")):
                     meta = self._read_json(meta_path)
@@ -1615,7 +1695,7 @@ class WebJobManager:
             if not self._cancel_requested:
                 self._add_log("Auto-rendering final clips…")
                 self._auto_render_run(run_dir)
-            self._write_run_meta(run_dir, url, {**self._summarize_run(run_dir), "video_quality": quality, "landscape_blur": False, "screen_size": "9:16", "add_hook": True, "add_captions": True, "subtitle_language": subtitle_language, "status": "staged", "file_exists": True, "v3_mode": layout_mode if layout_mode in V3_MODES or layout_mode == "gaming" else None})
+            self._write_run_meta(run_dir, url, {**self._summarize_run(run_dir), "video_quality": quality, "landscape_blur": False, "screen_size": "9:16", "add_hook": True, "add_captions": True, "subtitle_language": subtitle_language, "status": "staged", "file_exists": True, "v3_mode": layout_mode})
             self._enforce_retention()
             self._status = "complete"
             self._message = "Complete"

@@ -9,9 +9,105 @@ from layout_modes import (
     validate_facecam_overlap,
 )
 from gaming_layout import GamingLayoutError
+from speaker_tracking import choose_scene_crop_x, choose_scene_layout, choose_speaker, hard_cut_positions, scene_changed, smooth_positions
+import numpy as np
+
+
+def test_choose_scene_crop_locks_dominant_face():
+    # Left face larger than right → crop centered on left face.
+    faces = [(80, 40, 120, 120), (520, 60, 60, 60)]
+    crop_x = choose_scene_crop_x(faces, source_width=800, crop_width=270)
+    # Face center at 80+60=140 → crop starts near 140-135=5
+    assert 0 <= crop_x <= 40
+
+
+def test_choose_scene_crop_uses_midpoint_for_equal_two_shot():
+    faces = [(100, 40, 90, 90), (520, 40, 90, 90)]
+    crop_x = choose_scene_crop_x(faces, source_width=800, crop_width=270)
+    # Midpoint of 145 and 565 is 355; crop_x ≈ 355-135 = 220
+    assert 190 <= crop_x <= 250
+
+
+def test_choose_scene_layout_contains_wide_equal_two_shot():
+    faces = [(80, 100, 100, 100), (620, 100, 100, 100)]
+    _crop_x, layout = choose_scene_layout(faces, source_width=800, crop_width=270)
+    assert layout == "contain_blur"
+
+
+def test_split_middle_clamps_near_edge_roi_inside_source():
+    filters, _ = build_split_middle_filtergraph(
+        1920, 1080, out_w=540, out_h=960,
+        rois={
+            "top": {"x": 0.99, "y": 0.99, "width": 0.5, "height": 0.5},
+            "bottom": {"x": 0.98, "y": 0.98, "width": 0.5, "height": 0.5},
+        },
+    )
+    for item in filters:
+        if "crop=" not in item:
+            continue
+        crop = item.split("crop=", 1)[1].split(",", 1)[0]
+        width, height, x, y = map(int, crop.split(":"))
+        assert x + width <= 1920
+        assert y + height <= 1080
+
+
+def test_choose_scene_crop_holds_previous_when_no_faces():
+    assert choose_scene_crop_x([], source_width=800, crop_width=270, previous_crop_x=123) == 123
+    assert choose_scene_crop_x([], source_width=800, crop_width=270) == (800 - 270) // 2
+
+
+def test_scene_changed_detects_big_cut_not_small_motion():
+    a = np.full((40, 40), 40, dtype=np.uint8)
+    b = a.copy(); b[10:15, 10:15] = 50
+    c = np.full((40, 40), 200, dtype=np.uint8)
+    assert scene_changed(a, b) is False
+    assert scene_changed(a, c) is True
+
+
+def test_hard_cut_locks_same_speaker_head_movement():
+    out = hard_cut_positions([100, 110, 90, 120], [0, 0, 0, 0], fps=10, debounce_seconds=1.2, hold_seconds=0)
+    assert out == [100, 100, 100, 100]
+
+
+def test_hard_cut_ignores_short_other_speaker_burst():
+    ids = [0] * 20 + [1] * 8 + [0] * 10
+    targets = [100] * 20 + [400] * 8 + [100] * 10
+    out = hard_cut_positions(targets, ids, fps=10, debounce_seconds=1.2, hold_seconds=0)
+    assert set(out) == {100}
+
+
+def test_hard_cut_switches_once_after_stable_debounce_without_pan():
+    ids = [0] * 20 + [1] * 15
+    targets = [100] * 20 + [400] * 15
+    out = hard_cut_positions(targets, ids, fps=10, debounce_seconds=1.2, hold_seconds=0)
+    assert out[:31] == [100] * 31
+    assert out[31:] == [400] * 4
+    assert set(out) == {100, 400}  # no intermediate pan positions
+
+
+def test_choose_speaker_holds_when_both_mouths_active_laughing():
+    candidates = [
+        {"id": 0, "score": 0.70, "mouth": 0.30, "crop_x": 100},
+        {"id": 1, "score": 0.85, "mouth": 0.35, "crop_x": 400},
+    ]
+    chosen, _confidence, _hold = choose_speaker(candidates, current_id=0, hold_frames_left=0)
+    assert chosen == 0
+
+
+def test_smooth_positions_kills_small_jitter_and_caps_pan_speed():
+    positions = [100, 105, 96, 104, 300, 300, 300]
+    smoothed = smooth_positions(positions, fps=25, smooth_seconds=1.0, dead_zone_px=12, max_pan_px=6)
+    assert smoothed[:4] == [100, 100, 100, 100]
+    assert max(abs(b - a) for a, b in zip(smoothed, smoothed[1:])) <= 6
+    assert smoothed[-1] > 100
+
+
+def test_smooth_positions_preserves_static_crop():
+    assert smooth_positions([42] * 20, fps=25) == [42] * 20
 
 
 # --- Mode validation ---
+
 
 class TestValidateMode:
     def test_all_three_modes_accepted(self):
@@ -71,10 +167,20 @@ class TestValidateOrientation:
 # --- Geometry ---
 
 class TestOutputGeometry:
-    def test_always_1080x1920(self):
-        w, h = output_geometry()
-        assert (w, h) == (V3_OUTPUT_WIDTH, V3_OUTPUT_HEIGHT)
-        assert (w, h) == (1080, 1920)
+    @pytest.mark.parametrize(("quality", "expected"), [
+        ("480", (540, 960)),
+        ("720", (720, 1280)),
+        ("1080", (1080, 1920)),
+    ])
+    def test_quality_controls_final_portrait_geometry(self, quality, expected):
+        assert output_geometry(quality) == expected
+
+    def test_default_remains_1080_for_legacy_callers(self):
+        assert output_geometry() == (V3_OUTPUT_WIDTH, V3_OUTPUT_HEIGHT)
+
+    def test_invalid_quality_rejected(self):
+        with pytest.raises(LayoutModeError, match="Quality"):
+            output_geometry("2160")
 
 
 # --- State machine transitions ---

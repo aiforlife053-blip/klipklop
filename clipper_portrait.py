@@ -74,9 +74,39 @@ class PortraitMixin(ClipperBase):
         return final if final else stabilized
 
     def convert_to_portrait_with_progress(self, input_path: str, output_path: str, progress_callback):
-        """V3: speaker-tracking OpenCV only. Blur/black-contain routes removed."""
-        self.log("  Using OpenCV speaker tracking")
+        """V3 Vertical Full: active-speaker crop with stable hard cuts."""
+        self.log("  Using active-speaker face crop")
         return self.convert_to_portrait_opencv_with_progress(input_path, output_path, progress_callback)
+
+    def convert_to_portrait_static_with_progress(self, input_path: str, output_path: str, progress_callback):
+        """Convert landscape to fixed 9:16 center crop without per-frame tracking."""
+        cap = cv2.VideoCapture(input_path)
+        try:
+            if not cap.isOpened():
+                raise Exception(f"Failed to open video: {input_path}")
+            orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+            orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+            if orig_w <= 0 or orig_h <= 0:
+                raise Exception("Invalid video dimensions")
+        finally:
+            cap.release()
+
+        crop_w = min(orig_w, int(orig_h * 9 / 16))
+        crop_w = max(2, crop_w - crop_w % 2)
+        crop_x = max(0, (orig_w - crop_w) // 2)
+        out_w, out_h = self._get_target_portrait_dims(orig_w, orig_h)
+        duration = self._video_duration(input_path)
+        command = [
+            self.ffmpeg_path,
+            "-y",
+            "-i", input_path,
+            "-vf", f"crop={crop_w}:{orig_h}:{crop_x}:0,scale={out_w}:{out_h}:flags=lanczos,setsar=1",
+            *self.get_video_encoder_args(),
+            "-an",
+            output_path,
+        ]
+        self.run_ffmpeg_with_progress(command, duration, progress_callback)
+        return output_path
 
     def _is_landscape(self, input_path: str) -> bool:
         cap = cv2.VideoCapture(input_path)
@@ -95,21 +125,24 @@ class PortraitMixin(ClipperBase):
             cap.release()
 
     def convert_to_portrait_opencv_with_progress(self, input_path: str, output_path: str, progress_callback):
-        """Convert landscape to 9:16 portrait with active-speaker tracking (OpenCV)."""
+        """Convert landscape to 9:16 portrait with active-speaker crop (OpenCV)."""
 
         debug_log("Starting portrait conversion...")
         debug_log(f"Input: {input_path}")
         debug_log(f"Output: {output_path}")
         sys.stdout.flush()
 
-        from speaker_tracking import track_crop_positions
+        from speaker_tracking import tracking_strategy
 
         try:
-            tracking = track_crop_positions(input_path)
+            tracker, supports_layouts = tracking_strategy()
+            tracking = tracker(input_path)
         except Exception as exc:
-            raise Exception(f"Speaker tracking failed: {exc}") from exc
+            raise Exception(f"Active-speaker crop failed: {exc}") from exc
 
         crop_positions = tracking["crop_positions"]
+        layouts = tracking.get("layouts") if supports_layouts else None
+        layouts = layouts or ["crop"] * len(crop_positions)
         crop_w = int(tracking["crop_width"])
         orig_w = int(tracking["source_width"])
         orig_h = int(tracking["source_height"])
@@ -161,10 +194,23 @@ class PortraitMixin(ClipperBase):
                 break
 
             last_frame_time = current_time
-            crop_x = crop_positions[frame_idx] if frame_idx < len(crop_positions) else crop_positions[-1]
-            crop_x = max(0, min(int(crop_x), max(0, orig_w - crop_w)))
-            cropped = frame[0:crop_h, crop_x:crop_x + crop_w]
-            resized = cv2.resize(cropped, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
+            layout = layouts[frame_idx] if frame_idx < len(layouts) else layouts[-1]
+            if layout == "contain_blur":
+                bg_scale = max(out_w / orig_w, out_h / orig_h)
+                bg_w, bg_h = int(round(orig_w * bg_scale)), int(round(orig_h * bg_scale))
+                background = cv2.resize(frame, (bg_w, bg_h), interpolation=cv2.INTER_LINEAR)
+                bg_x, bg_y = (bg_w - out_w) // 2, (bg_h - out_h) // 2
+                resized = cv2.GaussianBlur(background[bg_y:bg_y + out_h, bg_x:bg_x + out_w], (0, 0), 24)
+                fg_scale = min(out_w / orig_w, out_h / orig_h)
+                fg_w, fg_h = int(round(orig_w * fg_scale)), int(round(orig_h * fg_scale))
+                foreground = cv2.resize(frame, (fg_w, fg_h), interpolation=cv2.INTER_LANCZOS4)
+                fg_x, fg_y = (out_w - fg_w) // 2, (out_h - fg_h) // 2
+                resized[fg_y:fg_y + fg_h, fg_x:fg_x + fg_w] = foreground
+            else:
+                crop_x = crop_positions[frame_idx] if frame_idx < len(crop_positions) else crop_positions[-1]
+                crop_x = max(0, min(int(crop_x), max(0, orig_w - crop_w)))
+                cropped = frame[0:crop_h, crop_x:crop_x + crop_w]
+                resized = cv2.resize(cropped, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
             success = out.write(resized)
             if not success:
                 print(f"[WARNING] Failed to write frame {frame_idx}")

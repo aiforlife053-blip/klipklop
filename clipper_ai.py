@@ -47,14 +47,15 @@ Jika kesulitan menemukan segmen bagus, WAJIB tetap menghasilkan {num_clips} deng
 PRINSIP PEMILIHAN CLIP (WAJIB DIPRIORITASKAN)
 =============================================
 
-Prioritaskan segmen dengan karakteristik berikut:
+PRIORITAS UTAMA: cari MOMEN LUCU, punchline, reaksi spontan, atau kejadian komedi yang jelas terlebih dahulu.
+URUTAN ARRAY WAJIB mengikuti prioritas ini: semua momen lucu yang layak harus berada sebelum konflik, pengakuan, opini, atau edukasi. Object pertama WAJIB momen lucu terbaik jika transcript memiliki satu saja momen lucu yang layak.
+Jika tidak ada momen lucu yang layak dan kontekstual, baru gunakan fallback berikut:
 
 1. Ada KONFLIK, ketegangan, kontroversi.
 2. Ada PENGAKUAN personal / vulnerability.
 3. Ada STATEMENT tajam / opini berani.
-4. Ada punchline atau momen lucu kuat.
-5. Ada cerita lengkap (setup → buildup → payoff).
-6. Ada kalimat yang bisa berdiri sendiri sebagai hook viral.
+4. Ada cerita lengkap (setup → buildup → payoff).
+5. Ada kalimat yang bisa berdiri sendiri sebagai hook viral.
 
 Hindari:
 
@@ -125,7 +126,9 @@ Setiap object HARUS memiliki:
 3. "title" (string) → Maks 60 karakter, padat & click-worthy
 4. "description" (string) → Maks 150 karakter, jelaskan kenapa viral
 5. "virality_score" (integer) → 1–10 (HARUS ANGKA, BUKAN STRING)
-6. "hook_text" (string) → Bahasa Indonesia, maks 8 kata, maks 2 baris
+6. "hook_text" (string) → Bahasa Indonesia, satu kalimat hook lengkap yang akan diucapkan TTS; maksimal 8 kata dan 2 baris visual
+
+Jika segment termasuk momen lucu/komedi, awali description dengan marker internal "[LUCU] ". Marker wajib untuk setiap momen lucu dan dilarang untuk non-komedi. Marker akan dibuang sebelum ditampilkan.
 
 DILARANG:
 
@@ -145,12 +148,13 @@ VIRALITY SCORE (WAJIB OBJEKTIF)
 * Confession pribadi
 * Statement berani
 * Punchline keras
+* Momen lucu yang jelas, reaksi spontan, atau payoff komedi
 
 5–7:
 
 * Insight menarik
 * Cerita cukup engaging
-* Momen lucu ringan
+* Insight menarik tanpa emosi kuat
 
 1–4:
 
@@ -168,15 +172,21 @@ HOOK TEXT (HARUS TAJAM & MENJUAL)
 WAJIB:
 
 * Bahasa Indonesia
-* Maksimal 8 kata
-* Maksimal 2 baris
+* Maksimal 3 baris visual
 * Tanpa emoji
-* Boleh tanpa nama orang jika memakan kuota kata
-* Harus berupa kutipan, statement tajam, atau punchline
+* WAJIB satu kalimat utuh, natural, dan enak dibaca
+* Nama orang harus menyatu di dalam kalimat, BUKAN format "Nama: kalimat"
+* Tandai hanya nama orang dengan kurung siku agar render bisa mewarnainya; kurung tidak tampil dan tidak dibaca TTS
+* Harus menarik, membuat penasaran, dan menahan jawaban/payoff utama
+* Utamakan curiosity gap yang jujur; jangan clickbait palsu
+* Bisa berupa statement tajam atau punchline
 
 Contoh benar:
-"Gua hampir bangkrut gara-gara ini"
-"Banyak podcaster cuma pura-pura sukses"
+"TERNYATA [RADITYA DIKA] HAMPIR BANGKRUT GARA-GARA INI"
+"BANYAK PODCASTER DISEBUT [TRETAN MUSLIM] CUMA PURA-PURA SUKSES"
+
+Contoh salah:
+"RADITYA DIKA: GUA HAMPIR BANGKRUT"
 
 Hook harus bisa berdiri sendiri sebagai headline viral.
 
@@ -190,7 +200,7 @@ Periksa:
 2. Semua durasi 40–70 detik (target 50–70) ?
 3. Semua punya tepat 6 field ?
 4. virality_score berupa integer 1–10 ?
-5. hook_text ≤ 8 kata ?
+5. hook_text satu kalimat utuh maksimal 8 kata, dan nama orang ditandai [NAMA] di dalam kalimat ?
 6. Tidak ada field lain ?
 7. Tidak ada teks di luar JSON ?
 
@@ -228,6 +238,7 @@ Transcript:
         if len(transcript or "") <= max_chars:
             return transcript
         keywords = (
+            "lucu", "ngakak", "ketawa", "tertawa", "wkwk", "haha", "kocak", "lawak", "joke", "becanda", "bercanda",
             "bangkrut", "takut", "marah", "sedih", "stres", "stress", "trauma", "gagal", "salah", "masalah",
             "konflik", "ribut", "berantem", "putus", "pacar", "cinta", "selingkuh", "uang", "bayaran", "mahal",
             "murah", "viral", "kontroversi", "jujur", "pengakuan", "rahasia", "ternyata", "kenapa", "gimana",
@@ -289,7 +300,7 @@ Transcript:
         import random
         seed = random.randint(1000, 9999)
         variety_hint = f"\n\n[SISTEM: Generate dengan variasi baru (Seed: {seed}). Prioritaskan segmen/timestamp yang BERBEDA dari yang biasanya paling jelas. Cari hidden gems atau momen unik yang sebelumnya mungkin terlewat.]"
-        duration_hint = f"\n\n[SISTEM: Timestamp WAJIB target {TARGET_CLIP_MIN}-{TARGET_CLIP_MAX} detik (minimum {HARD_CLIP_MIN}, maksimum {HARD_CLIP_MAX}). Jangan pilih satu kalimat pendek. Jika momen inti pendek, perluas konteks sebelum/sesudah. hook_text Bahasa Indonesia max 8 kata.]"
+        duration_hint = f"\n\n[SISTEM: Timestamp WAJIB target {TARGET_CLIP_MIN}-{TARGET_CLIP_MAX} detik (minimum {HARD_CLIP_MIN}, maksimum {HARD_CLIP_MAX}). Jangan pilih satu kalimat pendek. Jika momen inti pendek, perluas konteks sebelum/sesudah. hook_text wajib satu kalimat Indonesia natural maksimal 8 kata dan 2 baris visual; nama orang menyatu di dalam kalimat dan hanya nama ditandai [NAMA], jangan format 'Nama: kalimat'.]"
         prompt += variety_hint + duration_hint
 
         # Use OpenAI-compatible API for all providers
@@ -419,9 +430,7 @@ Transcript:
             else:
                 self.log(f"  ✗ {h['title']} ({duration:.0f}s) - Too short, skipped")
             
-            if len(valid) >= num_clips:
-                break
-        
+
         if len(valid) < num_clips:
             self.log(f"\n⚠️ WARNING: Only found {len(valid)} valid clips out of {num_clips} requested; filling from transcript.")
             used = [(self.parse_timestamp(h["start_time"]), self.parse_timestamp(h["end_time"])) for h in valid]
@@ -430,7 +439,18 @@ Transcript:
                 if len(valid) >= num_clips:
                     break
         
-        valid.sort(key=lambda h: float(h.get("virality_score", 0) or 0), reverse=True)
+        def is_funny(highlight):
+            return str(highlight.get("description", "")).lstrip().upper().startswith("[LUCU]")
+
+        valid.sort(
+            key=lambda h: (
+                is_funny(h),
+                float(h.get("virality_score", 0) or 0),
+            ),
+            reverse=True,
+        )
+        for highlight in valid:
+            highlight["description"] = re.sub(r"^\s*\[LUCU\]\s*", "", str(highlight.get("description", "")), flags=re.IGNORECASE)
         return valid[:num_clips]
 
     def _fallback_highlights_from_transcript(self, transcript: str, count: int, used: list) -> list:

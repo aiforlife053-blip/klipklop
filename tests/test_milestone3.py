@@ -19,10 +19,13 @@ from subtitle_cues import build_subtitle_cues
 from visual_style import normalize_hook_text
 
 
-def test_hook_is_max_eight_words_and_two_lines():
-    hook = normalize_hook_text("Ini adalah hook panjang sekali yang harus dipotong dengan aman sekarang")
-    assert len(hook.replace("\n", " ").split()) == 8
-    assert len(hook.splitlines()) == 2
+def test_hook_caps_eight_words_two_lines():
+    text = "Ini adalah hook panjang sekali yang harus dipotong dengan aman sekarang"
+    hook = normalize_hook_text(text)
+    assert hook.replace("\n", " ").split() == text.upper().split()[:8]
+    assert len(hook.splitlines()) <= 2
+    assert len(hook.replace("\n", " ").split()) <= 8
+    assert hook == hook.upper()
 
 
 def test_subtitle_contract_uppercase_and_punctuation_filter():
@@ -37,8 +40,9 @@ def test_subtitle_contract_uppercase_and_punctuation_filter():
         "segments": [],
     }
     cues = build_subtitle_cues(transcript)
-    assert cues[0]["text"] == "HALO DUNIA! INI TES?"
-    assert 3 <= len(cues[0]["words"]) <= 5
+    assert cues[0]["text"] == "HALO DUNIA! INI"
+    assert cues[1]["text"] == "TES"
+    assert len(cues[0]["words"]) == 3
 
 
 def test_duration_contract_is_40_to_70_target_50_to_70():

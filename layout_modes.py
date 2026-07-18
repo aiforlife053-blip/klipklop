@@ -15,6 +15,12 @@ from gaming_layout import (
 V3_MODES = ("vertical_full", "gaming", "split_middle")
 V3_OUTPUT_WIDTH = 1080
 V3_OUTPUT_HEIGHT = 1920
+V3_OUTPUT_GEOMETRIES = {
+    "480": (540, 960),
+    "720": (720, 1280),
+    "1080": (V3_OUTPUT_WIDTH, V3_OUTPUT_HEIGHT),
+}
+
 
 # Modes that only accept landscape sources
 LANDSCAPE_ONLY_MODES = frozenset({"gaming", "split_middle"})
@@ -79,9 +85,19 @@ def validate_orientation(mode, is_landscape):
     return canonical
 
 
-def output_geometry():
-    """Return (width, height) tuple for V3 output."""
-    return (V3_OUTPUT_WIDTH, V3_OUTPUT_HEIGHT)
+def output_geometry(quality=None):
+    """Return (width, height) for final 9:16 canvas by quality.
+
+    quality None/empty keeps legacy 1080 default for old callers.
+    """
+    if quality is None or str(quality).strip() == "":
+        return (V3_OUTPUT_WIDTH, V3_OUTPUT_HEIGHT)
+    key = str(quality).strip()
+    if key not in V3_OUTPUT_GEOMETRIES:
+        raise LayoutModeError(
+            f"Quality tidak valid: '{quality}'. Pilih: {', '.join(V3_OUTPUT_GEOMETRIES)}."
+        )
+    return V3_OUTPUT_GEOMETRIES[key]
 
 
 def is_legal_transition(from_status, to_status):
@@ -128,9 +144,8 @@ def build_vertical_full_filtergraph(source_w, source_h, out_w=None, out_h=None):
     return filters, "v0"
 
 
-def build_split_middle_filtergraph(source_w, source_h, out_w=None, out_h=None):
-    """Split Middle: left half -> top panel, right half -> bottom panel.
-    Source must be landscape."""
+def build_split_middle_filtergraph(source_w, source_h, out_w=None, out_h=None, rois=None):
+    """Split Middle: person-aware ROIs -> top/bottom; blind halves only fallback."""
     out_w = out_w or V3_OUTPUT_WIDTH
     out_h = out_h or V3_OUTPUT_HEIGHT
 
@@ -139,17 +154,38 @@ def build_split_middle_filtergraph(source_w, source_h, out_w=None, out_h=None):
             "Mode split_middle hanya mendukung video landscape (horizontal)."
         )
 
-    half_w = source_w // 2
-    half_w -= half_w % 2
     panel_h = out_h // 2
     panel_h -= panel_h % 2
 
+    def crop_from_roi(value, fallback_x):
+        if isinstance(value, dict):
+            try:
+                x = max(0.0, min(0.95, float(value["x"])))
+                y = max(0.0, min(0.95, float(value["y"])))
+                w = max(0.05, min(1.0 - x, float(value["width"])))
+                h = max(0.05, min(1.0 - y, float(value["height"])))
+                px = int(x * source_w) // 2 * 2
+                py = int(y * source_h) // 2 * 2
+                pw = max(2, int(w * source_w) // 2 * 2)
+                ph = max(2, int(h * source_h) // 2 * 2)
+                return pw, ph, px, py
+            except (KeyError, TypeError, ValueError):
+                pass
+        half_w = source_w // 2
+        half_w -= half_w % 2
+        return half_w, source_h, fallback_x, 0
+
+    roi_map = rois if isinstance(rois, dict) else {}
+    top_crop = crop_from_roi(roi_map.get("top"), 0)
+    half_w = source_w // 2
+    half_w -= half_w % 2
+    bottom_crop = crop_from_roi(roi_map.get("bottom"), half_w)
+    tw, th, tx, ty = top_crop
+    bw, bh, bx, by = bottom_crop
     filters = [
-        "[0:v]setpts=PTS-STARTPTS,split=2[left_src][right_src]",
-        f"[left_src]crop={half_w}:{source_h}:0:0,"
-        f"scale={out_w}:{panel_h}:flags=lanczos,setsar=1[top]",
-        f"[right_src]crop={half_w}:{source_h}:{half_w}:0,"
-        f"scale={out_w}:{panel_h}:flags=lanczos,setsar=1[bottom]",
+        "[0:v]setpts=PTS-STARTPTS,split=2[top_src][bottom_src]",
+        f"[top_src]crop={tw}:{th}:{tx}:{ty},scale={out_w}:{panel_h}:flags=lanczos,setsar=1[top]",
+        f"[bottom_src]crop={bw}:{bh}:{bx}:{by},scale={out_w}:{panel_h}:flags=lanczos,setsar=1[bottom]",
         "[top][bottom]vstack=inputs=2,setsar=1[v0]",
     ]
     return filters, "v0"
@@ -196,7 +232,10 @@ def build_filtergraph(mode, source_w, source_h, roi=None, out_w=None, out_h=None
     if canonical == "vertical_full":
         return build_vertical_full_filtergraph(source_w, source_h, out_w, out_h)
     elif canonical == "split_middle":
-        return build_split_middle_filtergraph(source_w, source_h, out_w, out_h)
+        rois = None
+        if isinstance(roi, dict) and ("top" in roi or "bottom" in roi):
+            rois = roi
+        return build_split_middle_filtergraph(source_w, source_h, out_w, out_h, rois=rois)
     elif canonical == "gaming":
         if roi is None:
             raise GamingLayoutError("Mode gaming memerlukan ROI facecam.")

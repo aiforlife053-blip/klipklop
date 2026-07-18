@@ -13,7 +13,7 @@ HOOK_MAX_LINES = 2
 HOOK_PAUSE_SECONDS = 0.3
 HOOK_SLIDE_SECONDS = 0.3
 SUBTITLE_WORD_MIN = 3
-SUBTITLE_WORD_MAX = 5
+SUBTITLE_WORD_MAX = 3
 TARGET_CLIP_MIN = 50
 TARGET_CLIP_MAX = 70
 HARD_CLIP_MIN = 40
@@ -32,14 +32,15 @@ EDITOR_DEFAULTS = {
         "enabled": True,
         "text": "sc: @{channel}",
         "color": "#FFFFFF",
-        "size": 0.028,
-        "opacity": 0.85,
+        "size": 0.03935185185185185,
+        "opacity": 0.45,
+        "outline_thickness": 0.0,
         "position_x": 0.82,
         "position_y": 0.06,
     },
     "hook_style": {
         "enabled": True,
-        "font_size": 0.056,
+        "font_size": 0.068,
         "font_family": "Poppins",
         "font_weight": 700,
         "text_color": "#FFFFFF",
@@ -55,9 +56,9 @@ EDITOR_DEFAULTS = {
     },
     "subtitle": {
         "enabled": True,
-        "color": "#FFD400",
+        "color": "#FFFF00",
         "text_color": "#FFFFFF",
-        "size": 0.042,
+        "size": 0.068,
         "position_x": 0.5,
         "position_y": 0.78,
         "text_transform": "uppercase",
@@ -100,10 +101,26 @@ def v3_locked_render_settings(base=None):
     settings["hook_style"]["font_family"] = "Poppins"
     settings["subtitle"]["enabled"] = True
     settings["subtitle"]["text_transform"] = "uppercase"
-    settings["subtitle"]["color"] = "#FFD400"
+    settings["subtitle"]["color"] = "#FFFF00"
     settings["subtitle"]["text_color"] = "#FFFFFF"
     settings["subtitle"]["outline_color"] = "#000000"
     settings["subtitle"]["shadow"] = 0
     settings["subtitle"]["font_family"] = "Poppins"
+    settings["subtitle"]["font_weight"] = 700
+    settings["subtitle"]["size"] = EDITOR_DEFAULTS["subtitle"]["size"]
+    settings["subtitle"]["word_min"] = SUBTITLE_WORD_MIN
+    settings["subtitle"]["word_max"] = SUBTITLE_WORD_MAX
     settings["subtitle"]["position_x"] = 0.5
+    settings["credit_watermark"]["size"] = EDITOR_DEFAULTS["credit_watermark"]["size"]
+    settings["credit_watermark"]["opacity"] = 0.45
+    settings["hook_style"]["max_words"] = HOOK_MAX_WORDS
+    settings["hook_style"]["max_lines"] = HOOK_MAX_LINES
+    mode = settings["video_layout"].get("mode")
+    if mode == "vertical_full":
+        settings["hook_style"]["font_size"] = 0.075
+        settings["subtitle"]["size"] = 0.075
+    if mode in {"split_middle"}:
+        settings["subtitle"]["position_y"] = 0.5
+    else:
+        settings["subtitle"]["position_y"] = 0.78
     return settings

@@ -728,14 +728,33 @@ class InstantJobManager(mod.WebJobManager):
         self.thread = None
 
 
-def test_start_persists_top_level_video_quality(tmp_path):
+def test_start_rejects_unsupported_top_level_video_quality(tmp_path):
     manager = InstantJobManager(app_dir=tmp_path)
     result = manager.start({"url": "https://www.youtube.com/watch?v=abc", "video_quality": "2160"})
+    assert result == {"status": "error", "message": "Kualitas video harus 480, 720, atau 1080"}
+    assert manager.thread is None
+
+
+def test_render_settings_rejects_persisted_unsupported_quality(tmp_path):
+    manager = InstantJobManager(app_dir=tmp_path)
+    with pytest.raises(mod.LayoutModeError, match="480, 720, atau 1080"):
+        manager._render_settings({}, {"video_quality": "2160"})
+
+
+def test_start_video_quality_does_not_reset_saved_model(tmp_path):
+    manager = InstantJobManager(app_dir=tmp_path)
+    manager.save_settings({"model": "gemini-3.5-flash", "base_url": "https://example.test/v1", "api_key": "secret-key"})
+    assert manager._config().config["model"] == "gemini-3.5-flash"
+    assert manager._config().config["ai_providers"]["highlight_finder"]["model"] == "gemini-3.5-flash"
+    manager.start({"url": "https://www.youtube.com/watch?v=abc", "video_quality": "480"})
     thread = manager.thread
     if thread:
         thread.join(1)
-    assert result == {"status": "queued", "queue_position": 1}
-    assert manager.get_settings()["video_quality"] == "2160"
+    cfg = manager._config().config
+    assert cfg["video_quality"] == "480"
+    assert cfg["model"] == "gemini-3.5-flash"
+    assert cfg["ai_providers"]["highlight_finder"]["model"] == "gemini-3.5-flash"
+    assert cfg["ai_providers"]["youtube_title_maker"]["model"] == "gemini-3.5-flash"
 
 
 def test_num_clips_accepts_allowed_values(tmp_path):
@@ -977,6 +996,13 @@ def test_render_settings_use_draft_snapshot_after_defaults_change(tmp_path):
     assert settings["video_quality"] == "1080"
 
 
+def test_render_settings_prefer_clip_quality_over_global_default(tmp_path):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    manager.save_settings({"video_quality": "1080"})
+    settings = manager._render_settings({}, {"video_quality": "480", "draft_settings": {"video_quality": "480"}})
+    assert settings["video_quality"] == "480"
+
+
 def test_local_renderer_accepts_progress_callback():
     stages = []
     renderer = LocalClipRenderer(progress_callback=lambda stage, progress=None: stages.append((stage, progress)))
@@ -1056,7 +1082,7 @@ def test_render_settings_normalize_untrusted_editor_values(tmp_path):
     settings = manager._render_settings({"settings": {"hook_style": {"font_family": "Invalid", "font_weight": 999, "font_size": 99, "text_color": "bad", "position_x": -2}, "blur_background": {"zoom": 99, "strength": -1}}}, metadata)
     assert settings["hook_style"]["font_family"] == "Poppins"
     assert settings["hook_style"]["font_weight"] == 700
-    assert settings["hook_style"]["font_size"] == 0.056
+    assert settings["hook_style"]["font_size"] == 0.068  # locked enlarged hook preset
     assert settings["hook_style"]["position_x"] == 0.5
     assert settings["hook_style"]["text_color"].startswith("#")
     assert settings["blur_background"]["enabled"] is False
@@ -1238,6 +1264,48 @@ def test_recovery_marks_stale_upload_and_render_states(tmp_path):
     assert [json.loads(path.read_text(encoding="utf-8"))["status"] for path in paths] == ["upload_error", "render_error", "render_error"]
 
 
+def test_auto_render_sets_render_started_at_so_recovery_skips_fresh(tmp_path, monkeypatch):
+    manager = mod.WebJobManager(app_dir=tmp_path)
+    clip_dir = tmp_path / "output" / "run" / "clip"
+    clip_dir.mkdir(parents=True)
+    meta_path = clip_dir / "data.json"
+    meta_path.write_text(json.dumps({"clip_id": "auto-fresh", "status": "needs_edit", "draft_settings": {}}), encoding="utf-8")
+
+    class Renderer:
+        def __init__(self, **kwargs):
+            self.progress_callback = kwargs.get("progress_callback")
+
+        def render_existing_clip(self, _clip_dir, _metadata, _settings, output, preview=False):
+            if self.progress_callback:
+                self.progress_callback("Menyusun video final", 0.4)
+            output.write_bytes(b"final" * 300)
+
+    monkeypatch.setattr(mod, "LocalClipRenderer", Renderer)
+    monkeypatch.setattr(manager, "_render_settings", lambda _payload, _meta: {
+        "watermark": {}, "credit_watermark": {}, "hook_style": {}, "blur_background": {},
+        "subtitle": {}, "video_quality": "480",
+    })
+    monkeypatch.setattr(manager, "_hook_tts_config", lambda: {})
+    results = manager._auto_render_run(tmp_path / "output" / "run")
+    saved = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert results == [{"clip_id": "auto-fresh", "status": "ready_to_schedule"}]
+    assert saved["status"] == "ready_to_schedule"
+    assert saved["render_started_at"]
+    assert datetime.fromisoformat(saved["render_started_at"]).tzinfo is not None
+    assert saved["render_progress"] == 1.0
+    # fresh timestamp must not be recovered as stale
+    meta_path.write_text(json.dumps({
+        "clip_id": "auto-fresh", "status": "rendering", "attempt_id": "a",
+        "render_started_at": datetime.now(timezone.utc).isoformat(),
+    }), encoding="utf-8")
+    manager.recover_stale_clip_operations()
+    assert json.loads(meta_path.read_text(encoding="utf-8"))["status"] == "rendering"
+    # missing timestamp still recovered (stale / crash path)
+    meta_path.write_text(json.dumps({"clip_id": "auto-fresh", "status": "rendering", "attempt_id": "b"}), encoding="utf-8")
+    manager.recover_stale_clip_operations()
+    assert json.loads(meta_path.read_text(encoding="utf-8"))["status"] == "render_error"
+
+
 def test_retention_skips_active_clip_sessions(tmp_path):
     manager = mod.WebJobManager(app_dir=tmp_path)
     for index, status in enumerate(("render_queued", "rendering", "scheduled", "uploading")):
@@ -1356,7 +1424,8 @@ def test_short_ai_highlight_is_expanded(tmp_path):
     core.report_tokens = lambda *_args, **_kwargs: None
     result = core._find_highlights_single("[00:01:00,000 - 00:01:04,000] halo", {"title": "video"}, 1, allow_chunking=False)
     assert result[0]["duration_seconds"] >= 10
-    assert result[0]["hook_text"] == "Short"
+    assert result[0]["hook_text"] == "SHORT"  # visual contract: uppercase hook output
+    assert len(result[0]["hook_text"].replace("\n", " ").split()) <= 8
 
 
 class PipelineCore(AutoClipperCore):

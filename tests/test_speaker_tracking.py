@@ -15,6 +15,8 @@ from speaker_tracking import (
     face_score,
     mouth_motion_score,
     smooth_positions,
+    track_crop_positions,
+    tracking_strategy,
 )
 
 
@@ -101,8 +103,8 @@ class TestChooseSpeaker:
 
     def test_switches_with_margin_after_hold(self):
         candidates = [
-            {"id": 0, "score": 0.50, "crop_x": 10},
-            {"id": 1, "score": 0.90, "crop_x": 50},
+            {"id": 0, "score": 0.50, "crop_x": 10, "mouth": 0.05},
+            {"id": 1, "score": 0.90, "crop_x": 50, "mouth": 0.40},
         ]
         chosen, conf, hold = choose_speaker(candidates, 0, hold_frames_left=0)
         assert chosen == 1
@@ -141,12 +143,11 @@ class TestEnforceHold:
 
 class TestSmoothPositions:
     def test_smooths_jump(self):
-        positions = [0.0] * 5 + [100.0] * 30
-        smoothed = smooth_positions(positions, fps=30.0, smooth_seconds=0.3)
+        positions = [0.0] * 5 + [100.0] * 60
+        smoothed = smooth_positions(positions, fps=30.0, smooth_seconds=0.3, dead_zone_px=0.0, max_pan_px=0.0)
         assert smoothed[0] == 0
-        # After jump, values rise gradually then settle near target
         assert any(0 < v < 100 for v in smoothed)
-        assert smoothed[-1] > 90
+        assert smoothed[-1] >= 95
 
     def test_empty(self):
         assert smooth_positions([], 30.0) == []
@@ -163,6 +164,12 @@ class TestCropXForFace:
 
 class TestConstants:
     def test_versions_and_policy(self):
-        assert TRACKER_VERSION.startswith("speaker-track-")
-        assert HOLD_SECONDS == 1.5
-        assert SMOOTH_SECONDS == 0.3
+        assert TRACKER_VERSION.startswith("active-speaker-")
+        assert HOLD_SECONDS == 2.0
+        assert SMOOTH_SECONDS == 0.0
+
+
+def test_vertical_full_uses_active_speaker_hard_cuts():
+    tracker, layouts = tracking_strategy()
+    assert tracker is track_crop_positions
+    assert layouts is False

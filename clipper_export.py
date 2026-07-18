@@ -16,10 +16,14 @@ from pathlib import Path
 
 from clipper_shared import SUBPROCESS_FLAGS, TimedTranscript, _hex_to_rgb, validate_timed_transcript
 from clipper_base import ClipperBase
-from gaming_layout import GamingLayoutError, build_gaming_filtergraph, validate_roi
-from subtitle_cues import non_overlapping_segments
+from gaming_layout import GamingLayoutError, validate_roi
+from layout_modes import build_filtergraph, output_geometry
+from subtitle_cues import build_subtitle_cues, non_overlapping_segments
+from visual_style import find_hook_name_span, hook_name_from_title, hook_tts_text, normalize_hook_text
+from speaker_tracking import detect_split_person_rois, split_rois_are_distinct
 from config.editor_defaults import HOOK_PAUSE_SECONDS, HOOK_SLIDE_SECONDS
-from visual_style import normalize_hook_text, sanitize_subtitle_token
+
+
 from utils.logger import debug_log
 
 
@@ -102,7 +106,7 @@ class ExportMixin(ClipperBase):
 
     @staticmethod
     def _tts_text(hook_text: str) -> str:
-        text = re.sub(r"[^\w\s.,!?;:'\"()\-]", "", str(hook_text), flags=re.UNICODE)
+        text = re.sub(r"[^\w\s.,!?;!'\"()\-]", "", hook_tts_text(hook_text), flags=re.UNICODE)
         return re.sub(r"\s+", " ", text).strip()
 
     def _generate_hook_tts(self, hook_text: str, clip_dir: Path) -> tuple[Path, float]:
@@ -114,17 +118,42 @@ class ExportMixin(ClipperBase):
         voice = str(getattr(self, "tts_voice", "") or "Fenrir")
         base_url = str(getattr(self, "tts_base_url", "") or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
         spoken_text = self._tts_text(hook_text)
-        digest = hashlib.sha256(f"{model}|{voice}|{spoken_text}".encode("utf-8")).hexdigest()[:20]
-        cache_dir = Path(getattr(self, "output_dir", clip_dir)) / ".hook-tts-cache"
+        # style_v3: shorter, punchier viral delivery; invalidate old cache.
+        style_prompt = (
+            "Ucapkan HANYA teks berikut dalam bahasa Indonesia. "
+            "Gaya: kreator pria Indonesia yang spontan dan seru, pitch rendah-sedang, "
+            "tempo cepat dengan punch kuat di kata penting, energi tinggi sejak kata pertama. "
+            "Gunakan naik-turun intonasi yang hidup, jeda sangat singkat, rasa penasaran dan sedikit nakal. "
+            "Bukan pembaca berita, bukan iklan formal, bukan robot, jangan datar, "
+            "tanpa membacakan instruksi ini.\n\n"
+            f"{spoken_text}"
+        )
+        digest = hashlib.sha256(f"{model}|{voice}|style_v3|{spoken_text}".encode("utf-8")).hexdigest()[:20]
+        # Shared tenant cache: survives across runs; still keyed by model/voice/style/text.
+        output_root = Path(getattr(self, "output_dir", clip_dir))
+        cache_dir = output_root.parent / "cache" / "hook-tts"
+        if not cache_dir.parent.exists():
+            cache_dir = output_root / ".hook-tts-cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
         output = cache_dir / f"{digest}.wav"
         if not output.is_file():
-            payload = {"model": model, "input": f"Ucapkan hanya teks berikut dalam bahasa Indonesia. Suara pria energik, tegas, cepat, natural, penuh rasa penasaran, tanpa membacakan instruksi.\n\n{spoken_text}", "response_format": {"type": "audio"}, "generation_config": {"speech_config": [{"voice": voice}]}}
-            response = requests.post(f"{base_url}/interactions", headers={"x-goog-api-key": api_key, "Content-Type": "application/json"}, json=payload, timeout=90)
+            payload = {
+                "contents": [{"parts": [{"text": style_prompt}]}],
+                "generationConfig": {
+                    "responseModalities": ["AUDIO"],
+                    "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}},
+                },
+            }
+            response = requests.post(f"{base_url}/models/{model}:generateContent", headers={"x-goog-api-key": api_key, "Content-Type": "application/json"}, json=payload, timeout=90)
             response.raise_for_status()
-            encoded = ((response.json().get("output_audio") or {}).get("data") or "")
+            parts = (((response.json().get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+            audio = next((part.get("inlineData") or part.get("inline_data") for part in parts if part.get("inlineData") or part.get("inline_data")), {})
+            encoded = audio.get("data") or ""
             if not encoded:
                 raise RuntimeError("Gemini TTS tidak menghasilkan audio")
+            mime = str(audio.get("mimeType") or audio.get("mime_type") or "")
+            if mime and not mime.lower().startswith("audio/l16"):
+                raise RuntimeError(f"Format audio Gemini TTS tidak didukung: {mime}")
             pcm = base64.b64decode(encoded)
             temporary = output.with_suffix(".tmp.wav")
             with wave.open(str(temporary), "wb") as handle:
@@ -135,37 +164,113 @@ class ExportMixin(ClipperBase):
             os.replace(temporary, output)
         return output, self._probe_media_duration(str(output))
 
-    def _create_hook_overlay(self, hook_text: str, width: int, height: int, output_path: Path):
+    def _create_hook_overlay(self, hook_text: str, width: int, height: int, output_path: Path, known_names=None):
         from PIL import Image, ImageDraw, ImageFont
 
         style = self.hook_style_settings or {}
         font_size_frac = float(style.get("font_size", 0.056))
         root = Path(__file__).resolve().parent
-        font_family = "Poppins"
         font_weight = max(100, min(900, int(style.get("font_weight") or 700)))
         family_fonts = {
             "Plus Jakarta Sans": root / "fonts" / "PlusJakartaSans.ttf",
             "Poppins": root / "fonts" / ("Poppins-Bold.ttf" if font_weight >= 600 else "Poppins-Regular.ttf"),
         }
         font_candidates = [str(family_fonts["Poppins"]), str(family_fonts["Plus Jakarta Sans"])]
-        font_px = max(1, int(max(16, font_size_frac * 500) / 340 * width))
-        font = None
-        for candidate in font_candidates:
-            if not candidate or not os.path.exists(candidate):
-                continue
+        body_px = max(1, int(max(16, font_size_frac * 500) / 340 * width))
+        name_px = max(body_px + 1, int(round(body_px * 1.25)))
+        min_hook_px = max(10, int(round(20 / 1080 * width)))
+
+        def load_font(size_px: int):
+            for candidate in font_candidates:
+                if not candidate or not os.path.exists(candidate):
+                    continue
+                try:
+                    font = ImageFont.truetype(candidate, size_px)
+                    if hasattr(font, "set_variation_by_axes") and "PlusJakartaSans" in Path(candidate).name:
+                        try:
+                            font.set_variation_by_axes([max(200, min(800, font_weight))])
+                        except OSError:
+                            pass
+                    return font
+                except Exception:
+                    continue
+            return ImageFont.load_default()
+
+        display = normalize_hook_text(hook_text)
+        plain = " ".join(line for line in display.split("\n") if line.strip()) or "MOMEN INI WAJIB DITONTON"
+        words = plain.split()
+        name_span = find_hook_name_span(words, known_names=known_names, original_text=hook_text)
+
+        stroke_width = max(0, int(round(float(style.get("outline_thickness", 1.5)) / 340 * width))) + max(0, int(round((font_weight - 400) / 200 * width / 340)))
+        max_text_width = max(40, int(width * 0.86) - 2 * stroke_width)
+        max_lines = max(1, int(style.get("max_lines", 3)))
+        body_font = load_font(body_px)
+        name_font = load_font(name_px) if name_span else body_font
+        space_w = 0
+
+        def measure(word: str, is_name: bool) -> float:
+            font = name_font if is_name else body_font
             try:
-                font = ImageFont.truetype(candidate, font_px)
-                if hasattr(font, "set_variation_by_axes") and "PlusJakartaSans" in Path(candidate).name:
-                    font.set_variation_by_axes([max(200, min(800, font_weight))])
+                return float(font.getlength(word))
+            except AttributeError:
+                return float(font.getbbox(word)[2])
+
+        def wrap_words(word_list, name_range):
+            lines = []
+            current = []
+            current_w = 0.0
+            for idx, word in enumerate(word_list):
+                is_name = bool(name_range and name_range[0] <= idx < name_range[1])
+                word_w = measure(word, is_name)
+                gap = space_w if current else 0.0
+                if current and current_w + gap + word_w > max_text_width:
+                    lines.append(current)
+                    current = [(word, is_name)]
+                    current_w = word_w
+                else:
+                    current.append((word, is_name))
+                    current_w += gap + word_w
+            if current:
+                lines.append(current)
+            return lines
+
+        for _ in range(40):
+            try:
+                space_w = float(body_font.getlength(" "))
+            except AttributeError:
+                space_w = float(body_font.getbbox(" ")[2])
+            all_lines = wrap_words(words, name_span)
+            lines = all_lines
+            too_many = len(lines) > max_lines
+            too_wide = False
+            for line in lines[:max_lines]:
+                width_line = 0.0
+                for i, (word, is_name) in enumerate(line):
+                    width_line += measure(word, is_name)
+                    if i:
+                        width_line += space_w
+                if width_line > max_text_width + 1:
+                    too_wide = True
+                    break
+            if not too_wide and not too_many:
                 break
-            except Exception:
-                continue
-        if font is None:
-            font = ImageFont.load_default()
-        display_text = normalize_hook_text(hook_text)
-        lines = [line for line in display_text.split("\n") if line.strip()] or self._wrap_preview_text(display_text, font, int(width * 0.9))
-        lines = lines[:2]
-        line_height = int(font_px * 1.2)
+            if body_px <= min_hook_px:
+                if len(lines) > max_lines:
+                    # Keep every spoken word visible. Balance overflow across
+                    # the fixed line count instead of dropping trailing words.
+                    flat = [item for row in lines for item in row]
+                    per_line = max(1, (len(flat) + max_lines - 1) // max_lines)
+                    lines = [flat[index:index + per_line] for index in range(0, len(flat), per_line)]
+                break
+            body_px = max(min_hook_px, body_px - max(1, int(round(6 / 1080 * width))))
+            name_px = max(body_px + 1, int(round(body_px * 1.25))) if name_span else body_px
+            body_font = load_font(body_px)
+            name_font = load_font(name_px) if name_span else body_font
+
+        if not lines:
+            lines = [[(plain, False)]]
+
+        line_height = int(max(body_px, name_px) * 1.2)
         total_height = line_height * len(lines)
         center_x = float(style.get("position_x", 0.5)) * width
         center_y = float(style.get("position_y", 0.22)) * height
@@ -173,15 +278,31 @@ class ExportMixin(ClipperBase):
         outline_width = max(0, int(round(float(style.get("outline_thickness", 1.5)) / 340 * width)))
         weight_width = max(0, int(round((font_weight - 400) / 200 * width / 340)))
         stroke_width = outline_width + weight_width
-        text_color = _hex_to_rgb(str(style.get("text_color") or "#FFFFFF"))
+        body_color = _hex_to_rgb(str(style.get("text_color") or "#FFFFFF"))
+        name_color = _hex_to_rgb("#FFFF00")
         outline_color = _hex_to_rgb(str(style.get("outline_color") or "#000000"))
         overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
+
         for line_index, line in enumerate(lines):
-            bbox = draw.textbbox((0, 0), line, font=font, stroke_width=stroke_width)
-            text_x = center_x - (bbox[2] - bbox[0]) / 2 - bbox[0]
-            text_y = block_top + line_index * line_height - bbox[1]
-            draw.text((text_x, text_y), line, font=font, fill=(*text_color, 255), stroke_width=stroke_width, stroke_fill=(*outline_color, 255))
+            # measure full line width with mixed fonts
+            line_w = 0.0
+            for i, (word, is_name) in enumerate(line):
+                line_w += measure(word, is_name)
+                if i:
+                    line_w += space_w
+            x = center_x - line_w / 2
+            y = block_top + line_index * line_height
+            for i, (word, is_name) in enumerate(line):
+                font = name_font if is_name else body_font
+                fill = name_color if is_name else body_color
+                bbox = draw.textbbox((0, 0), word, font=font, stroke_width=stroke_width)
+                text_x = x - bbox[0]
+                text_y = y - bbox[1]
+                # keep stroke inside frame horizontally as much as possible
+                text_x = min(max(text_x, stroke_width - bbox[0]), width - (bbox[2] - bbox[0]) - stroke_width - bbox[0])
+                draw.text((text_x, text_y), word, font=font, fill=(*fill, 255), stroke_width=stroke_width, stroke_fill=(*outline_color, 255))
+                x += measure(word, is_name) + space_w
         overlay.save(output_path, "PNG")
 
     def _create_credit_overlay(self, width: int, height: int, output_path: Path):
@@ -192,24 +313,34 @@ class ExportMixin(ClipperBase):
         opacity = float(settings.get("opacity", 0.85))
         font_size = self._scale_from_preview_width(size, 320, width, minimum=max(10, int(round(10 / 340 * width))))
         root = Path(__file__).resolve().parent
-        font_path = root / "fonts" / "Poppins-Bold.ttf"
+        font_path = root / "fonts" / "Poppins-Regular.ttf"
         if not font_path.is_file():
             font_path = root / "fonts" / "PlusJakartaSans.ttf"
         font = ImageFont.truetype(str(font_path), font_size)
         if hasattr(font, "set_variation_by_axes"):
-            font.set_variation_by_axes([600])
+            try:
+                font.set_variation_by_axes([400])
+            except OSError:
+                # Static Poppins fonts expose the method but reject axes.
+                pass
         channel = self.channel_name if self.channel_name and self.channel_name != "{channel}" else "Local Video"
         channel = re.sub(r"^@+", "", str(channel).strip()) or "channel"
         text = "sc: @" + channel
         overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
-        bbox = draw.textbbox((0, 0), text, font=font)
+        stroke_width = max(0, int(round(float(settings.get("outline_thickness", 0.0)) / 340 * width)))
+        bbox = draw.textbbox((0, 0), text, font=font, stroke_width=stroke_width)
         # Top-right small credit
         margin_x = width * 0.04
         margin_y = height * 0.035
         text_x = width - margin_x - (bbox[2] - bbox[0]) - bbox[0]
         text_y = margin_y - bbox[1]
-        draw.text((text_x, text_y), text, font=font, fill=(*_hex_to_rgb(str(settings.get("color") or "#FFFFFF")), int(255 * opacity)))
+        color = _hex_to_rgb(str(settings.get("color") or "#FFFFFF"))
+        alpha = int(255 * opacity)
+        draw.text(
+            (text_x, text_y), text, font=font, fill=(*color, alpha),
+            stroke_width=stroke_width, stroke_fill=(*color, alpha),
+        )
         overlay.save(output_path, "PNG")
 
     def _create_caption_ass(
@@ -521,7 +652,7 @@ class ExportMixin(ClipperBase):
         watermark_settings = {**(settings.get("watermark") or {}), "enabled": False}
         credit_settings = {**(settings.get("credit_watermark") or {}), "enabled": True, "text": "sc: @{channel}"}
         hook_settings = {**(settings.get("hook_style") or {}), "enabled": True, "font_family": "Poppins"}
-        subtitle_settings = {**(settings.get("subtitle") or {}), "enabled": True, "text_transform": "uppercase", "font_family": "Poppins", "color": "#FFD400", "text_color": "#FFFFFF", "outline_color": "#000000", "shadow": 0}
+        subtitle_settings = {**(settings.get("subtitle") or {}), "enabled": True, "text_transform": "uppercase", "font_family": "Poppins", "font_weight": 700, "color": "#FFFF00", "text_color": "#FFFFFF", "outline_color": "#000000", "shadow": 0}
         blur_settings = {**(settings.get("blur_background") or {}), "enabled": False}
         self.watermark_settings = watermark_settings
         self.credit_watermark_settings = credit_settings
@@ -546,21 +677,97 @@ class ExportMixin(ClipperBase):
         try:
             source_width, source_height, duration = self._probe_render_input(str(source_file))
             layout = settings.get("video_layout", {}) or {}
-            # Final V3 output locked 1080x1920
-            width, height = 1080, 1920
-            portrait_filters = None
-            if layout.get("mode") == "gaming":
+            quality = str(settings.get("video_quality") or getattr(self, "video_quality", "1080") or "1080")
+            width, height = output_geometry(quality)
+            self.output_resolution = f"{width}:{height}"
+            self.video_quality = quality
+            mode = str(layout.get("mode") or "normal")
+            if mode in {"normal", "vertical_full"}:
+                mode = "vertical_full"
+            elif mode not in {"gaming", "split_middle"}:
+                mode = "vertical_full"
+            roi = None
+            tracked_source = None
+            if mode == "gaming":
                 roi = validate_roi({"x": layout.get("facecam_x"), "y": layout.get("facecam_y"), "width": layout.get("facecam_width"), "height": layout.get("facecam_height")})
                 if not roi:
                     raise GamingLayoutError("Facecam tidak ditemukan. Gunakan video dengan facecam yang terlihat jelas, lalu coba lagi.")
-                portrait_filters, _ = build_gaming_filtergraph(source_width, source_height, width, height, roi)
+            elif mode == "split_middle":
+                stored_rois = layout.get("person_rois") or metadata.get("split_person_rois")
+                if isinstance(stored_rois, dict) and split_rois_are_distinct(stored_rois):
+                    roi = stored_rois
+                else:
+                    roi = detect_split_person_rois(str(source_file)) or None
+                    if roi and split_rois_are_distinct(roi):
+                        metadata["split_person_rois"] = roi
+                    elif not (roi and split_rois_are_distinct(roi)):
+                        roi = None
+                # Subtitle center for split
+                subtitle_settings["position_y"] = 0.5
             else:
-                # No blur — hard crop/center path only
-                portrait_filters, _ = self._portrait_filter(width, height, False)
-            tts_source, intro_duration = None, 0.0
-            tts_source, spoken_duration = self._generate_hook_tts(metadata.get("hook_text") or metadata.get("title", ""), clip_dir)
+                subtitle_settings["position_y"] = float(subtitle_settings.get("position_y") or 0.78)
+            self.subtitle_style = subtitle_settings
+            render_input = source_file
+            portrait_filters = None
+            tracked_source = None
+            raw_hook = str(metadata.get("hook_text") or metadata.get("title", "") or "")
+            known = [
+                hook_name_from_title(raw_hook, str(metadata.get("title") or "")),
+                metadata.get("channel_name"),
+                getattr(self, "channel_name", ""),
+            ]
+
+            # Prefetch TTS while portrait work runs; falls back to sequential if executor fails.
+            from concurrent.futures import ThreadPoolExecutor
+            tts_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hook-tts")
+            tts_future = tts_executor.submit(self._generate_hook_tts, raw_hook, clip_dir)
+            try:
+                if mode == "vertical_full" and source_width > source_height:
+                    draft_file = clip_dir / "draft.mp4"
+                    reused_draft = False
+                    if draft_file.is_file() and draft_file.stat().st_size >= 1000:
+                        try:
+                            draft_w, draft_h, _ = self._probe_render_input(str(draft_file))
+                        except Exception:
+                            draft_w, draft_h = 0, 0
+                        # Draft already holds speaker-tracked portrait from generate stage.
+                        if draft_w > 0 and draft_h > draft_w:
+                            render_input = draft_file
+                            source_width, source_height = draft_w, draft_h
+                            portrait_filters = [
+                                f"[0:v]setpts=PTS-STARTPTS,scale={width}:{height}:flags=lanczos,setsar=1[v0]"
+                            ]
+                            reused_draft = True
+                            self.log("  Reusing tracked draft portrait (skip re-track)")
+                    if not reused_draft:
+                        tracked_source = clip_dir / f"render-{operation_id}.tracked.mp4"
+                        temporary.append(tracked_source)
+                        try:
+                            self.convert_to_portrait_with_progress(
+                                str(source_file),
+                                str(tracked_source),
+                                lambda _value: None,
+                            )
+                        except Exception as exc:
+                            self.log(f"  Speaker tracking fallback to static crop: {exc}")
+                            tracked_source = None
+                        if tracked_source and tracked_source.is_file() and tracked_source.stat().st_size >= 1000:
+                            render_input = tracked_source
+                            source_width, source_height, _ = self._probe_render_input(str(tracked_source))
+                            portrait_filters = [
+                                f"[0:v]setpts=PTS-STARTPTS,scale={width}:{height}:flags=lanczos,setsar=1[v0]"
+                            ]
+                        else:
+                            portrait_filters, _ = build_filtergraph(mode, source_width, source_height, roi=roi, out_w=width, out_h=height)
+                else:
+                    portrait_filters, _ = build_filtergraph(mode, source_width, source_height, roi=roi, out_w=width, out_h=height)
+
+                tts_source, spoken_duration = tts_future.result()
+            finally:
+                tts_executor.shutdown(wait=False, cancel_futures=True)
+
             intro_duration = spoken_duration + HOOK_PAUSE_SECONDS + HOOK_SLIDE_SECONDS
-            self._create_hook_overlay(metadata.get("hook_text") or metadata.get("title", ""), width, height, hook_overlay)
+            self._create_hook_overlay(raw_hook, width, height, hook_overlay, known_names=known)
             if not transcript:
                 raise ValueError("Transcript subtitle tidak tersedia")
             ass_file = clip_dir / f"render-{operation_id}.captions.ass"
@@ -571,7 +778,7 @@ class ExportMixin(ClipperBase):
             self._create_credit_overlay(width, height, credit_overlay)
             preview_size = (540, 960) if preview else None
             command = self._build_composite_command(
-                str(source_file), str(output_path), duration,
+                str(render_input), str(output_path), duration,
                 audio_source=str(source_file) if self._has_audio_stream(str(source_file)) else None,
                 hook_overlay=hook_overlay, ass_file=ass_file, watermark_path=None,
                 credit_overlay=credit_overlay, portrait_filters=portrait_filters,
@@ -664,59 +871,29 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 value = value.title()
             return value.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}").replace("\r", " ").replace("\n", " ")
 
-        if transcript["words"]:
-            words = [
-                {"text": ass_text(word["word"]), "start": word["start"], "end": word["end"]}
-                for word in transcript["words"]
-            ]
-            chunk = []
-            chunks = []
-            for index, word in enumerate(words):
-                chunk.append(word)
-                next_word = words[index + 1] if index + 1 < len(words) else None
-                remaining = len(words) - index - 1
-                should_flush = False
-                if len(chunk) >= 3:
-                    should_flush = not next_word or word["text"].rstrip().endswith((".", ",", "?", "!")) or next_word["start"] - word["end"] > 0.45 or len(chunk) >= (4 if remaining == 3 else 5)
-                if should_flush:
-                    chunks.append(chunk)
-                    chunk = []
-            if chunk:
-                chunks.append(chunk)
-            for chunk in chunks:
-                chunk_start = chunk[0]["start"]
-                chunk_end = chunk[-1]["end"]
-                for i, word in enumerate(chunk):
-                    event_start = chunk_start if i == 0 else chunk[i - 1]["end"]
-                    event_end = word["end"] if i < len(chunk) - 1 else chunk_end
+        cues = build_subtitle_cues(transcript, text_transform=text_transform)
+        for cue in cues:
+            if cue["words"]:
+                for i, word in enumerate(cue["words"]):
+                    event_start = float(word["active_from"])
+                    event_end = float(word["active_until"])
                     if event_end - event_start < 0.01:
                         event_end = event_start + 0.01
                     text_parts = []
-                    for j, chunk_word in enumerate(chunk):
-                        if i == j:
-                            text_parts.append(f"{{\\c{highlight_colour}}}{chunk_word['text']}{{\\c{primary_colour}}}")
-                        else:
-                            text_parts.append(f"{{\\c{primary_colour}}}{chunk_word['text']}")
+                    for j, cue_word in enumerate(cue["words"]):
+                        color = highlight_colour if i == j else primary_colour
+                        text_parts.append(f"{{\\c{color}}}{ass_text(cue_word['text'])}")
                     events.append({
                         "start": self.format_time(event_start + time_offset),
                         "end": self.format_time(event_end + time_offset),
                         "text": " ".join(text_parts),
                     })
-        else:
-            for segment in non_overlapping_segments(transcript["segments"]):
-                start = segment["start"] + time_offset
-                end = segment["end"] + time_offset
-                words = segment["text"].split()
-                parts = [" ".join(words[i:i + 4]) for i in range(0, len(words), 4)]
-                span = max(0.25, (end - start) / len(parts))
-                for index, part in enumerate(parts):
-                    part_start = start + index * span
-                    part_end = end if index == len(parts) - 1 else min(end, part_start + span)
-                    events.append({
-                        "start": self.format_time(part_start),
-                        "end": self.format_time(part_end),
-                        "text": ass_text(part),
-                    })
+            else:
+                events.append({
+                    "start": self.format_time(float(cue["start"]) + time_offset),
+                    "end": self.format_time(float(cue["end"]) + time_offset),
+                    "text": ass_text(cue["text"]),
+                })
 
         for event in events:
             ass_content += f"Dialogue: 0,{event['start']},{event['end']},Default,,0,0,0,,{{\\pos({pos_x},{pos_y})\\b{font_weight}}}{event['text']}\n"
