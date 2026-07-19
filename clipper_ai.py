@@ -300,6 +300,9 @@ WAJIB:
 * Tanpa emoji
 * WAJIB berupa headline deklaratif, bukan kalimat tanya
 * WAJIB satu kalimat utuh, natural, dan enak dibaca
+* Gunakan bahasa lisan Shorts: terdengar seperti ucapan teman saat menceritakan momen, bukan judul berita
+* Pilih kata sehari-hari yang ringkas, spesifik, dan sesuai transcript
+* Hindari bahasa berita atau frasa generik kaku seperti "yang sangat parah", "aksi mengejutkan", "kejadian tak terduga", "momen mengharukan", dan "ungkap fakta"
 * Nama orang wajib ada, tetapi nama boleh berada di posisi mana pun dalam kalimat
 * Nama sedikit lebih besar dan cyan; isi lain putih
 * Tandai hanya nama orang dengan kurung siku agar render bisa mewarnainya; kurung tidak tampil dan tidak dibaca TTS
@@ -313,11 +316,13 @@ WAJIB:
 Contoh benar:
 "ALASAN [ALDI TAHER] SERING TERLAMBAT"
 "[RADITYA DIKA] KEBANYAKAN BACA HARUS FISIOTERAPI"
+"[KOMENG] JAILNYA KEBANGETAN"
 
 Contoh salah:
 "RADITYA DIKA: GUA HAMPIR BANGKRUT"
 "KENAPA [ALDI TAHER] TELAT TERUS?" — kalimat tanya tanpa konteks
 "[ALDI TAHER] UNGKAP ALASAN TERLAMBAT" — menghilangkan konteks bahwa kejadian sering berulang
+"KEJAILAN [KOMENG] YANG SANGAT PARAH" — bahasa berita generik dan kaku
 
 Hook harus bisa berdiri sendiri sebagai headline viral.
 
@@ -450,7 +455,7 @@ Transcript:
         import random
         seed = random.randint(1000, 9999)
         variety_hint = f"\n\n[SISTEM: Generate dengan variasi baru (Seed: {seed}). Prioritaskan segmen/timestamp yang BERBEDA dari yang biasanya paling jelas. Cari hidden gems atau momen unik yang sebelumnya mungkin terlewat.]"
-        duration_hint = f"\n\n[SISTEM: Timestamp WAJIB target {TARGET_CLIP_MIN}-{TARGET_CLIP_MAX} detik (minimum {HARD_CLIP_MIN}, maksimum {HARD_CLIP_MAX}). Jangan pilih satu kalimat pendek. Jika momen inti pendek, perluas konteks sebelum/sesudah. hook_text maksimal 7 kata; nama orang WAJIB ada dan ditandai [NAMA], tetapi boleh berada di posisi mana pun yang natural. Hook WAJIB satu headline deklaratif kontekstual, bukan kalimat tanya, dan tidak boleh merangkai potongan transcript yang rusak. Kata penentu seperti sering/selalu/berulang kali OPSIONAL dan DILARANG ditambah jika tidak didukung transcript; jangan format 'Nama: kalimat'. Setiap description WAJIB diakhiri tepat 5 hashtag yang spesifik dan relevan dengan isi segmen.]"
+        duration_hint = f"\n\n[SISTEM: Timestamp WAJIB target {TARGET_CLIP_MIN}-{TARGET_CLIP_MAX} detik (minimum {HARD_CLIP_MIN}, maksimum {HARD_CLIP_MAX}). Jangan pilih satu kalimat pendek. Jika momen inti pendek, perluas konteks sebelum/sesudah. hook_text maksimal 7 kata; nama orang WAJIB ada dan ditandai [NAMA], tetapi boleh berada di posisi mana pun yang natural. Hook WAJIB deklaratif, kontekstual, memakai bahasa lisan Shorts seperti ucapan teman, bukan bahasa berita atau kalimat tanya, dan tidak boleh merangkai potongan transcript yang rusak. Hindari frasa generik kaku seperti 'yang sangat parah', 'aksi mengejutkan', 'kejadian tak terduga', 'momen mengharukan', atau 'ungkap fakta'. Kata penentu seperti sering/selalu/berulang kali OPSIONAL dan DILARANG ditambah jika tidak didukung transcript; jangan format 'Nama: kalimat'. Setiap description WAJIB diakhiri tepat 5 hashtag yang spesifik dan relevan dengan isi segmen.]"
         prompt += variety_hint + duration_hint
 
         # Use OpenAI-compatible API for all providers

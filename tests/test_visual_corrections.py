@@ -99,6 +99,18 @@ def test_prompt_requires_contextual_declarative_hook_not_empty_question():
     assert "wajib akhiri dengan ?" not in prompt
 
 
+def test_prompt_requires_spoken_shorts_hook_instead_of_stiff_news_language():
+    from clipper_ai import AiMixin
+
+    prompt = AiMixin.get_default_prompt().lower()
+    assert "bahasa lisan shorts" in prompt
+    assert "ucapan teman saat menceritakan momen" in prompt
+    assert "[komeng] jailnya kebangetan" in prompt
+    assert "kejailan [komeng] yang sangat parah" in prompt
+    assert "yang sangat parah" in prompt
+    assert "hindari bahasa berita" in prompt
+
+
 def test_hook_removes_emoji_from_overlay_and_tts():
     raw = "ASILA MAISA DITUDUH JADI SELINGKUHAN 😮"
     assert "😮" not in normalize_hook_text(raw)

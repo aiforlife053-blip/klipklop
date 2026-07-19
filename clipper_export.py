@@ -494,9 +494,10 @@ class ExportMixin(ClipperBase):
                 filters.append(f"[{audio_index}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[aoriginal]")
             else:
                 filters.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={duration:.3f},asetpts=PTS-STARTPTS[aoriginal]")
-            filters.append("[atts][aoriginal]concat=n=2:v=0:a=1,loudnorm=I=-14:LRA=7:TP=-1[aout]")
+            # volume=1 forces clean frame sizing before loudnorm; avoids 1-sample AAC packets that YouTube speeds up.
+            filters.append("[atts][aoriginal]concat=n=2:v=0:a=1,volume=1,loudnorm=I=-14:LRA=7:TP=-1,asetpts=PTS-STARTPTS[aout]")
         elif audio_source:
-            filters.append(f"[{audio_index}:a]asetpts=PTS-STARTPTS,loudnorm=I=-14:LRA=7:TP=-1[aout]")
+            filters.append(f"[{audio_index}:a]asetpts=PTS-STARTPTS,volume=1,loudnorm=I=-14:LRA=7:TP=-1,asetpts=PTS-STARTPTS[aout]")
         cmd = [self.ffmpeg_path, "-y"]
         for media_input in inputs:
             cmd.extend(["-i", media_input])
@@ -506,7 +507,7 @@ class ExportMixin(ClipperBase):
             cmd.extend(["-map", "[aout]"])
         cmd.extend([*self.get_video_encoder_args(), "-pix_fmt", "yuv420p"])
         if has_output_audio:
-            cmd.extend(["-c:a", "aac", "-b:a", "192k"])
+            cmd.extend(["-c:a", "aac", "-b:a", "192k", "-ar", "48000"])
         cmd.extend(["-t", f"{duration + intro_duration:.3f}", "-movflags", "+faststart", "-progress", "pipe:1", output_path])
         return cmd
 

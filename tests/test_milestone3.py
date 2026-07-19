@@ -77,7 +77,8 @@ def test_intro_filter_freezes_then_hides_without_clipped_slide_and_delays_origin
     assert "main_w" not in graph
     assert "apad=pad_dur=0.600" in graph
     assert "[atts][aoriginal]concat=n=2:v=0:a=1" in graph
-    assert "loudnorm=I=-14:LRA=7:TP=-1" in graph
+    assert "volume=1,loudnorm=I=-14:LRA=7:TP=-1,asetpts=PTS-STARTPTS[aout]" in graph
+    assert command[command.index("-ar") + 1] == "48000"
     assert command[command.index("-t") + 1] == "52.600"
 
 

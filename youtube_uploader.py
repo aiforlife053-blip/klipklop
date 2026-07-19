@@ -10,6 +10,7 @@ from social_auth import get_youtube_credentials
 
 
 VIDEO_EXTS = {".mp4", ".webm", ".mkv", ".mov", ".avi"}
+THUMBNAIL_EXTS = {".jpg", ".jpeg", ".png"}
 
 
 def delete_youtube_video(video_id, user_key=None):
@@ -29,7 +30,7 @@ def list_existing_youtube_videos(video_ids, user_key=None):
     return [item["id"] for item in response.get("items", [])]
 
 
-def upload_youtube_video(file_path, title, description="", privacy="private", user_key=None):
+def upload_youtube_video(file_path, title, description="", privacy="private", user_key=None, thumbnail_path=None):
     path = Path(file_path).resolve()
     if not path.exists() or path.suffix.lower() not in VIDEO_EXTS:
         raise ValueError("File video tidak valid")
@@ -68,4 +69,22 @@ def upload_youtube_video(file_path, title, description="", privacy="private", us
             failures += 1
 
     video_id = response["id"]
-    return {"video_id": video_id, "url": f"https://www.youtube.com/watch?v={video_id}"}
+    thumbnail = Path(thumbnail_path).resolve() if thumbnail_path else None
+    thumbnail_set = False
+    thumbnail_error = ""
+    if thumbnail and thumbnail.is_file() and thumbnail.suffix.lower() in THUMBNAIL_EXTS:
+        try:
+            youtube.thumbnails().set(
+                videoId=video_id,
+                media_body=MediaFileUpload(str(thumbnail), resumable=False),
+            ).execute()
+            thumbnail_set = True
+        except (HttpError, OSError) as exc:
+            # Video sudah berhasil diunggah; jangan memicu retry yang membuat duplikat.
+            thumbnail_error = f"Thumbnail YouTube gagal dipasang ({type(exc).__name__})"
+    return {
+        "video_id": video_id,
+        "url": f"https://www.youtube.com/watch?v={video_id}",
+        "thumbnail_set": thumbnail_set,
+        "thumbnail_error": thumbnail_error,
+    }

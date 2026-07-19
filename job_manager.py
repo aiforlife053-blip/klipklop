@@ -716,7 +716,14 @@ class WebJobManager:
                 if current.get("status") != "uploading" or current.get("attempt_id") != attempt_id or int(current.get("render_revision", 0)) != revision:
                     continue
                 try:
-                    result = upload_youtube_video(claimed_path.with_name("master.mp4"), claimed_upload.get("title"), claimed_upload.get("description"), "public", self.user_id)
+                    result = upload_youtube_video(
+                        claimed_path.with_name("master.mp4"),
+                        claimed_upload.get("title"),
+                        claimed_upload.get("description"),
+                        "public",
+                        self.user_id,
+                        claimed_path.with_name("thumbnail.jpg"),
+                    )
                 except Exception as exc:
                     self._complete_upload(claimed_path, attempt_id, revision)
                     _UPLOAD_LOGGER.exception("scheduled upload failed clip=%s error=%s", str(clip_id)[:12], type(exc).__name__)
@@ -730,7 +737,14 @@ class WebJobManager:
             metadata.update(status="uploading", attempt_id=attempt_id, youtube_upload=upload)
             self._write_json_atomic(meta_path, metadata)
             try:
-                result = upload_youtube_video(meta_path.with_name("master.mp4"), upload.get("title"), upload.get("description"), "public", self.user_id)
+                result = upload_youtube_video(
+                    meta_path.with_name("master.mp4"),
+                    upload.get("title"),
+                    upload.get("description"),
+                    "public",
+                    self.user_id,
+                    meta_path.with_name("thumbnail.jpg"),
+                )
                 upload.update(status="uploaded", **result, uploaded_at=datetime.now(timezone.utc).isoformat())
                 metadata.update(status="uploaded", youtube_upload=upload)
             except Exception as exc:
