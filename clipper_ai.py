@@ -23,7 +23,34 @@ MAX_CLIP_DURATION = HARD_CLIP_MAX
 MAX_GROQ_UPLOAD_BYTES = 20 * 1024 * 1024
 
 
+_HIGHLIGHT_CATEGORY_PRIORITY = {"LUCU": 3, "INFORMATIF": 2, "EMOSIONAL": 1}
+_HIGHLIGHT_CATEGORY_RE = re.compile(r"^\s*\[(LUCU|INFORMATIF|EMOSIONAL)\]\s*", re.IGNORECASE)
+
+
+def needs_humor_retry(highlights: list[dict]) -> bool:
+    """Retry humor discovery once when the broad pass found no funny candidate."""
+    for item in highlights:
+        match = _HIGHLIGHT_CATEGORY_RE.match(str(item.get("description", "")))
+        if match and match.group(1).upper() == "LUCU":
+            return False
+    return True
+
+
+def rank_highlights_by_priority(highlights: list[dict]) -> list[dict]:
+    """Enforce product priority independently from model score and array order."""
+    ranked = []
+    for position, highlight in enumerate(highlights):
+        item = dict(highlight)
+        match = _HIGHLIGHT_CATEGORY_RE.match(str(item.get("description", "")))
+        category = match.group(1).upper() if match else ""
+        item["description"] = _HIGHLIGHT_CATEGORY_RE.sub("", str(item.get("description", "")), count=1)
+        ranked.append((_HIGHLIGHT_CATEGORY_PRIORITY.get(category, 0), float(item.get("virality_score", 0) or 0), -position, item))
+    ranked.sort(key=lambda entry: entry[:3], reverse=True)
+    return [entry[3] for entry in ranked]
+
+
 def ensure_five_hashtags(description: str, *context: str) -> str:
+    """Return description body plus exactly five context-derived hashtags."""
     text = str(description or "").strip()
     tags = []
     for tag in re.findall(r"(?<!\w)#[\w]+", text, flags=re.UNICODE):
@@ -74,24 +101,23 @@ Jika kesulitan menemukan segmen bagus, WAJIB tetap menghasilkan {num_clips} deng
 PRINSIP PEMILIHAN CLIP (WAJIB DIPRIORITASKAN)
 =============================================
 
-PRIORITAS UTAMA: cari MOMEN LUCU, punchline, reaksi spontan, atau kejadian komedi yang jelas terlebih dahulu.
-URUTAN ARRAY WAJIB mengikuti prioritas ini: semua momen lucu yang layak harus berada sebelum konflik, pengakuan, opini, atau edukasi. Object pertama WAJIB momen lucu terbaik jika transcript memiliki satu saja momen lucu yang layak.
-Jika tidak ada momen lucu yang layak dan kontekstual, baru gunakan fallback berikut:
+URUTAN PRIORITAS MUTLAK:
 
-1. Ada KONFLIK, ketegangan, kontroversi.
-2. Ada PENGAKUAN personal / vulnerability.
-3. Ada STATEMENT tajam / opini berani.
-4. Ada cerita lengkap (setup → buildup → payoff).
-5. Ada kalimat yang bisa berdiri sendiri sebagai hook viral.
+1. LUCU / entertaining: punchline, reaksi spontan, kejadian komedi, atau interaksi absurd dengan setup dan payoff yang jelas.
+2. INFORMATIF: insight, fakta, tutorial, pengalaman praktis, atau penjelasan berguna yang dapat dipahami mandiri.
+3. EMOSIONAL: konflik, pengakuan personal, kontroversi, vulnerability, atau opini tajam.
+
+Object pertama WAJIB momen LUCU terbaik jika transcript memiliki satu saja momen lucu yang layak. INFORMATIF hanya boleh mengalahkan EMOSIONAL. EMOSIONAL hanya fallback jika tidak ada momen LUCU atau INFORMATIF yang layak.
+
+Jangan menilai humor hanya dari kata "lucu", "ketawa", atau "wkwk". Baca blok percakapan utuh: setup, respons lawan bicara, punchline, dan reaksi sesudahnya.
 
 Hindari:
 
 * Obrolan filler
 * Basa-basi
 * Transisi topik tanpa payoff
-* Penjelasan teknis panjang tanpa emosi
-
-Jika harus memilih, utamakan EMOSI & KONFLIK dibanding edukasi netral.
+* Penjelasan teknis panjang tanpa insight praktis
+* Momen emosional generik jika tersedia momen lucu atau informatif yang layak
 
 ==================================================
 ATURAN DURASI (KRITIS – TIDAK BOLEH DILANGGAR)
@@ -155,7 +181,11 @@ Setiap object HARUS memiliki:
 5. "virality_score" (integer) → 1–10 (HARUS ANGKA, BUKAN STRING)
 6. "hook_text" (string) → Bahasa Indonesia, maksimal 6 kata; nama orang wajib ada dan ditandai [NAMA]; gunakan headline deklaratif kontekstual
 
-Jika segment termasuk momen lucu/komedi, awali description dengan marker internal "[LUCU] ". Marker wajib untuk setiap momen lucu dan dilarang untuk non-komedi. Marker akan dibuang sebelum ditampilkan.
+Awali description dengan tepat satu marker kategori internal:
+* "[LUCU] " untuk humor/komedi dengan setup dan payoff.
+* "[INFORMATIF] " untuk insight/fakta/penjelasan praktis.
+* "[EMOSIONAL] " untuk konflik/pengakuan/cerita personal.
+Marker wajib, harus sesuai isi segment, dan akan dibuang sebelum ditampilkan.
 
 DILARANG:
 
@@ -267,6 +297,25 @@ Transcript:
         if filtered != transcript:
             self.log(f"  Fast AI mode: transcript dipangkas {len(transcript)} → {len(filtered)} chars")
         return self._find_highlights_single(filtered, video_info, num_clips)
+
+    def _retry_humor_candidates(self, transcript: str, count: int) -> list[dict]:
+        """One focused pass when broad discovery returned no funny candidate."""
+        prompt = f"""Cari maksimal {count} kandidat KHUSUS MOMEN LUCU dari transcript berikut.
+Humor harus memiliki setup dan punchline/payoff atau reaksi spontan yang jelas. Jangan menebak humor hanya dari kata lucu/ketawa/wkwk.
+Return JSON array saja. Tiap object wajib punya tepat: start_time, end_time, title, description, virality_score, hook_text. Timestamp harus berasal dari transcript, durasi 40–70 detik, description wajib diawali [LUCU], hook_text maksimal 6 kata dan nama orang ditandai [NAMA]. Jika tidak ada humor yang benar-benar layak, return [].
+
+Transcript:
+{transcript}"""
+        response = self.highlight_client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=self.temperature,
+        )
+        content = response.choices[0].message.content.strip()
+        if content.startswith("```"):
+            content = re.sub(r"```json?\n?|```\n?", "", content)
+        result = json.loads(content)
+        return result if isinstance(result, list) else []
 
     def _prefilter_transcript_for_ai(self, transcript: str, max_chars: int = 35000) -> str:
         if len(transcript or "") <= max_chars:
@@ -411,6 +460,14 @@ Transcript:
             self.log(f"\n📄 Full GPT Response:\n{result}")
             self.log(f"\n💡 Error position: line {e.lineno}, column {e.colno}")
             raise Exception(f"Failed to parse GPT response as JSON: {e}\n\nFull response logged above.")
+        if not isinstance(highlights, list):
+            raise ValueError("AI highlight response must be a JSON array")
+        if needs_humor_retry(highlights):
+            self.log("  Broad pass tidak menemukan kategori LUCU; menjalankan satu pencarian humor khusus")
+            try:
+                highlights = self._retry_humor_candidates(transcript, request_clips) + highlights
+            except Exception as exc:
+                self.log(f"  Humor retry tidak valid; lanjut dengan kandidat awal: {exc}")
         
         # Filter by duration (target around 60s)
         valid = []
@@ -473,18 +530,9 @@ Transcript:
                 if len(valid) >= num_clips:
                     break
         
-        def is_funny(highlight):
-            return str(highlight.get("description", "")).lstrip().upper().startswith("[LUCU]")
-
-        valid.sort(
-            key=lambda h: (
-                is_funny(h),
-                float(h.get("virality_score", 0) or 0),
-            ),
-            reverse=True,
-        )
+        valid = rank_highlights_by_priority(valid)
         for highlight in valid:
-            description = re.sub(r"^\s*\[LUCU\]\s*", "", str(highlight.get("description", "")), flags=re.IGNORECASE)
+            description = str(highlight.get("description", ""))
             highlight["description"] = ensure_five_hashtags(
                 description,
                 str(highlight.get("title", "")),

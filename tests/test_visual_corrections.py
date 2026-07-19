@@ -531,10 +531,73 @@ def test_prompt_prioritizes_funny_moments():
     prompt = AiMixin.get_default_prompt()
     lower = prompt.lower()
     funny_idx = lower.find("lucu")
-    conflict_idx = lower.find("konflik")
-    assert funny_idx != -1
-    assert funny_idx < conflict_idx or "prioritas utama" in lower
+    informative_idx = lower.find("informatif")
+    emotional_idx = lower.find("emosional")
+    assert -1 < funny_idx < informative_idx < emotional_idx
+    assert "utamakan emosi & konflik dibanding edukasi" not in lower
     assert "maksimal 6 kata" in lower or "maks 6 kata" in lower
     assert "nama sedikit lebih besar dan cyan" in lower
     assert "memberi konteks inti klip" in lower
     assert '"[lucu] "' in lower
+    assert '"[informatif] "' in lower
+    assert '"[emosional] "' in lower
+
+
+def test_highlight_priority_is_funny_then_informative_then_emotional():
+    from clipper_ai import rank_highlights_by_priority
+
+    highlights = [
+        {"title": "curhat", "description": "[EMOSIONAL] cerita berat", "virality_score": 10},
+        {"title": "tips", "description": "[INFORMATIF] cara berguna", "virality_score": 5},
+        {"title": "punchline", "description": "[LUCU] setup dan payoff", "virality_score": 4},
+    ]
+
+    ranked = rank_highlights_by_priority(highlights)
+
+    assert [item["title"] for item in ranked] == ["punchline", "tips", "curhat"]
+    assert [item["description"] for item in ranked] == ["setup dan payoff", "cara berguna", "cerita berat"]
+
+
+def test_unmarked_highlight_is_last_fallback_even_with_high_score():
+    from clipper_ai import rank_highlights_by_priority
+
+    ranked = rank_highlights_by_priority([
+        {"title": "unknown", "description": "tanpa kategori", "virality_score": 10},
+        {"title": "info", "description": "[INFORMATIF] insight", "virality_score": 1},
+    ])
+
+    assert [item["title"] for item in ranked] == ["info", "unknown"]
+
+
+def test_missing_funny_category_requires_specialized_humor_retry():
+    from clipper_ai import needs_humor_retry
+
+    assert needs_humor_retry([{"description": "[INFORMATIF] insight"}])
+    assert not needs_humor_retry([{"description": "[LUCU] setup dan payoff"}])
+
+
+def test_humor_retry_asks_for_funny_candidates_only():
+    import json
+    from types import SimpleNamespace
+    from clipper_ai import AiMixin
+
+    captured = {}
+
+    class Completions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps([
+                {"title": "punchline", "description": "[LUCU] setup dan payoff"}
+            ])))])
+
+    ai = object.__new__(AiMixin)
+    ai.highlight_client = SimpleNamespace(chat=SimpleNamespace(completions=Completions()))
+    ai.model = "test-model"
+    ai.temperature = 0
+
+    result = ai._retry_humor_candidates("TRANSCRIPT UTUH", 2)
+
+    assert result[0]["description"].startswith("[LUCU]")
+    retry_prompt = captured["messages"][0]["content"].lower()
+    assert "khusus momen lucu" in retry_prompt
+    assert "setup" in retry_prompt and "payoff" in retry_prompt
