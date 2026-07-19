@@ -25,6 +25,62 @@ MAX_GROQ_UPLOAD_BYTES = 20 * 1024 * 1024
 
 _HIGHLIGHT_CATEGORY_PRIORITY = {"LUCU": 3, "INFORMATIF": 2, "EMOSIONAL": 1}
 _HIGHLIGHT_CATEGORY_RE = re.compile(r"^\s*\[(LUCU|INFORMATIF|EMOSIONAL)\]\s*", re.IGNORECASE)
+_TIMED_LINE_RE = re.compile(
+    r"^\[(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})\]\s*(.*)$"
+)
+_DANGLING_TAIL_WORDS = {
+    "agar", "atau", "bahwa", "dan", "dengan", "harus", "jadi", "kalau",
+    "karena", "ketika", "lalu", "maka", "namun", "supaya", "tapi", "untuk", "yang",
+}
+
+
+def _timestamp_seconds(value: str) -> float:
+    hours, minutes, seconds = str(value).replace(",", ".").split(":")
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
+def _timed_transcript_lines(transcript: str) -> list[tuple[float, float, str]]:
+    lines = []
+    for line in str(transcript or "").splitlines():
+        match = _TIMED_LINE_RE.match(line.strip())
+        if match:
+            lines.append((_timestamp_seconds(match.group(1)), _timestamp_seconds(match.group(2)), match.group(3).strip()))
+    return lines
+
+
+def _text_ends_complete(text: str) -> bool:
+    words = re.findall(r"[\wÀ-ÖØ-öø-ÿ]+", str(text).casefold(), flags=re.UNICODE)
+    punctuation = re.search(r"[.!?][\s\]\)\"']*$", str(text).strip())
+    return bool(words) and words[-1] not in _DANGLING_TAIL_WORDS and bool(punctuation)
+
+
+def highlight_ends_on_complete_thought(transcript: str, end_seconds: float) -> bool:
+    """Reject an endpoint whose last transcript word leaves a sentence dangling."""
+    lines = _timed_transcript_lines(transcript)
+    last_text = ""
+    for start, _end, text in lines:
+        if start >= float(end_seconds) - 0.01:
+            break
+        last_text = text
+    crosses_cut = any(
+        start < float(end_seconds) - 0.01 and end > float(end_seconds) + 0.01
+        for start, end, _text in lines
+    )
+    return _text_ends_complete(last_text) and not crosses_cut
+
+
+def align_highlight_end(transcript: str, start_seconds: float, end_seconds: float, max_end: float) -> float | None:
+    """Extend a dangling endpoint to first complete transcript segment within hard max."""
+    if highlight_ends_on_complete_thought(transcript, end_seconds):
+        return float(end_seconds)
+    for start, end, text in _timed_transcript_lines(transcript):
+        if end <= float(end_seconds) + 0.01:
+            continue
+        if end > float(max_end) + 0.01:
+            break
+        if end > float(start_seconds) and _text_ends_complete(text) and highlight_ends_on_complete_thought(transcript, end):
+            return end
+    return None
 
 
 def needs_humor_retry(highlights: list[dict]) -> bool:
@@ -78,6 +134,16 @@ def ensure_five_hashtags(description: str, *context: str) -> str:
 
 
 class AiMixin(ClipperBase):
+    def _highlight_create(self, **kwargs):
+        clients = getattr(self, "highlight_clients", None) or [self.highlight_client]
+        for index, client in enumerate(clients):
+            try:
+                return client.chat.completions.create(**kwargs)
+            except Exception as exc:
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                if status not in {429, 500, 502, 503, 504} or index == len(clients) - 1:
+                    raise
+
     def get_default_prompt(self=None):
         """Get default system prompt for highlight detection"""
         return """Kamu adalah EDITOR SHORT-FORM TIER A untuk konten PODCAST viral (TikTok / Reels / Shorts).
@@ -127,6 +193,7 @@ ATURAN DURASI (KRITIS – TIDAK BOLEH DILANGGAR)
 * Minimum absolut: 40 detik.
 * Maksimum absolut: 70 detik.
 * Hitung durasi dari timestamp transcript.
+* end_time WAJIB berada setelah kalimat/punchline/payoff selesai; dilarang berhenti pada kata sambung seperti "harus", "karena", "bahwa", "dan", "tapi", atau "yang".
 * JANGAN estimasi berdasarkan panjang teks.
 
 Jika momen inti < 50 detik:
@@ -179,7 +246,7 @@ Setiap object HARUS memiliki:
 3. "title" (string) → Maks 60 karakter, padat & click-worthy
 4. "description" (string) → Maks 150 karakter, jelaskan kenapa viral
 5. "virality_score" (integer) → 1–10 (HARUS ANGKA, BUKAN STRING)
-6. "hook_text" (string) → Bahasa Indonesia, maksimal 6 kata; nama orang wajib ada dan ditandai [NAMA]; gunakan headline deklaratif kontekstual
+6. "hook_text" (string) → Bahasa Indonesia, maksimal 6 kata; nama orang wajib ada dan ditandai [NAMA]; gunakan headline deklaratif kontekstual. Ejaan nama WAJIB disalin persis dari judul/channel/transcript sumber, jangan menebak atau mengubah ejaan.
 
 Awali description dengan tepat satu marker kategori internal:
 * "[LUCU] " untuk humor/komedi dengan setup dan payoff.
@@ -264,7 +331,7 @@ Periksa:
 2. Semua durasi 40–70 detik (target 50–70) ?
 3. Semua punya tepat 6 field ?
 4. virality_score berupa integer 1–10 ?
-5. hook_text maksimal 6 kata, berupa headline deklaratif kontekstual, dan berisi nama bertanda [NAMA] di posisi natural ?
+5. hook_text maksimal 7 kata, berupa headline deklaratif kontekstual, dan berisi nama bertanda [NAMA] di posisi natural ?
 6. Tidak ada field lain ?
 7. Tidak ada teks di luar JSON ?
 
@@ -296,17 +363,17 @@ Transcript:
         filtered = self._prefilter_transcript_for_ai(transcript)
         if filtered != transcript:
             self.log(f"  Fast AI mode: transcript dipangkas {len(transcript)} → {len(filtered)} chars")
-        return self._find_highlights_single(filtered, video_info, num_clips)
+        return self._find_highlights_single(filtered, video_info, num_clips, validation_transcript=transcript)
 
     def _retry_humor_candidates(self, transcript: str, count: int) -> list[dict]:
         """One focused pass when broad discovery returned no funny candidate."""
         prompt = f"""Cari maksimal {count} kandidat KHUSUS MOMEN LUCU dari transcript berikut.
 Humor harus memiliki setup dan punchline/payoff atau reaksi spontan yang jelas. Jangan menebak humor hanya dari kata lucu/ketawa/wkwk.
-Return JSON array saja. Tiap object wajib punya tepat: start_time, end_time, title, description, virality_score, hook_text. Timestamp harus berasal dari transcript, durasi 40–70 detik, description wajib diawali [LUCU], hook_text maksimal 6 kata dan nama orang ditandai [NAMA]. Jika tidak ada humor yang benar-benar layak, return [].
+Return JSON array saja. Tiap object wajib punya tepat: start_time, end_time, title, description, virality_score, hook_text. Timestamp harus berasal dari transcript, durasi 40–70 detik, description wajib diawali [LUCU], hook_text maksimal 7 kata dan nama orang ditandai [NAMA]. Jika tidak ada humor yang benar-benar layak, return [].
 
 Transcript:
 {transcript}"""
-        response = self.highlight_client.chat.completions.create(
+        response = self._highlight_create(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
             temperature=self.temperature,
@@ -356,7 +423,7 @@ Transcript:
         selected = [lines[i] for i in sorted(keep)]
         return "\n".join(selected) or transcript[:max_chars]
 
-    def _find_highlights_single(self, transcript: str, video_info: dict, num_clips: int, allow_chunking: bool = True) -> list:
+    def _find_highlights_single(self, transcript: str, video_info: dict, num_clips: int, allow_chunking: bool = True, validation_transcript: str | None = None) -> list:
         """Find highlights using AI (OpenAI-compatible API)"""
         self.log(f"[2/4] Finding highlights (using {self.model})...")
         
@@ -383,13 +450,13 @@ Transcript:
         import random
         seed = random.randint(1000, 9999)
         variety_hint = f"\n\n[SISTEM: Generate dengan variasi baru (Seed: {seed}). Prioritaskan segmen/timestamp yang BERBEDA dari yang biasanya paling jelas. Cari hidden gems atau momen unik yang sebelumnya mungkin terlewat.]"
-        duration_hint = f"\n\n[SISTEM: Timestamp WAJIB target {TARGET_CLIP_MIN}-{TARGET_CLIP_MAX} detik (minimum {HARD_CLIP_MIN}, maksimum {HARD_CLIP_MAX}). Jangan pilih satu kalimat pendek. Jika momen inti pendek, perluas konteks sebelum/sesudah. hook_text maksimal 6 kata; nama orang WAJIB ada dan ditandai [NAMA], tetapi boleh berada di posisi mana pun yang natural. Hook WAJIB satu headline deklaratif kontekstual, bukan kalimat tanya, dan tidak boleh merangkai potongan transcript yang rusak. Kata penentu seperti sering/selalu/berulang kali OPSIONAL dan DILARANG ditambah jika tidak didukung transcript; jangan format 'Nama: kalimat'. Setiap description WAJIB diakhiri tepat 5 hashtag yang spesifik dan relevan dengan isi segmen.]"
+        duration_hint = f"\n\n[SISTEM: Timestamp WAJIB target {TARGET_CLIP_MIN}-{TARGET_CLIP_MAX} detik (minimum {HARD_CLIP_MIN}, maksimum {HARD_CLIP_MAX}). Jangan pilih satu kalimat pendek. Jika momen inti pendek, perluas konteks sebelum/sesudah. hook_text maksimal 7 kata; nama orang WAJIB ada dan ditandai [NAMA], tetapi boleh berada di posisi mana pun yang natural. Hook WAJIB satu headline deklaratif kontekstual, bukan kalimat tanya, dan tidak boleh merangkai potongan transcript yang rusak. Kata penentu seperti sering/selalu/berulang kali OPSIONAL dan DILARANG ditambah jika tidak didukung transcript; jangan format 'Nama: kalimat'. Setiap description WAJIB diakhiri tepat 5 hashtag yang spesifik dan relevan dengan isi segmen.]"
         prompt += variety_hint + duration_hint
 
         # Use OpenAI-compatible API for all providers
         self.log(f"  Using API: {self.highlight_client.base_url}")
         try:
-            response = self.highlight_client.chat.completions.create(
+            response = self._highlight_create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=self.temperature,
@@ -469,6 +536,7 @@ Transcript:
             except Exception as exc:
                 self.log(f"  Humor retry tidak valid; lanjut dengan kandidat awal: {exc}")
         
+        endpoint_transcript = validation_transcript or transcript
         # Filter by duration (target around 60s)
         valid = []
         for h in highlights:
@@ -479,6 +547,19 @@ Transcript:
             
             start_seconds = self.parse_timestamp(h["start_time"])
             end_seconds = self.parse_timestamp(h["end_time"])
+            aligned_end = align_highlight_end(
+                endpoint_transcript,
+                start_seconds,
+                end_seconds,
+                start_seconds + MAX_CLIP_DURATION,
+            )
+            if aligned_end is None:
+                self.log(f"  ⚠ {h.get('title', 'Unknown')} - ending belum lengkap; memakai timestamp AI")
+                aligned_end = end_seconds
+            if aligned_end > end_seconds:
+                end_seconds = aligned_end
+                h["end_time"] = self.format_timestamp(end_seconds)
+                self.log(f"  ↻ Extended '{h.get('title', 'Unknown')}' to a complete transcript boundary")
             duration = end_seconds - start_seconds
             if duration < MIN_CLIP_DURATION:
                 # Expand toward target 50–70s window
@@ -523,12 +604,10 @@ Transcript:
             
 
         if len(valid) < num_clips:
-            self.log(f"\n⚠️ WARNING: Only found {len(valid)} valid clips out of {num_clips} requested; filling from transcript.")
-            used = [(self.parse_timestamp(h["start_time"]), self.parse_timestamp(h["end_time"])) for h in valid]
-            for fallback in self._fallback_highlights_from_transcript(transcript, num_clips - len(valid), used):
-                valid.append(fallback)
-                if len(valid) >= num_clips:
-                    break
+            raise ValueError(
+                f"Hanya {len(valid)} dari {num_clips} kandidat memiliki ending lengkap; "
+                "generate dibatalkan agar filler generik tidak masuk produksi"
+            )
         
         valid = rank_highlights_by_priority(valid)
         for highlight in valid:

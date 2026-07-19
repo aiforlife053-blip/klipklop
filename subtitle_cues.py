@@ -133,7 +133,11 @@ def build_subtitle_cues(transcript: TimedTranscript, text_transform: str = "uppe
                 "start": word["start"],
                 "end": word["end"],
                 "active_from": word["start"],
-                "active_until": chunk[index + 1]["start"] if index < len(chunk) - 1 else cue_end,
+                "active_until": (
+                    chunk[index + 1]["start"]
+                    if index < len(chunk) - 1 and chunk[index + 1]["start"] > word["start"]
+                    else word["end"]
+                ) if index < len(chunk) - 1 else cue_end,
             }
             for index, word in enumerate(chunk)
         ]

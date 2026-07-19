@@ -1450,7 +1450,7 @@ def test_short_ai_highlight_is_expanded(tmp_path):
     core.highlight_client = SimpleNamespace(base_url="test", chat=Chat())
     core.log = lambda *_args, **_kwargs: None
     core.report_tokens = lambda *_args, **_kwargs: None
-    result = core._find_highlights_single("[00:01:00,000 - 00:01:04,000] halo", {"title": "video"}, 1, allow_chunking=False)
+    result = core._find_highlights_single("[00:01:00,000 - 00:01:04,000] halo.", {"title": "video"}, 1, allow_chunking=False)
     assert result[0]["duration_seconds"] >= 10
     assert result[0]["hook_text"] == "TERNYATA [ALDI TAHER] BERUBAH!"
     assert len(result[0]["hook_text"].replace("[", "").replace("]", "").split()) <= 6

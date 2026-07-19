@@ -48,8 +48,8 @@ def test_renderer_layer_does_not_invent_glued_or_sequential_repeat_tokens():
 
     cues = build_subtitle_cues(transcript)
 
-    assert [word["text"] for word in cues[0]["words"]] == ["ALDITANYA", "ALLAH", "ALLAH"]
-    assert cues[0]["text"] == "ALDITANYA ALLAH ALLAH"
+    assert [word["text"] for cue in cues for word in cue["words"]] == ["ALDITANYA", "ALLAH", "ALLAH"]
+    assert [cue["text"] for cue in cues] == ["ALDITANYA ALLAH", "ALLAH"]
     assert all(len(cue["active_word_indexes"]) == len(cue["words"]) for cue in cues)
 
 

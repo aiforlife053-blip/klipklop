@@ -63,6 +63,7 @@ class LocalClipRenderer(FfmpegMixin, PortraitMixin, ExportMixin):
         cancel_check=None,
         log_callback=None,
         tts_api_key: str = "",
+        tts_api_keys: list = None,
         tts_base_url: str = "https://generativelanguage.googleapis.com/v1beta",
         tts_model: str = "gemini-3.1-flash-tts-preview",
         tts_voice: str = "Fenrir",
@@ -88,6 +89,9 @@ class LocalClipRenderer(FfmpegMixin, PortraitMixin, ExportMixin):
         self.gpu_encoder_args = []
         self.channel_name = ""
         self.tts_api_key = str(tts_api_key or "")
+        self.tts_api_keys = list(dict.fromkeys(
+            str(key) for key in [self.tts_api_key, *(tts_api_keys or [])] if key
+        ))
         self.tts_base_url = str(tts_base_url or "https://generativelanguage.googleapis.com/v1beta")
         self.tts_model = str(tts_model or "gemini-3.1-flash-tts-preview")
         self.tts_voice = str(tts_voice or "Fenrir")
@@ -133,6 +137,11 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
                 base_url=hf_config.get("base_url", "https://generativelanguage.googleapis.com/v1beta/openai"),
                 timeout=float(hf_config.get("timeout", 180.0) or 180.0),
             )
+            highlight_keys = [hf_config.get("api_key", ""), *(hf_config.get("backup_api_keys") or [])]
+            self.highlight_clients = [
+                OpenAI(api_key=key, base_url=hf_config.get("base_url", "https://generativelanguage.googleapis.com/v1beta/openai"), timeout=float(hf_config.get("timeout", 180.0) or 180.0))
+                for key in dict.fromkeys(str(key) for key in highlight_keys if key)
+            ]
             self.model = hf_config.get("model", model)
             cm_config = self.ai_providers.get("caption_maker", {})
             self.caption_client = OpenAI(
@@ -144,6 +153,9 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
             tts_config = self.ai_providers.get("hook_maker", {})
             self.tts_client = None
             self.tts_api_key = str(tts_config.get("api_key") or "")
+            self.tts_api_keys = list(dict.fromkeys(
+                str(key) for key in [self.tts_api_key, *(tts_config.get("backup_api_keys") or [])] if key
+            ))
             self.tts_base_url = str(tts_config.get("base_url") or "https://generativelanguage.googleapis.com/v1beta")
             self.tts_model = str(tts_config.get("model") or "gemini-3.1-flash-tts-preview")
             self.tts_voice = str(tts_config.get("voice") or "Fenrir")

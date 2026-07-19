@@ -348,7 +348,7 @@ class WebJobManager:
         providers = cfg.get("ai_providers", {})
         hook = providers.get("hook_maker", {})
         api_key = self._vault_read_key("hook") if self._vault_enabled else hook.get("api_key", "")
-        return {"tts_api_key": str(api_key or ""), "tts_base_url": str(hook.get("base_url") or "https://generativelanguage.googleapis.com/v1beta"), "tts_model": str(hook.get("model") or "gemini-3.1-flash-tts-preview"), "tts_voice": str(hook.get("voice") or "Fenrir")}
+        return {"tts_api_key": str(api_key or ""), "tts_api_keys": [api_key, *(hook.get("backup_api_keys") or [])], "tts_base_url": str(hook.get("base_url") or "https://generativelanguage.googleapis.com/v1beta"), "tts_model": str(hook.get("model") or "gemini-3.1-flash-tts-preview"), "tts_voice": str(hook.get("voice") or "Fenrir")}
 
     def get_settings(self):
         cfg = self._config().config

@@ -19,12 +19,12 @@ from subtitle_cues import build_subtitle_cues
 from visual_style import normalize_hook_text
 
 
-def test_hook_caps_six_words_four_lines():
+def test_hook_caps_seven_words_four_lines():
     text = "Ini adalah hook panjang sekali yang harus dipotong dengan aman sekarang"
     hook = normalize_hook_text(text)
-    assert hook.replace("\n", " ").rstrip("!").split() == text.upper().split()[:6]
+    assert hook.replace("\n", " ").rstrip("!").split() == text.upper().split()[:7]
     assert len(hook.splitlines()) <= 4
-    assert len(hook.replace("\n", " ").split()) <= 6
+    assert len(hook.replace("\n", " ").split()) <= 7
     assert hook == hook.upper()
 
 
@@ -40,9 +40,8 @@ def test_subtitle_contract_uppercase_and_punctuation_filter():
         "segments": [],
     }
     cues = build_subtitle_cues(transcript)
-    assert cues[0]["text"] == "HALO DUNIA! INI"
-    assert cues[1]["text"] == "TES"
-    assert len(cues[0]["words"]) == 3
+    assert [cue["text"] for cue in cues] == ["HALO DUNIA!", "INI TES"]
+    assert len(cues[0]["words"]) == 2
 
 
 def test_duration_contract_is_40_to_70_target_50_to_70():
@@ -63,7 +62,7 @@ def test_locked_visuals_ignore_client_style():
     assert settings["credit_watermark"]["text"] == "sc: @{channel}"
 
 
-def test_intro_filter_freezes_then_slides_and_delays_original_audio(tmp_path):
+def test_intro_filter_freezes_then_hides_without_clipped_slide_and_delays_original_audio(tmp_path):
     renderer = LocalClipRenderer(ffmpeg_path="ffmpeg")
     renderer.hook_style_settings = {"duration": 5}
     command = renderer._build_composite_command(
@@ -74,7 +73,8 @@ def test_intro_filter_freezes_then_slides_and_delays_original_audio(tmp_path):
     graph = command[command.index("-filter_complex") + 1]
     assert "tpad=stop_mode=clone:stop_duration=2.600" in graph
     assert "concat=n=2:v=1:a=0" in graph
-    assert "(t-2.300)/0.300" in graph
+    assert "overlay=0:0:enable='between(t,0,2.600)'" in graph
+    assert "main_w" not in graph
     assert "apad=pad_dur=0.600" in graph
     assert "[atts][aoriginal]concat=n=2:v=0:a=1" in graph
     assert "loudnorm=I=-14:LRA=7:TP=-1" in graph

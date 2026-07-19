@@ -15,6 +15,7 @@ from speaker_tracking import (
     face_score,
     mouth_motion_score,
     smooth_positions,
+    track_scene_crop_positions,
     track_crop_positions,
     tracking_strategy,
 )
@@ -53,6 +54,18 @@ def test_tracker_ignores_low_face_confidence_even_when_audio_is_loud():
     # geometrically rejected detection into a camera target.
     assert not valid_face_detection(rejected_face)
     assert valid_face_detection(MIN_FACE_CONFIDENCE)
+
+
+def test_wide_shot_real_face_is_not_rejected_into_empty_center_crop():
+    from speaker_tracking import MIN_FACE_CONFIDENCE, valid_face_detection
+
+    # Regression fixture from a 1920x1080 podcast two-shot: rejecting this
+    # real upper-body face made the previous crop hold on empty center space.
+    score = face_score((438, 322, 99, 99), 1920, 1080)
+    assert score >= MIN_FACE_CONFIDENCE
+    assert valid_face_detection(score)
+    # Torso/print detections remain rejected geometrically.
+    assert not valid_face_detection(face_score((800, 760, 180, 180), 1920, 1080))
 
 
 class TestMouthMotion:
@@ -176,14 +189,68 @@ class TestCropXForFace:
         assert crop_x_for_face((0, 0, 50, 50), 1920, 600) == 0
 
 
+def test_face_visibility_guard_reframes_stale_crop_after_source_cut():
+    from speaker_tracking import ensure_visible_face_crop
+
+    candidates = [
+        {"score": 0.72, "face": (690, 100, 90, 90), "crop_x": 584},
+    ]
+    # Previous speaker crop is on the left and contains no current face.
+    assert ensure_visible_face_crop(40, candidates, 270, 854) == 584
+
+
+def test_face_visibility_guard_keeps_crop_when_full_face_is_visible():
+    from speaker_tracking import ensure_visible_face_crop
+
+    candidates = [
+        {"score": 0.72, "face": (180, 100, 90, 90), "crop_x": 90},
+    ]
+    assert ensure_visible_face_crop(100, candidates, 270, 854) == 100
+
+
+def test_missing_frame_detection_holds_face_crop_inside_same_source_shot():
+    from speaker_tracking import resolve_visible_crop
+
+    assert resolve_visible_crop(40, [], fallback_crop_x=584, crop_width=270, source_width=854, source_cut=False) == 40
+
+
+def test_missing_frame_detection_uses_shot_fallback_after_source_cut():
+    from speaker_tracking import resolve_visible_crop
+
+    assert resolve_visible_crop(40, [], fallback_crop_x=584, crop_width=270, source_width=854, source_cut=True) == 584
+
+
+def test_final_crop_sequence_holds_last_face_verified_crop_across_detector_miss():
+    from speaker_tracking import stabilize_visible_crops
+
+    positions = [445, 244, 445, 445]
+    candidates = [
+        [],
+        [{"score": 0.8, "face": (300, 80, 90, 90), "crop_x": 244}],
+        [],
+        [],
+    ]
+    assert stabilize_visible_crops(positions, candidates, [445] * 4, [False] * 4, 270, 854) == [445, 244, 244, 244]
+
+
 class TestConstants:
     def test_versions_and_policy(self):
-        assert TRACKER_VERSION.startswith("active-speaker-")
+        assert TRACKER_VERSION.startswith("scene-face-")
         assert HOLD_SECONDS == 2.0
         assert SMOOTH_SECONDS == 0.0
 
 
-def test_vertical_full_uses_active_speaker_hard_cuts():
+def test_vertical_full_uses_one_fixed_crop_per_source_shot():
+    from speaker_tracking import track_shot_speaker_positions
+
     tracker, layouts = tracking_strategy()
-    assert tracker is track_crop_positions
+    assert tracker is track_shot_speaker_positions
     assert layouts is False
+
+
+def test_shot_speaker_vote_locks_one_full_vertical_crop_per_source_shot():
+    from speaker_tracking import lock_crop_per_source_shot
+
+    active = [100, 100, 300, 100, 300, 300, 300, 100]
+    cuts = [False, False, False, False, True, False, False, False]
+    assert lock_crop_per_source_shot(active, cuts) == [100] * 4 + [300] * 4

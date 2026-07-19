@@ -52,6 +52,20 @@ def test_generated_hook_keeps_required_inline_name_marker_for_renderer():
     assert find_hook_name_span(words, original_text=stored) == (1, 3)
 
 
+def test_generated_hook_rewrites_unnatural_sebut_isi_phrase_generically():
+    assert normalize_generated_hook_text("[ALDI TAHER] SEBUT ISI DARAH SETAN") == "[ALDI TAHER] BILANG DARAH BERISI SETAN"
+    assert normalize_generated_hook_text("[ALDI TAHER] SEBUT DARAH BERISI SETAN") == "[ALDI TAHER] BILANG DARAH BERISI SETAN"
+    assert normalize_generated_hook_text("[BUDI] SEBUT ISI TAS BOM") == "[BUDI] BILANG TAS BERISI BOM"
+
+
+def test_generated_hook_accepts_seven_words_but_rejects_eight():
+    import pytest
+
+    assert normalize_generated_hook_text("[ALDI TAHER] BILANG DARAH MANUSIA BERISI SETAN")
+    with pytest.raises(ValueError, match="maksimal 7 kata"):
+        normalize_generated_hook_text("[ALDI TAHER] BILANG DARAH MANUSIA TERNYATA BERISI SETAN")
+
+
 def test_generated_declarative_hook_does_not_require_terminal_punctuation():
     raw = "ALASAN [ALDI TAHER] SERING TERLAMBAT"
     assert normalize_generated_hook_text(raw) == raw
@@ -101,8 +115,8 @@ def test_tts_removes_comma_after_full_name():
     assert LocalClipRenderer._tts_text("ASILA MAISA, BONGKAR RAHASIA!") == "ASILA MAISA BONGKAR RAHASIA!"
 
 
-def test_user_hook_above_six_words_is_rejected_not_truncated():
-    with pytest.raises(ValueError, match="maksimal 6 kata"):
+def test_user_hook_above_seven_words_is_rejected_not_truncated():
+    with pytest.raises(ValueError, match="maksimal 7 kata"):
         validate_hook_text("satu dua tiga empat lima enam tujuh delapan sembilan")
 
 
@@ -113,7 +127,7 @@ def test_user_hook_keeps_inline_name_marker_for_renderer():
     assert find_hook_name_span(words, original_text=stored) == (0, 2)
 
 
-def test_subtitle_hyphenated_repetition_becomes_separate_words_with_three_word_cap():
+def test_subtitle_hyphenated_repetition_becomes_separate_words_with_two_word_cap():
     transcript = {
         "duration": 3.0,
         "words": [
@@ -124,8 +138,8 @@ def test_subtitle_hyphenated_repetition_becomes_separate_words_with_three_word_c
         "segments": [],
     }
     cues = build_subtitle_cues(transcript)
-    assert [cue["text"] for cue in cues] == ["MUTER MUTER TUH", "SEBENERNYA"]
-    assert all(len(cue["words"]) <= 3 for cue in cues)
+    assert [cue["text"] for cue in cues] == ["MUTER MUTER", "TUH SEBENERNYA"]
+    assert all(len(cue["words"]) <= 2 for cue in cues)
 
 
 def test_subtitle_drops_same_word_alternative_but_keeps_later_repetition():
@@ -159,14 +173,14 @@ def test_hook_does_not_infer_generic_shared_prefix_as_name(text):
     assert hook_name_from_title(text, text) == ""
 
 
-def test_segment_only_subtitles_are_split_to_max_three_words():
+def test_segment_only_subtitles_are_split_to_max_two_words():
     cues = build_subtitle_cues({
         "duration": 6,
         "words": [],
         "segments": [{"text": "one two three four five six", "start": 0.0, "end": 6.0}],
     })
-    assert [cue["text"] for cue in cues] == ["ONE TWO THREE", "FOUR FIVE SIX"]
-    assert all(len(cue["text"].split()) <= 3 for cue in cues)
+    assert [cue["text"] for cue in cues] == ["ONE TWO", "THREE FOUR", "FIVE SIX"]
+    assert all(len(cue["text"].split()) <= 2 for cue in cues)
 
 
 def test_legacy_colon_hook_still_becomes_one_sentence():
@@ -342,10 +356,10 @@ def test_subtitle_defaults_target_98px_and_reference_blue():
     assert sub["letter_spacing"] == pytest.approx(1.5 / 1080)
     assert sub["font_family"] == "Poppins"
     assert sub["font_weight"] == 700
-    assert sub["word_min"] == 3
-    assert sub["word_max"] == 3
-    assert SUBTITLE_WORD_MIN == 3
-    assert SUBTITLE_WORD_MAX == 3
+    assert sub["word_min"] == 2
+    assert sub["word_max"] == 2
+    assert SUBTITLE_WORD_MIN == 2
+    assert SUBTITLE_WORD_MAX == 2
     # size formula: size * 500 / 340 * width ≈ 98 @1080 (49px @540)
     size = float(sub["size"])
     px = int(max(12, size * 500) / 340 * 1080)
@@ -363,12 +377,12 @@ def test_credit_defaults_40px_opacity_045_without_outline():
     assert 39 <= px <= 41
 
 
-def test_hook_defaults_max_six_words_four_lines():
+def test_hook_defaults_max_seven_words_four_lines():
     hook = EDITOR_DEFAULTS["hook_style"]
     assert HOOK_MAX_LINES == 4
-    assert HOOK_MAX_WORDS == 6
+    assert HOOK_MAX_WORDS == 7
     assert hook["max_lines"] == 4
-    assert hook["max_words"] == 6
+    assert hook["max_words"] == 7
     # compact hook: ≈111px @1080 (56px @540)
     px = int(max(16, float(hook["font_size"]) * 500) / 340 * 1080)
     assert 110 <= px <= 112
@@ -387,7 +401,7 @@ def test_sanitize_subtitle_strips_question_comma_period():
     assert sanitize_subtitle_text("Halo? apa, stop.") == "Halo apa stop"
 
 
-def test_subtitle_cues_are_max_3_words_uppercase_no_punct():
+def test_subtitle_cues_are_max_2_words_uppercase_no_punct():
     words = [
         {"word": "Satu?", "start": 0.0, "end": 0.2},
         {"word": "dua,", "start": 0.2, "end": 0.4},
@@ -401,12 +415,12 @@ def test_subtitle_cues_are_max_3_words_uppercase_no_punct():
     assert cues
     for cue in cues:
         n = len(cue["text"].split())
-        assert 1 <= n <= 3
+        assert 1 <= n <= 2
         assert "?" not in cue["text"]
         assert "," not in cue["text"]
         assert "." not in cue["text"]
-    assert len(cues[0]["text"].split()) == 3
-    assert cues[0]["text"] == "SATU DUA TIGA"
+    assert len(cues[0]["text"].split()) == 2
+    assert cues[0]["text"] == "SATU DUA"
 
 
 def test_subtitle_cue_holds_through_short_speech_gap():
@@ -419,7 +433,8 @@ def test_subtitle_cue_holds_through_short_speech_gap():
         {"word": "henti", "start": 1.9, "end": 2.0},
     ]
     cues = build_subtitle_cues({"duration": 2, "words": words, "segments": []})
-    assert cues[0]["end"] == pytest.approx(1.5)
+    assert all(len(cue["text"].split()) <= 2 for cue in cues)
+    assert cues[0]["end"] == pytest.approx(cues[1]["start"])
 
 
 def test_overlapping_whisper_words_produce_non_overlapping_cues():
@@ -441,12 +456,12 @@ def test_overlapping_whisper_words_produce_non_overlapping_cues():
     assert all(word["active_until"] <= events[index + 1]["active_from"] for index, word in enumerate(events[:-1]))
 
 
-def test_normalize_hook_caps_six_words_four_lines():
+def test_normalize_hook_caps_seven_words_four_lines():
     text = "ini adalah hook panjang yang diucapkan penuh tanpa potong delapan kata saja"
     out = normalize_hook_text(text)
     flat = out.replace("\n", " ")
-    assert len(flat.split()) == 6
-    assert flat == "INI ADALAH HOOK PANJANG YANG DIUCAPKAN!"
+    assert len(flat.split()) == 7
+    assert flat == "INI ADALAH HOOK PANJANG YANG DIUCAPKAN PENUH!"
     assert out == out.upper()
     assert out.count("\n") <= 3
 
@@ -454,10 +469,10 @@ def test_normalize_hook_caps_six_words_four_lines():
 def test_v3_locked_settings_force_new_visual_contract():
     settings = v3_locked_render_settings({"video_layout": {"mode": "split_middle"}})
     assert settings["subtitle"]["color"] == "#2CCDE7"
-    assert settings["subtitle"]["word_max"] == 3
+    assert settings["subtitle"]["word_max"] == 2
     assert settings["credit_watermark"]["opacity"] == 0.45
     assert settings["hook_style"]["max_lines"] == 4
-    assert settings["hook_style"]["max_words"] == 6
+    assert settings["hook_style"]["max_words"] == 7
     assert settings["video_layout"]["mode"] == "split_middle"
 
 
@@ -525,6 +540,79 @@ def test_split_rois_reject_same_person_scales():
     assert split_rois_are_distinct(distinct)
 
 
+def test_incomplete_highlight_tail_is_rejected_before_render():
+    from clipper_ai import highlight_ends_on_complete_thought
+
+    transcript = "\n".join([
+        "[00:00:00,000 - 00:00:04,000] Gue menerima bahwa gue",
+        "[00:00:04,000 - 00:00:08,000] semakin tua harus",
+        "[00:00:08,000 - 00:00:12,000] lebih menjaga kesehatan.",
+    ])
+    assert not highlight_ends_on_complete_thought(transcript, 8.0)
+    assert highlight_ends_on_complete_thought(transcript, 12.0)
+
+
+def test_highlight_tail_without_sentence_ending_is_rejected_even_after_noun():
+    from clipper_ai import highlight_ends_on_complete_thought
+
+    transcript = "\n".join([
+        "[00:00:00,000 - 00:00:04,000] setiap manusia punya hal-hal",
+        "[00:00:04,000 - 00:00:08,000] yang bisa dikagumi.",
+    ])
+    assert not highlight_ends_on_complete_thought(transcript, 4.0)
+    assert highlight_ends_on_complete_thought(transcript, 8.0)
+
+
+def test_prefilter_is_only_for_ai_prompt_not_endpoint_validation():
+    from clipper_ai import AiMixin
+
+    core = object.__new__(AiMixin)
+    core._prefilter_transcript_for_ai = lambda _transcript, max_chars=35000: "FILTERED"
+    captured = {}
+    core._find_highlights_single = lambda transcript, _info, _count, allow_chunking=True, validation_transcript=None: captured.update(
+        prompt=transcript, validation=validation_transcript
+    ) or []
+    core.log = lambda *_args: None
+    full = "[00:00:00,000 - 00:00:04,000] setup\n[00:00:04,000 - 00:00:08,000] payoff."
+    core.find_highlights(full, {}, 1)
+    assert captured == {"prompt": "FILTERED", "validation": full}
+
+
+def test_highlight_tail_extends_to_next_complete_segment_within_hard_max():
+    from clipper_ai import align_highlight_end
+
+    transcript = "\n".join([
+        "[00:00:00,000 - 00:00:04,000] Gue menerima bahwa gue",
+        "[00:00:04,000 - 00:00:08,000] semakin tua harus",
+        "[00:00:08,000 - 00:00:10,000] menjaga kesehatan.",
+    ])
+    assert align_highlight_end(transcript, 0.0, 8.0, 10.0) == 10.0
+    assert align_highlight_end(transcript, 0.0, 8.0, 9.0) is None
+
+
+def test_highlight_endpoint_rejects_overlapping_dialog_still_crossing_cut():
+    from clipper_ai import align_highlight_end, highlight_ends_on_complete_thought
+
+    transcript = "\n".join([
+        "[00:00:00,000 - 00:00:04,000] biar darahnya",
+        "[00:00:04,000 - 00:00:08,000] bersih ya.",
+        "[00:00:06,000 - 00:00:10,000] keren nih kan bilang",
+        "[00:00:10,000 - 00:00:12,000] masyaallah.",
+    ])
+    assert not highlight_ends_on_complete_thought(transcript, 8.0)
+    assert align_highlight_end(transcript, 0.0, 4.0, 12.0) == 12.0
+
+
+def test_highlight_extension_considers_segment_that_started_before_cut():
+    from clipper_ai import align_highlight_end
+
+    transcript = "\n".join([
+        "[00:00:00,000 - 00:00:08,000] Setup belum selesai",
+        "[00:00:07,000 - 00:00:10,000] Jawaban selesai.",
+    ])
+    assert align_highlight_end(transcript, 0.0, 8.0, 12.0) == 10.0
+
+
 def test_prompt_prioritizes_funny_moments():
     from clipper_ai import AiMixin
 
@@ -535,7 +623,7 @@ def test_prompt_prioritizes_funny_moments():
     emotional_idx = lower.find("emosional")
     assert -1 < funny_idx < informative_idx < emotional_idx
     assert "utamakan emosi & konflik dibanding edukasi" not in lower
-    assert "maksimal 6 kata" in lower or "maks 6 kata" in lower
+    assert "maksimal 7 kata" in lower or "maks 7 kata" in lower
     assert "nama sedikit lebih besar dan cyan" in lower
     assert "memberi konteks inti klip" in lower
     assert '"[lucu] "' in lower

@@ -63,6 +63,18 @@ def normalize_generated_hook_text(text: str, max_words: int = HOOK_MAX_WORDS) ->
         raise ValueError("Hook AI wajib menandai nama orang dengan [NAMA]")
     if name.strip().upper() in {"NAMA", "NAMA ORANG", "NAME", "PERSON"}:
         raise ValueError("Hook AI wajib memakai nama orang nyata, bukan placeholder")
+    cleaned = re.sub(
+        r"^(\[[^\[\]]+\])\s+SEBUT\s+ISI\s+(\S+)\s+(.+)$",
+        r"\1 BILANG \2 BERISI \3",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"^(\[[^\[\]]+\])\s+SEBUT\s+(\S+)\s+BERISI\s+(.+)$",
+        r"\1 BILANG \2 BERISI \3",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
     words = _WORD_RE.findall(strip_hook_colon(cleaned))
     if not words or len(words) > max(1, int(max_words)):
         raise ValueError(f"Hook AI maksimal {max_words} kata")

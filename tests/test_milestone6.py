@@ -180,7 +180,7 @@ def test_hook_contract_matches_reference_rules():
     text = "RADIT KEBANYAKAN BACA HARUS FISIOTERAPI BANGET SEKARANG JUGA"
     hook = normalize_hook_text(text)
     words = hook.replace("\n", " ").split()
-    assert hook.replace("\n", " ").rstrip("!").split() == text.split()[:6]
+    assert hook.replace("\n", " ").rstrip("!").split() == text.split()[:7]
     assert len(hook.splitlines()) <= 4
 
 
@@ -315,6 +315,36 @@ def test_hook_tts_uses_generate_content_audio_response(tmp_path, monkeypatch):
     assert "konsonan akhir" in prompt
     assert output.is_file() and output.stat().st_size > 44
     assert duration == pytest.approx(1.0 / 1.12)
+
+
+def test_hook_tts_rotates_key_on_rate_limit(tmp_path, monkeypatch):
+    renderer = mod.LocalClipRenderer(ffmpeg_path="ffmpeg", output_dir=str(tmp_path))
+    renderer.tts_api_key = "primary"
+    renderer.tts_api_keys = ["primary", "backup"]
+    renderer.tts_model = "gemini-3.1-flash-tts-preview"
+    calls = []
+
+    class Response:
+        def __init__(self, status): self.status_code = status
+        def raise_for_status(self):
+            if self.status_code == 429:
+                import requests
+                error = requests.HTTPError()
+                error.response = self
+                raise error
+        def json(self):
+            import base64
+            return {"candidates": [{"content": {"parts": [{"inlineData": {"data": base64.b64encode(b"\0\0" * 100).decode()}}]}}]}
+
+    def fake_post(_url, headers, **_kwargs):
+        calls.append(headers["x-goog-api-key"])
+        return Response(401 if len(calls) == 1 else 200)
+
+    import requests
+    monkeypatch.setattr(requests, "post", fake_post)
+    monkeypatch.setattr(renderer, "_probe_media_duration", lambda _path: 1.0)
+    renderer._generate_hook_tts("Tes suara", tmp_path)
+    assert calls == ["primary", "backup"]
 
 
 def test_hook_audio_is_faster_and_punchier(tmp_path):

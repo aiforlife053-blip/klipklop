@@ -53,17 +53,17 @@ def extract_audio_energy(source_path: str, fps: float, frame_count: int, sample_
     return energies
 
 
-TRACKER_VERSION = "active-speaker-v2"
+TRACKER_VERSION = "scene-face-v1"
 HOLD_SECONDS = 2.0
 SMOOTH_SECONDS = 0.0
 SWITCH_MARGIN = 0.16
-MIN_FACE_CONFIDENCE = 0.35
+MIN_FACE_CONFIDENCE = 0.25
 SWITCH_DEBOUNCE_SECONDS = 1.2
 
 
 def tracking_strategy():
-    """Vertical Full uses speaker selection; no wide/two-shot layouts."""
-    return track_crop_positions, False
+    """Vertical Full locks one active-speaker crop per source shot, always full-frame."""
+    return track_shot_speaker_positions, False
 MOUTH_ACTIVE_THRESHOLD = 0.16
 MOUTH_LEAD_MARGIN = 0.06
 DEAD_ZONE_PX = 12.0
@@ -343,6 +343,45 @@ def crop_x_for_face(face, source_width: int, crop_width: int) -> int:
     return max(0, min(crop_x, source_width - crop_width))
 
 
+def ensure_visible_face_crop(crop_x: float, candidates: list[dict], crop_width: int, source_width: int) -> int:
+    """Reject a stale crop that contains no complete credible face."""
+    left = max(0, min(int(crop_x), max(0, source_width - crop_width)))
+    right = left + crop_width
+    visible = [item for item in candidates if left <= item["face"][0] and item["face"][0] + item["face"][2] <= right]
+    if visible or not candidates:
+        return left
+    best = max(candidates, key=lambda item: float(item.get("score", 0.0)))
+    return max(0, min(int(best["crop_x"]), max(0, source_width - crop_width)))
+
+
+def resolve_visible_crop(crop_x: float, candidates: list[dict], fallback_crop_x: float | None, crop_width: int, source_width: int, source_cut: bool = False) -> int:
+    """Use shot-level face framing when frame-level face detection is missing."""
+    if candidates:
+        return ensure_visible_face_crop(crop_x, candidates, crop_width, source_width)
+    target = fallback_crop_x if source_cut and fallback_crop_x is not None else crop_x
+    return max(0, min(int(target), max(0, source_width - crop_width)))
+
+
+def stabilize_visible_crops(positions, frame_candidates, fallback_positions, source_cuts, crop_width: int, source_width: int) -> list[int]:
+    """Hold last face-verified crop through detector misses inside one source shot."""
+    stabilized = []
+    last_verified = None
+    for index, (position, candidates) in enumerate(zip(positions, frame_candidates)):
+        fallback = fallback_positions[min(index, len(fallback_positions) - 1)] if fallback_positions else position
+        source_cut = source_cuts[min(index, len(source_cuts) - 1)] if source_cuts else False
+        if source_cut:
+            last_verified = None
+        if candidates:
+            current = ensure_visible_face_crop(position, candidates, crop_width, source_width)
+            last_verified = current
+        elif last_verified is not None:
+            current = last_verified
+        else:
+            current = resolve_visible_crop(position, candidates, fallback, crop_width, source_width, source_cut)
+        stabilized.append(current)
+    return stabilized
+
+
 def scene_changed(
     previous_gray: np.ndarray | None,
     current_gray: np.ndarray,
@@ -378,9 +417,12 @@ def choose_scene_layout(
     previous_crop_x: int | None = None,
     dominant_ratio: float = DOMINANT_FACE_RATIO,
     previous_layout: str = "crop",
+    detection_coverage: float | None = None,
 ) -> tuple[int, str]:
     """Return fixed crop x and layout; wide equal two-shots use blur-contain."""
     center = center_crop_x(source_width, crop_width)
+    if detection_coverage is not None and detection_coverage < 0.4:
+        return center, "contain_blur"
     if not faces:
         return (center if previous_crop_x is None else int(previous_crop_x), previous_layout)
 
@@ -463,9 +505,11 @@ def track_scene_crop_positions(
         scale_x = source_width / down_w
         scale_y = source_height / down_h
 
-        shots: list[tuple[int, int, list[tuple[int, int, int, int]]]] = []
+        shots: list[tuple[int, int, list[tuple[int, int, int, int]], int, int]] = []
         shot_start = 0
         shot_faces: list[tuple[int, int, int, int]] = []
+        shot_face_samples = 0
+        shot_face_hits = 0
         previous_gray = None
         frame_index = 0
 
@@ -479,18 +523,23 @@ def track_scene_crop_positions(
                 gray = cv2.GaussianBlur(gray, (5, 5), 0)
                 enough = frame_index - shot_start >= min_shot_frames
                 if enough and scene_changed(previous_gray, gray, scene_threshold):
-                    shots.append((shot_start, frame_index, shot_faces))
+                    shots.append((shot_start, frame_index, shot_faces, shot_face_samples, shot_face_hits))
                     shot_start = frame_index
                     shot_faces = []
+                    shot_face_samples = 0
+                    shot_face_hits = 0
                 previous_gray = gray
 
                 if frame_index % max(1, face_stride) == 0 and not cascade.empty():
+                    shot_face_samples += 1
                     detected = cascade.detectMultiScale(
                         gray,
                         scaleFactor=1.1,
                         minNeighbors=5,
                         minSize=(max(18, down_w // 18), max(18, down_h // 18)),
                     )
+                    if len(detected):
+                        shot_face_hits += 1
                     for x, y, w, h in detected:
                         shot_faces.append((
                             int(round(x * scale_x)), int(round(y * scale_y)),
@@ -500,19 +549,24 @@ def track_scene_crop_positions(
 
         if frame_index == 0:
             raise RuntimeError("Video contains no frames")
-        shots.append((shot_start, frame_index, shot_faces))
+        shots.append((shot_start, frame_index, shot_faces, shot_face_samples, shot_face_hits))
 
         positions = [center_x] * frame_index
         layouts = ["crop"] * frame_index
+        source_cuts = [False] * frame_index
         previous_crop = None
         previous_layout = "crop"
-        for start, end, faces in shots:
+        for start, end, faces, face_samples, face_hits in shots:
+            detection_coverage = face_hits / face_samples if face_samples else 0.0
             crop_x, layout = choose_scene_layout(
                 faces, source_width, crop_width,
                 previous_crop_x=previous_crop, previous_layout=previous_layout,
+                detection_coverage=detection_coverage,
             )
             positions[start:end] = [crop_x] * max(0, end - start)
             layouts[start:end] = [layout] * max(0, end - start)
+            if start > 0:
+                source_cuts[start] = True
             previous_crop = crop_x
             previous_layout = layout
 
@@ -527,6 +581,7 @@ def track_scene_crop_positions(
         return {
             "crop_positions": positions,
             "layouts": layouts,
+            "source_cuts": source_cuts,
             "crop_width": crop_width,
             "source_width": source_width,
             "source_height": source_height,
@@ -561,6 +616,9 @@ def track_crop_positions(
         if source_width <= 0 or source_height <= 0:
             raise RuntimeError("Invalid video dimensions")
         audio_energies = extract_audio_energy(source_path, fps, total_frames)
+        scene_fallback = track_scene_crop_positions(source_path)
+        fallback_positions = scene_fallback["crop_positions"]
+        source_cuts = scene_fallback.get("source_cuts") or [False] * len(fallback_positions)
 
         crop_width = min(source_width, int(source_height * 9 / 16))
         crop_width -= crop_width % 2
@@ -586,6 +644,7 @@ def track_crop_positions(
         hold_frames = max(1, int(round(fps * hold_seconds)))
         raw_targets: list[float] = []
         raw_ids: list[int | None] = []
+        frame_candidates: list[list[dict]] = []
         prev_mouth_rois: dict[int, np.ndarray] = {}
         current_id = None
         hold_left = 0
@@ -599,6 +658,7 @@ def track_crop_positions(
             if sample_stride > 1 and frame_index % sample_stride != 0 and raw_targets:
                 raw_targets.append(raw_targets[-1])
                 raw_ids.append(raw_ids[-1] if raw_ids else current_id)
+                frame_candidates.append(frame_candidates[-1] if frame_candidates else [])
                 frame_index += 1
                 continue
 
@@ -634,6 +694,7 @@ def track_crop_positions(
                         "id": face_id,
                         "score": score,
                         "mouth": m_score,
+                        "face": (int(x), int(y), int(w), int(h)),
                         "crop_x": crop_x_for_face((x, y, w, h), source_width, crop_width),
                     })
                 # If two detections map to same bucket, keep higher score only.
@@ -655,9 +716,15 @@ def track_crop_positions(
                 match = next((item for item in candidates if item["id"] == chosen_id), None)
                 if match:
                     last_target = float(match["crop_x"])
+            # Safety invariant: every crop with credible detections must contain
+            # one complete face, even while speaker debounce holds an old id.
+            fallback_crop = fallback_positions[min(frame_index, len(fallback_positions) - 1)] if fallback_positions else center_x
+            source_cut = source_cuts[min(frame_index, len(source_cuts) - 1)] if source_cuts else False
+            last_target = float(resolve_visible_crop(last_target, candidates, fallback_crop, crop_width, source_width, source_cut))
             # Missing face: hold last_target (already set); never-seen stays center
             raw_targets.append(last_target)
             raw_ids.append(current_id)
+            frame_candidates.append(candidates)
             frame_index += 1
 
         if not raw_targets:
@@ -673,6 +740,10 @@ def track_crop_positions(
             debounce_seconds=SWITCH_DEBOUNCE_SECONDS,
             hold_seconds=hold_seconds,
         )
+        cut_positions = stabilize_visible_crops(
+            cut_positions, frame_candidates, fallback_positions, source_cuts,
+            crop_width, source_width,
+        )
         # Pad/truncate to total_frames if known
         if total_frames > 0:
             if len(cut_positions) < total_frames:
@@ -682,6 +753,7 @@ def track_crop_positions(
 
         return {
             "crop_positions": cut_positions,
+            "source_cuts": source_cuts,
             "crop_width": crop_width,
             "source_width": source_width,
             "source_height": source_height,
@@ -692,6 +764,45 @@ def track_crop_positions(
         }
     finally:
         capture.release()
+
+
+def lock_crop_per_source_shot(
+    active_positions: list[int],
+    source_cuts: list[bool],
+    bucket_px: int = 24,
+) -> list[int]:
+    """Choose dominant active-speaker crop once per source camera shot."""
+    if not active_positions:
+        return []
+    cuts = list(source_cuts[:len(active_positions)])
+    cuts.extend([False] * (len(active_positions) - len(cuts)))
+    boundaries = [0] + [i for i in range(1, len(active_positions)) if cuts[i]] + [len(active_positions)]
+    locked = list(active_positions)
+    bucket_px = max(1, int(bucket_px))
+    for start, end in zip(boundaries, boundaries[1:]):
+        shot = active_positions[start:end]
+        counts: dict[int, int] = {}
+        first_seen: dict[int, int] = {}
+        for offset, value in enumerate(shot):
+            bucket = int(round(int(value) / bucket_px))
+            counts[bucket] = counts.get(bucket, 0) + 1
+            first_seen.setdefault(bucket, offset)
+        winner = max(counts, key=lambda bucket: (counts[bucket], -first_seen[bucket]))
+        members = sorted(int(value) for value in shot if int(round(int(value) / bucket_px)) == winner)
+        crop = members[len(members) // 2]
+        locked[start:end] = [crop] * (end - start)
+    return locked
+
+
+def track_shot_speaker_positions(source_path: str) -> dict:
+    """Use active-speaker evidence, but permit crop changes only on source cuts."""
+    result = track_crop_positions(source_path)
+    positions = result.get("crop_positions") or []
+    cuts = result.get("source_cuts") or [False] * len(positions)
+    result["crop_positions"] = lock_crop_per_source_shot(positions, cuts)
+    result["layouts"] = ["crop"] * len(result["crop_positions"])
+    result["mode"] = "shot_active_speaker"
+    return result
 
 
 def split_rois_are_distinct(rois: dict, min_center_gap: float = 0.2) -> bool:

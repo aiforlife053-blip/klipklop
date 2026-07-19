@@ -117,8 +117,10 @@ class ExportMixin(ClipperBase):
 
     def _generate_hook_tts(self, hook_text: str, clip_dir: Path) -> tuple[Path, float]:
         import requests
-        api_key = str(getattr(self, "tts_api_key", "") or "")
-        if not api_key:
+        api_keys = list(dict.fromkeys(
+            str(key) for key in (getattr(self, "tts_api_keys", None) or [getattr(self, "tts_api_key", "")]) if key
+        ))
+        if not api_keys:
             raise ValueError("Gemini API key diperlukan untuk suara hook")
         model = str(getattr(self, "tts_model", "") or "gemini-3.1-flash-tts-preview")
         voice = str(getattr(self, "tts_voice", "") or "Fenrir")
@@ -152,8 +154,12 @@ class ExportMixin(ClipperBase):
                     "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}},
                 },
             }
-            response = requests.post(f"{base_url}/models/{model}:generateContent", headers={"x-goog-api-key": api_key, "Content-Type": "application/json"}, json=payload, timeout=90)
-            response.raise_for_status()
+            response = requests.Response()
+            for index, api_key in enumerate(api_keys):
+                response = requests.post(f"{base_url}/models/{model}:generateContent", headers={"x-goog-api-key": api_key, "Content-Type": "application/json"}, json=payload, timeout=90)
+                if getattr(response, "status_code", 200) not in {401, 403, 429, 500, 502, 503, 504} or index == len(api_keys) - 1:
+                    response.raise_for_status()
+                    break
             parts = (((response.json().get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
             audio = next((part.get("inlineData") or part.get("inline_data") for part in parts if part.get("inlineData") or part.get("inline_data")), {})
             encoded = audio.get("data") or ""
@@ -441,12 +447,7 @@ class ExportMixin(ClipperBase):
             inputs.append(str(hook_overlay))
             filters.append(f"[{input_index}:v]format=rgba[hook]")
             hook_duration = intro_duration if intro_duration > 0 else max(1.0, min(10.0, float((self.hook_style_settings or {}).get("duration", 5.0))))
-            if intro_duration > 0:
-                slide_start = max(0.0, hook_duration - HOOK_SLIDE_SECONDS)
-                x_expr = f"if(lt(t\\,{slide_start:.3f})\\,0\\,-min(1\\,(t-{slide_start:.3f})/{HOOK_SLIDE_SECONDS:.3f})*main_w)"
-                filters.append(f"[{current}][hook]overlay=x='{x_expr}':y=0:enable='between(t,0,{hook_duration:.3f})'[v{layer}]")
-            else:
-                filters.append(f"[{current}][hook]overlay=0:0:enable='between(t,0,{hook_duration:.3f})'[v{layer}]")
+            filters.append(f"[{current}][hook]overlay=0:0:enable='between(t,0,{hook_duration:.3f})'[v{layer}]")
             current = f"v{layer}"
             layer += 1
         if ass_file:
