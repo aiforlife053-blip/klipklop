@@ -33,6 +33,34 @@ def _transform(text: str, transform: str) -> str:
     return text
 
 
+def _word_parts(word) -> list[dict]:
+    """Split provider tokens containing spaces/hyphens into timed visible words."""
+    original = str(word["word"] or "")
+    # ASS escape fixtures may contain spaces/newlines inside one literal token;
+    # leave those intact so escaping remains one rendered unit.
+    if any(char in original for char in ("\\", "{", "}", "\n", "\r")):
+        return [word]
+    raw = original.replace("—", "-").replace("-", " ")
+    parts = raw.split()
+    if len(parts) <= 1:
+        return [word]
+    start, end = float(word["start"]), float(word["end"])
+    duration = max(0.0, end - start)
+    return [
+        {**word, "word": part, "start": start + duration * index / len(parts),
+         "end": start + duration * (index + 1) / len(parts)}
+        for index, part in enumerate(parts)
+    ]
+
+
+def _is_duplicate_word(previous: dict | None, current: dict) -> bool:
+    if not previous or previous["text"].casefold() != current["text"].casefold():
+        return False
+    # Collapse alternative provider hypotheses starting together. Preserve
+    # intentional sequential repetition, including touching word boundaries.
+    return abs(float(current["start"]) - float(previous["start"])) <= 0.1
+
+
 def non_overlapping_segments(segments):
     by_start = {}
     for segment in segments:
@@ -64,11 +92,16 @@ def build_subtitle_cues(transcript: TimedTranscript, text_transform: str = "uppe
                 })
         return cues
     words = []
-    for word in sorted(transcript["words"], key=lambda item: (item["start"], item["end"])):
+    expanded = [part for word in transcript["words"] for part in _word_parts(word)]
+    for word in sorted(expanded, key=lambda item: (item["start"], item["end"])):
         text = _transform(sanitize_subtitle_token(word["word"]), text_transform)
         if not text:
             continue
-        words.append({"text": text, "start": word["start"], "end": word["end"]})
+        candidate = {"text": text, "start": word["start"], "end": word["end"]}
+        if _is_duplicate_word(words[-1] if words else None, candidate):
+            words[-1]["end"] = max(float(words[-1]["end"]), float(candidate["end"]))
+            continue
+        words.append(candidate)
     chunks, chunk = [], []
     word_min = max(1, int(SUBTITLE_WORD_MIN))
     word_max = max(word_min, int(SUBTITLE_WORD_MAX))
@@ -114,18 +147,20 @@ def build_subtitle_cues(transcript: TimedTranscript, text_transform: str = "uppe
                 "capability": "word_highlight",
             }
         )
-    # Raw Whisper word ranges may overlap. Clamp adjacent cue/event boundaries
-    # so ASS never draws two full subtitle lines at the same timestamp.
+    # Raw provider ranges may overlap across cue boundaries. Preserve every
+    # transcript word: move the later cue forward instead of truncating the
+    # earlier cue's tail word to zero duration.
     for index in range(len(cues) - 1):
+        current_end = float(cues[index]["end"])
         next_start = float(cues[index + 1]["start"])
-        cues[index]["end"] = min(float(cues[index]["end"]), next_start)
-        if cues[index]["words"]:
-            cues[index]["words"][-1]["active_until"] = cues[index]["end"]
-        gap = next_start - float(cues[index]["end"])
+        if next_start < current_end:
+            cues[index + 1]["start"] = current_end
+            next_start = current_end
+        gap = next_start - current_end
         if 0 < gap <= 0.75:
             cues[index]["end"] = next_start
             if cues[index]["words"]:
-                cues[index]["words"][-1]["active_until"] = cues[index]["end"]
+                cues[index]["words"][-1]["active_until"] = next_start
     normalized_cues = []
     for cue in cues:
         normalized_words = []

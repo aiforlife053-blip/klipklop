@@ -74,6 +74,11 @@ FACE_SAMPLE_PER_SHOT = 5
 DOMINANT_FACE_RATIO = 1.45
 
 
+def valid_face_detection(score: float, min_confidence: float = MIN_FACE_CONFIDENCE) -> bool:
+    """Only geometrically credible faces may become camera targets."""
+    return float(score) >= float(min_confidence)
+
+
 def center_crop_x(source_width: int, crop_width: int) -> int:
     crop_width = max(1, min(crop_width, source_width))
     return max(0, min((source_width - crop_width) // 2, source_width - crop_width))
@@ -87,6 +92,9 @@ def face_score(face, source_width: int, source_height: int, prev_center=None) ->
     size_score = min(1.0, area / 0.08)
     # Prefer faces in upper half (typical talking-head framing)
     cy = (y + h / 2) / max(1.0, source_height)
+    # Reject printed/decorative face false positives around torso/table level.
+    if cy > 0.72:
+        return 0.0
     vertical_score = max(0.0, 1.0 - abs(cy - 0.35) / 0.5)
     # Temporal continuity bonus
     continuity = 0.0
@@ -612,6 +620,8 @@ def track_crop_positions(
                     if raw_targets:
                         prev_center = (raw_targets[-1] + crop_width / 2) / source_width
                     f_score = face_score((x, y, w, h), source_width, source_height, prev_center)
+                    if not valid_face_detection(f_score):
+                        continue
                     face_roi = gray[y:y + h, x:x + w]
                     m_score = mouth_motion_score(face_roi, prev_mouth_rois.get(face_id))
                     prev_mouth_rois[face_id] = face_roi.copy()

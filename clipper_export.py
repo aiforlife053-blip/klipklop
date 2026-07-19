@@ -110,6 +110,11 @@ class ExportMixin(ClipperBase):
         text = re.sub(r"[^\w\s.,!?;!'\"()\-]", "", hook_tts_text(hook_text), flags=re.UNICODE)
         return re.sub(r"\s+", " ", text.replace(",", " ")).strip()
 
+    @staticmethod
+    def _tts_pronunciation_text(spoken_text: str) -> str:
+        """Add minimal phonetic guidance without changing overlay metadata."""
+        return re.sub(r"\bJIGONG\b", "ji-gong", spoken_text, flags=re.IGNORECASE)
+
     def _generate_hook_tts(self, hook_text: str, clip_dir: Path) -> tuple[Path, float]:
         import requests
         api_key = str(getattr(self, "tts_api_key", "") or "")
@@ -119,7 +124,8 @@ class ExportMixin(ClipperBase):
         voice = str(getattr(self, "tts_voice", "") or "Fenrir")
         base_url = str(getattr(self, "tts_base_url", "") or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
         spoken_text = self._tts_text(hook_text)
-        # style_v6: energetic delivery without sacrificing Indonesian consonants.
+        pronunciation_text = self._tts_pronunciation_text(spoken_text)
+        # style_v7: energetic delivery plus targeted final-consonant guidance.
         style_prompt = (
             "Ucapkan HANYA teks berikut dalam bahasa Indonesia. "
             "Gaya: kreator pria Indonesia yang spontan, viral, dan langsung menghentak sejak suku kata pertama. "
@@ -128,9 +134,9 @@ class ExportMixin(ClipperBase):
             "Gunakan perubahan intonasi yang berani, rasa kaget dan penasaran, volume suara penuh dan dekat mikrofon. "
             "Bukan pembaca berita, bukan iklan formal, bukan robot, jangan datar, "
             "tanpa membacakan instruksi ini.\n\n"
-            f"{spoken_text}"
+            f"{pronunciation_text}"
         )
-        digest = hashlib.sha256(f"{model}|{voice}|style_v6|{spoken_text}".encode("utf-8")).hexdigest()[:20]
+        digest = hashlib.sha256(f"{model}|{voice}|style_v7|{pronunciation_text}".encode("utf-8")).hexdigest()[:20]
         # Shared tenant cache: survives across runs; still keyed by model/voice/style/text.
         output_root = Path(getattr(self, "output_dir", clip_dir))
         cache_dir = output_root.parent / "cache" / "hook-tts"
@@ -179,7 +185,7 @@ class ExportMixin(ClipperBase):
         }
         font_candidates = [str(family_fonts["Poppins"]), str(family_fonts["Plus Jakarta Sans"])]
         body_px = max(1, int(max(16, font_size_frac * 500) / 340 * width))
-        name_px = max(body_px + 1, int(round(body_px * 1.45)))
+        name_px = max(body_px + 1, int(round(body_px * 1.18)))
         min_hook_px = max(10, int(round(20 / 1080 * width)))
         letter_spacing = float(style.get("letter_spacing", 0.0)) * width
 
@@ -252,12 +258,7 @@ class ExportMixin(ClipperBase):
                 space_w = float(body_font.getlength(" "))
             except AttributeError:
                 space_w = float(body_font.getbbox(" ")[2])
-            if name_span:
-                name_line = [(word, True) for word in words[name_span[0]:name_span[1]]]
-                body_words = words[:name_span[0]] + words[name_span[1]:]
-                all_lines = [name_line, *wrap_words(body_words, None)]
-            else:
-                all_lines = wrap_words(words, None)
+            all_lines = wrap_words(words, name_span)
             lines = all_lines
             too_many = len(lines) > max_lines
             too_wide = False
@@ -281,7 +282,7 @@ class ExportMixin(ClipperBase):
                     lines = [flat[index:index + per_line] for index in range(0, len(flat), per_line)]
                 break
             body_px = max(min_hook_px, body_px - max(1, int(round(6 / 1080 * width))))
-            name_px = max(body_px + 1, int(round(body_px * 1.45))) if name_span else body_px
+            name_px = max(body_px + 1, int(round(body_px * 1.18))) if name_span else body_px
             body_font = load_font(body_px)
             name_font = load_font(name_px) if name_span else body_font
 
@@ -492,9 +493,9 @@ class ExportMixin(ClipperBase):
                 filters.append(f"[{audio_index}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[aoriginal]")
             else:
                 filters.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={duration:.3f},asetpts=PTS-STARTPTS[aoriginal]")
-            filters.append("[atts][aoriginal]concat=n=2:v=0:a=1[aout]")
+            filters.append("[atts][aoriginal]concat=n=2:v=0:a=1,loudnorm=I=-14:LRA=7:TP=-1[aout]")
         elif audio_source:
-            filters.append(f"[{audio_index}:a]asetpts=PTS-STARTPTS[aout]")
+            filters.append(f"[{audio_index}:a]asetpts=PTS-STARTPTS,loudnorm=I=-14:LRA=7:TP=-1[aout]")
         cmd = [self.ffmpeg_path, "-y"]
         for media_input in inputs:
             cmd.extend(["-i", media_input])

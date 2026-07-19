@@ -15,7 +15,7 @@ import requests
 from clipper_shared import SUBPROCESS_FLAGS, SubtitleNotFoundError, TimedTranscript, timed_segments_to_prompt, validate_timed_transcript
 from clipper_base import ClipperBase
 from config.editor_defaults import HARD_CLIP_MAX, HARD_CLIP_MIN, TARGET_CLIP_MAX, TARGET_CLIP_MIN
-from visual_style import normalize_hook_text
+from visual_style import normalize_generated_hook_text, normalize_hook_text
 
 # V3 clip duration contract (seconds)
 MIN_CLIP_DURATION = HARD_CLIP_MIN
@@ -153,7 +153,7 @@ Setiap object HARUS memiliki:
 3. "title" (string) → Maks 60 karakter, padat & click-worthy
 4. "description" (string) → Maks 150 karakter, jelaskan kenapa viral
 5. "virality_score" (integer) → 1–10 (HARUS ANGKA, BUKAN STRING)
-6. "hook_text" (string) → Bahasa Indonesia, maksimal 6 kata; awali [NAMA LENGKAP] dan akhiri ? atau !
+6. "hook_text" (string) → Bahasa Indonesia, maksimal 6 kata; nama orang wajib ada dan ditandai [NAMA]; gunakan headline deklaratif kontekstual
 
 Jika segment termasuk momen lucu/komedi, awali description dengan marker internal "[LUCU] ". Marker wajib untuk setiap momen lucu dan dilarang untuk non-komedi. Marker akan dibuang sebelum ditampilkan.
 
@@ -201,21 +201,26 @@ WAJIB:
 * Bahasa Indonesia
 * Maksimal 6 kata
 * Tanpa emoji
-* WAJIB akhiri dengan ? atau ! sesuai makna
+* WAJIB berupa headline deklaratif, bukan kalimat tanya
 * WAJIB satu kalimat utuh, natural, dan enak dibaca
-* Awali dengan nama lengkap orang
-* Nama menjadi baris kuning besar; isi maksimal 3 baris putih
+* Nama orang wajib ada, tetapi nama boleh berada di posisi mana pun dalam kalimat
+* Nama sedikit lebih besar dan cyan; isi lain putih
 * Tandai hanya nama orang dengan kurung siku agar render bisa mewarnainya; kurung tidak tampil dan tidak dibaca TTS
-* Harus menarik, membuat penasaran, dan menahan jawaban/payoff utama
-* Utamakan curiosity gap yang jujur; jangan clickbait palsu
+* Jangan merangkai potongan transcript yang tidak membentuk kalimat utuh
+* Harus memberi konteks inti klip, bukan curiosity gap kosong
+* Kata penentu konteks bersifat opsional: sering, selalu, berulang kali, pertama kali, diam-diam, hampir, atau kata setara
+* DILARANG menambah kata penentu konteks jika tidak dinyatakan atau tidak didukung transcript
+* Jika kata tersebut didukung transcript dan penting bagi makna, pertahankan; jika tidak penting, jangan dipaksakan
 * Bisa berupa statement tajam atau punchline
 
 Contoh benar:
-"[RADITYA DIKA] KEBANYAKAN BACA HARUS FISIOTERAPI!"
-"[RIZKY BILLAR] AKHIRNYA BONGKAR RAHASIA?"
+"ALASAN [ALDI TAHER] SERING TERLAMBAT"
+"[RADITYA DIKA] KEBANYAKAN BACA HARUS FISIOTERAPI"
 
 Contoh salah:
 "RADITYA DIKA: GUA HAMPIR BANGKRUT"
+"KENAPA [ALDI TAHER] TELAT TERUS?" — kalimat tanya tanpa konteks
+"[ALDI TAHER] UNGKAP ALASAN TERLAMBAT" — menghilangkan konteks bahwa kejadian sering berulang
 
 Hook harus bisa berdiri sendiri sebagai headline viral.
 
@@ -229,7 +234,7 @@ Periksa:
 2. Semua durasi 40–70 detik (target 50–70) ?
 3. Semua punya tepat 6 field ?
 4. virality_score berupa integer 1–10 ?
-5. hook_text maksimal 6 kata, diawali nama lengkap bertanda [NAMA], dan berakhir ? atau ! ?
+5. hook_text maksimal 6 kata, berupa headline deklaratif kontekstual, dan berisi nama bertanda [NAMA] di posisi natural ?
 6. Tidak ada field lain ?
 7. Tidak ada teks di luar JSON ?
 
@@ -329,7 +334,7 @@ Transcript:
         import random
         seed = random.randint(1000, 9999)
         variety_hint = f"\n\n[SISTEM: Generate dengan variasi baru (Seed: {seed}). Prioritaskan segmen/timestamp yang BERBEDA dari yang biasanya paling jelas. Cari hidden gems atau momen unik yang sebelumnya mungkin terlewat.]"
-        duration_hint = f"\n\n[SISTEM: Timestamp WAJIB target {TARGET_CLIP_MIN}-{TARGET_CLIP_MAX} detik (minimum {HARD_CLIP_MIN}, maksimum {HARD_CLIP_MAX}). Jangan pilih satu kalimat pendek. Jika momen inti pendek, perluas konteks sebelum/sesudah. hook_text maksimal 6 kata; WAJIB diawali [NAMA LENGKAP], nama menjadi baris kuning sedikit lebih besar dan isi maksimal 3 baris putih. WAJIB akhiri ? atau ! sesuai makna; jangan format 'Nama: kalimat'. Setiap description WAJIB diakhiri tepat 5 hashtag yang spesifik dan relevan dengan isi segmen.]"
+        duration_hint = f"\n\n[SISTEM: Timestamp WAJIB target {TARGET_CLIP_MIN}-{TARGET_CLIP_MAX} detik (minimum {HARD_CLIP_MIN}, maksimum {HARD_CLIP_MAX}). Jangan pilih satu kalimat pendek. Jika momen inti pendek, perluas konteks sebelum/sesudah. hook_text maksimal 6 kata; nama orang WAJIB ada dan ditandai [NAMA], tetapi boleh berada di posisi mana pun yang natural. Hook WAJIB satu headline deklaratif kontekstual, bukan kalimat tanya, dan tidak boleh merangkai potongan transcript yang rusak. Kata penentu seperti sering/selalu/berulang kali OPSIONAL dan DILARANG ditambah jika tidak didukung transcript; jangan format 'Nama: kalimat'. Setiap description WAJIB diakhiri tepat 5 hashtag yang spesifik dan relevan dengan isi segmen.]"
         prompt += variety_hint + duration_hint
 
         # Use OpenAI-compatible API for all providers
@@ -444,8 +449,8 @@ Transcript:
                 h["description"] = h.get("title", "No description")
                 self.log(f"  ⚠ Missing description for '{h.get('title', 'Unknown')}', using title")
             if "hook_text" not in h:
-                h["hook_text"] = h.get("title", "Highlight")
-            h["hook_text"] = normalize_hook_text(h.get("hook_text") or h.get("title") or "Highlight")
+                raise ValueError("AI highlight wajib memiliki hook_text dengan [NAMA]")
+            h["hook_text"] = normalize_generated_hook_text(h["hook_text"])
             
             if duration > MAX_CLIP_DURATION:
                 h["end_time"] = self.format_timestamp(self.parse_timestamp(h["start_time"]) + MAX_CLIP_DURATION)
@@ -601,8 +606,8 @@ Transcript:
         local = validate_timed_transcript(
             {
                 "duration": data.get("duration"),
-                "words": data.get("words") or [],
-                "segments": data.get("segments"),
+                "words": [item for item in (data.get("words") or []) if isinstance(item, dict) and str(item.get("word") or "").strip()],
+                "segments": [item for item in (data.get("segments") or []) if isinstance(item, dict) and str(item.get("text") or "").strip()],
             }
         )
         result = validate_timed_transcript(

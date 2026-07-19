@@ -40,6 +40,20 @@ class TestFaceScore:
         with_prev = face_score(face, 1920, 1080, prev_center=0.5)
         assert with_prev >= without
 
+    def test_rejects_face_detection_in_lower_torso_region(self):
+        assert face_score((800, 760, 180, 180), 1920, 1080) == 0.0
+
+
+def test_tracker_ignores_low_face_confidence_even_when_audio_is_loud():
+    from speaker_tracking import combine_scores, MIN_FACE_CONFIDENCE, valid_face_detection
+
+    rejected_face = MIN_FACE_CONFIDENCE - 0.01
+    assert combine_scores(rejected_face, 1.0, 1.0) > MIN_FACE_CONFIDENCE
+    # Face validity is a trust gate; global audio/motion must not promote a
+    # geometrically rejected detection into a camera target.
+    assert not valid_face_detection(rejected_face)
+    assert valid_face_detection(MIN_FACE_CONFIDENCE)
+
 
 class TestMouthMotion:
     def test_static_is_low(self):

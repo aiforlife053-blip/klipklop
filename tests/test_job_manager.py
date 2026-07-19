@@ -306,6 +306,33 @@ def test_groq_chunk_request_shape_and_normalization(tmp_path, monkeypatch):
     assert isinstance(result, dict)
 
 
+def test_groq_transcription_ignores_empty_word_timestamp(tmp_path, monkeypatch):
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    response = groq_transcript()
+    response["words"].insert(0, {"word": "", "start": 0.0, "end": 0.1})
+    monkeypatch.setattr(clipper_ai.requests, "post", lambda *_args, **_kwargs: GroqResponse(200, response))
+
+    result = GroqHarness()._transcribe_groq_chunk(str(audio))
+
+    assert result["words"] == [
+        {"word": "halo", "start": 0.0, "end": 0.8},
+        {"word": "dunia", "start": 0.9, "end": 1.8},
+    ]
+
+
+def test_groq_transcription_ignores_empty_segment_timestamp(tmp_path, monkeypatch):
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    response = groq_transcript()
+    response["segments"].insert(0, {"text": "", "start": 0.0, "end": 0.1})
+    monkeypatch.setattr(clipper_ai.requests, "post", lambda *_args, **_kwargs: GroqResponse(200, response))
+
+    result = GroqHarness()._transcribe_groq_chunk(str(audio))
+
+    assert result["segments"] == [{"text": "halo dunia", "start": 0.0, "end": 1.8}]
+
+
 @pytest.mark.parametrize("language", ["", "none", "auto", " AUTO "])
 def test_groq_language_auto_is_omitted(tmp_path, monkeypatch, language):
     audio = tmp_path / "audio.mp3"
@@ -731,13 +758,13 @@ class InstantJobManager(mod.WebJobManager):
 def test_start_rejects_unsupported_top_level_video_quality(tmp_path):
     manager = InstantJobManager(app_dir=tmp_path)
     result = manager.start({"url": "https://www.youtube.com/watch?v=abc", "video_quality": "2160"})
-    assert result == {"status": "error", "message": "Kualitas video harus 480, 720, atau 1080"}
+    assert result == {"status": "error", "message": "Kualitas video harus 480, 720, 1080, atau 1440"}
     assert manager.thread is None
 
 
 def test_render_settings_rejects_persisted_unsupported_quality(tmp_path):
     manager = InstantJobManager(app_dir=tmp_path)
-    with pytest.raises(mod.LayoutModeError, match="480, 720, atau 1080"):
+    with pytest.raises(mod.LayoutModeError, match="480, 720, 1080, atau 1440"):
         manager._render_settings({}, {"video_quality": "2160"})
 
 
@@ -1082,7 +1109,7 @@ def test_render_settings_normalize_untrusted_editor_values(tmp_path):
     settings = manager._render_settings({"settings": {"hook_style": {"font_family": "Invalid", "font_weight": 999, "font_size": 99, "text_color": "bad", "position_x": -2}, "blur_background": {"zoom": 99, "strength": -1}}}, metadata)
     assert settings["hook_style"]["font_family"] == "Poppins"
     assert settings["hook_style"]["font_weight"] == 700
-    assert settings["hook_style"]["font_size"] == 0.075  # locked dense hook preset
+    assert settings["hook_style"]["font_size"] == 0.070  # locked compact hook preset
     assert settings["hook_style"]["position_x"] == 0.5
     assert settings["hook_style"]["text_color"].startswith("#")
     assert settings["blur_background"]["enabled"] is False
@@ -1355,7 +1382,7 @@ def test_final_composite_uses_one_encode_and_separate_audio_source(tmp_path):
     filter_graph = command[command.index("-filter_complex") + 1]
     assert command.count("-c:v") == 1
     assert command[command.index("-map", command.index("-map") + 1) + 1] == "[aout]"
-    assert "[1:a]asetpts=PTS-STARTPTS[aout]" in filter_graph
+    assert "[1:a]asetpts=PTS-STARTPTS,loudnorm=I=-14:LRA=7:TP=-1[aout]" in filter_graph
     assert filter_graph.index("overlay=0:0:enable") < filter_graph.index("ass=") < filter_graph.rindex("overlay=0:0")
 
 
@@ -1381,7 +1408,7 @@ def test_hook_tts_freezes_video_and_plays_before_original_audio(tmp_path):
     assert "concat=n=2:v=1:a=0" in graph
     assert "[2:a]aresample=48000" in graph
     assert "[1:a]aresample=48000" in graph
-    assert "concat=n=2:v=0:a=1[aout]" in graph
+    assert "concat=n=2:v=0:a=1,loudnorm=I=-14:LRA=7:TP=-1[aout]" in graph
     assert "amix" not in graph
     assert "enable='between(t,0,2.750)'" in graph
     assert command[command.index("-t") + 1] == "12.750"
@@ -1407,6 +1434,7 @@ def test_short_ai_highlight_is_expanded(tmp_path):
             "title": "Short",
             "description": "Desc",
             "virality_score": 8,
+            "hook_text": "TERNYATA [ALDI TAHER] BERUBAH!",
         }]))
 
     class Chat:
@@ -1424,8 +1452,8 @@ def test_short_ai_highlight_is_expanded(tmp_path):
     core.report_tokens = lambda *_args, **_kwargs: None
     result = core._find_highlights_single("[00:01:00,000 - 00:01:04,000] halo", {"title": "video"}, 1, allow_chunking=False)
     assert result[0]["duration_seconds"] >= 10
-    assert result[0]["hook_text"] == "SHORT!"  # visual contract: uppercase hook with punctuation
-    assert len(result[0]["hook_text"].replace("\n", " ").split()) <= 8
+    assert result[0]["hook_text"] == "TERNYATA [ALDI TAHER] BERUBAH!"
+    assert len(result[0]["hook_text"].replace("[", "").replace("]", "").split()) <= 6
 
 
 class PipelineCore(AutoClipperCore):

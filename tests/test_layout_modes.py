@@ -171,6 +171,7 @@ class TestOutputGeometry:
         ("480", (540, 960)),
         ("720", (720, 1280)),
         ("1080", (1080, 1920)),
+        ("1440", (1440, 2560)),
     ])
     def test_quality_controls_final_portrait_geometry(self, quality, expected):
         assert output_geometry(quality) == expected

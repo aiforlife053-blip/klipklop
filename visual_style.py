@@ -55,6 +55,20 @@ def split_hook_name_body(text: str) -> tuple[str, str]:
     return name, body
 
 
+def normalize_generated_hook_text(text: str, max_words: int = HOOK_MAX_WORDS) -> str:
+    """Validate AI hook while preserving its required inline name marker."""
+    cleaned = re.sub(r"\s+", " ", str(text or "").strip())
+    name = marked_hook_name(cleaned)
+    if not name:
+        raise ValueError("Hook AI wajib menandai nama orang dengan [NAMA]")
+    if name.strip().upper() in {"NAMA", "NAMA ORANG", "NAME", "PERSON"}:
+        raise ValueError("Hook AI wajib memakai nama orang nyata, bukan placeholder")
+    words = _WORD_RE.findall(strip_hook_colon(cleaned))
+    if not words or len(words) > max(1, int(max_words)):
+        raise ValueError(f"Hook AI maksimal {max_words} kata")
+    return cleaned.upper()
+
+
 def normalize_hook_text(text: str, max_words: int = HOOK_MAX_WORDS, max_lines: int = HOOK_MAX_LINES) -> str:
     """One uppercase sentence; strip legacy colon; wrap ≤ max_lines."""
     cleaned = strip_hook_colon(text)
@@ -86,13 +100,16 @@ def normalize_hook_text(text: str, max_words: int = HOOK_MAX_WORDS, max_lines: i
 
 
 def validate_hook_text(text: str) -> str:
-    """Validate user-authored hooks before normalization can drop words."""
-    cleaned = "".join(ch for ch in strip_hook_colon(text) if not unicodedata.category(ch).startswith(("S", "C")))
+    """Validate user-authored hooks while preserving an inline name marker."""
+    raw = str(text or "").strip()
+    cleaned = "".join(ch for ch in strip_hook_colon(raw) if not unicodedata.category(ch).startswith(("S", "C")))
     words = _WORD_RE.findall(cleaned)
     if not words:
         raise ValueError("Hook text kosong")
     if len(words) > HOOK_MAX_WORDS:
         raise ValueError(f"Hook maksimal {HOOK_MAX_WORDS} kata")
+    if marked_hook_name(raw):
+        return re.sub(r"\s+", " ", raw).upper()
     return normalize_hook_text(cleaned)
 
 
@@ -176,7 +193,9 @@ def sanitize_subtitle_token(token: str) -> str:
     for ch in text:
         if ch.isalnum() or ch.isspace() or ch in _ALLOWED_SUBTITLE_PUNCT or ch in {"\\", "{", "}"}:
             out.append(ch)
-        elif ch in {".", ",", "?", ";", ":", "\"", "'", "“", "”", "‘", "’", "-", "—", "…"}:
+        elif ch in {"-", "—"}:
+            out.append(" ")
+        elif ch in {".", ",", "?", ";", ":", "\"", "'", "“", "”", "‘", "’", "…"}:
             continue
         # drop other symbols
     return "".join(out)

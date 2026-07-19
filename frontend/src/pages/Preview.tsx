@@ -100,8 +100,8 @@ export default function Preview() {
   const editHook = async (clip: WorkflowClip) => {
     const text = uploadText[clip.clip_id] || { title: clip.title, description: clip.description, hook_text: clip.hook_text || '' };
     const words = text.hook_text.trim().split(/\s+/).filter(Boolean);
-    if (words.length > 8) {
-      setPageError('Hook maksimal 8 kata.');
+    if (words.length > 6) {
+      setPageError('Hook maksimal 6 kata.');
       return;
     }
     const result = await run('/api/clip/hook', { clip_id: clip.clip_id, hook_text: text.hook_text }, 'Render ulang hook gagal.');

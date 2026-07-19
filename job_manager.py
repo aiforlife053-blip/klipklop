@@ -41,7 +41,7 @@ GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 GEMINI_MODEL = "gemini-2.5-flash"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 GROQ_MODEL = "whisper-large-v3-turbo"
-SUPPORTED_VIDEO_QUALITIES = frozenset({"480", "720", "1080"})
+SUPPORTED_VIDEO_QUALITIES = frozenset({"480", "720", "1080", "1440"})
 _GLOBAL_QUEUE = queue.Queue()
 _GLOBAL_QUEUE_LOCK = threading.Lock()
 _GLOBAL_PENDING = []
@@ -174,7 +174,7 @@ class WebJobManager:
             settings_payload = {}
         requested_quality = str(payload.get("video_quality") or settings_payload.get("video_quality") or "")
         if requested_quality and requested_quality not in SUPPORTED_VIDEO_QUALITIES:
-            return {"status": "error", "message": "Kualitas video harus 480, 720, atau 1080"}
+            return {"status": "error", "message": "Kualitas video harus 480, 720, 1080, atau 1440"}
 
         if "settings" in payload and isinstance(payload["settings"], dict):
             self.save_settings(self._settings_from_start_payload(payload))
@@ -975,7 +975,7 @@ class WebJobManager:
             or "720"
         )
         if settings["video_quality"] not in SUPPORTED_VIDEO_QUALITIES:
-            raise LayoutModeError("Kualitas video harus 480, 720, atau 1080")
+            raise LayoutModeError("Kualitas video harus 480, 720, 1080, atau 1440")
         settings["screen_size"] = "9:16"
         settings["landscape_blur"] = False
         settings["watermark"]["enabled"] = False

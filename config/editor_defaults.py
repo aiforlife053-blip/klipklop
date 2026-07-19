@@ -41,13 +41,13 @@ EDITOR_DEFAULTS = {
     },
     "hook_style": {
         "enabled": True,
-        "font_size": 0.075,
+        "font_size": 0.070,
         "letter_spacing": -0.001388888888888889,
         "font_family": "Poppins",
         "font_weight": 700,
         "text_color": "#FFFFFF",
         "outline_color": "#000000",
-        "outline_thickness": 3.1481481481481484,
+        "outline_thickness": 2.5185185185185186,
         "duration": 5.0,
         "position_x": 0.5,
         "position_y": 0.62,
@@ -64,7 +64,7 @@ EDITOR_DEFAULTS = {
         "position_x": 0.5,
         "position_y": 0.78,
         "text_transform": "uppercase",
-        "letter_spacing": 0.001851851851851852,
+        "letter_spacing": 0.001388888888888889,
         "bg_color": "#000000",
         "bg_opacity": 0.0,
         "font_family": "Poppins",
@@ -121,8 +121,8 @@ def v3_locked_render_settings(base=None):
     settings["hook_style"]["max_lines"] = HOOK_MAX_LINES
     settings["hook_style"]["letter_spacing"] = EDITOR_DEFAULTS["hook_style"]["letter_spacing"]
     mode = settings["video_layout"].get("mode")
+    settings["hook_style"]["font_size"] = 0.070
     if mode == "vertical_full":
-        settings["hook_style"]["font_size"] = 0.075
         settings["subtitle"]["size"] = 0.062
     if mode in {"split_middle"}:
         settings["subtitle"]["position_y"] = 0.5

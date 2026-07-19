@@ -14,7 +14,7 @@ from config.editor_defaults import (
 from layout_modes import build_filtergraph, output_geometry
 from speaker_tracking import choose_speaker
 from subtitle_cues import build_subtitle_cues
-from visual_style import find_hook_name_span, hook_name_from_title, hook_tts_text, normalize_hook_text, sanitize_subtitle_text, sanitize_subtitle_token, validate_hook_text
+from visual_style import find_hook_name_span, hook_name_from_title, hook_tts_text, normalize_generated_hook_text, normalize_hook_text, sanitize_subtitle_text, sanitize_subtitle_token, validate_hook_text
 from clipper_core import LocalClipRenderer
 from clipper_ai import ensure_five_hashtags
 
@@ -44,6 +44,47 @@ def test_hook_sentence_keeps_name_inside_one_readable_sentence():
     assert span == (1, 3)
 
 
+def test_generated_hook_keeps_required_inline_name_marker_for_renderer():
+    raw = "TERNYATA [ALDI TAHER] BUKAN JIGONG!"
+    stored = normalize_generated_hook_text(raw)
+    assert stored == raw
+    words = normalize_hook_text(stored).replace("\n", " ").split()
+    assert find_hook_name_span(words, original_text=stored) == (1, 3)
+
+
+def test_generated_declarative_hook_does_not_require_terminal_punctuation():
+    raw = "ALASAN [ALDI TAHER] SERING TERLAMBAT"
+    assert normalize_generated_hook_text(raw) == raw
+
+
+def test_generated_hook_rejects_literal_name_placeholder():
+    with pytest.raises(ValueError, match="nama orang nyata"):
+        normalize_generated_hook_text("PENYESALAN TERBESAR [NAMA] SELAMA PANDEMI COVID")
+
+
+def test_prompt_requires_name_but_does_not_force_it_to_the_front():
+    from clipper_ai import AiMixin
+
+    prompt = AiMixin.get_default_prompt().lower()
+    assert "nama orang wajib ada" in prompt
+    assert "nama boleh berada di posisi mana pun" in prompt
+    assert "wajib diawali [nama" not in prompt
+    assert "satu kalimat utuh, natural" in prompt
+
+
+def test_prompt_requires_contextual_declarative_hook_not_empty_question():
+    from clipper_ai import AiMixin
+
+    prompt = AiMixin.get_default_prompt().lower()
+    assert "headline deklaratif" in prompt
+    assert "bukan kalimat tanya" in prompt
+    assert "kata penentu konteks bersifat opsional" in prompt
+    assert "dilarang menambah" in prompt
+    assert "alasan [aldi taher] sering terlambat" in prompt
+    assert "kenapa [aldi taher] telat terus" in prompt
+    assert "wajib akhiri dengan ?" not in prompt
+
+
 def test_hook_removes_emoji_from_overlay_and_tts():
     raw = "ASILA MAISA DITUDUH JADI SELINGKUHAN 😮"
     assert "😮" not in normalize_hook_text(raw)
@@ -63,6 +104,43 @@ def test_tts_removes_comma_after_full_name():
 def test_user_hook_above_six_words_is_rejected_not_truncated():
     with pytest.raises(ValueError, match="maksimal 6 kata"):
         validate_hook_text("satu dua tiga empat lima enam tujuh delapan sembilan")
+
+
+def test_user_hook_keeps_inline_name_marker_for_renderer():
+    stored = validate_hook_text("[ALDI TAHER] TENANG HADAPI KANKER")
+    assert "[ALDI TAHER]" in stored
+    words = normalize_hook_text(stored).replace("\n", " ").split()
+    assert find_hook_name_span(words, original_text=stored) == (0, 2)
+
+
+def test_subtitle_hyphenated_repetition_becomes_separate_words_with_three_word_cap():
+    transcript = {
+        "duration": 3.0,
+        "words": [
+            {"word": "muter-muter", "start": 0.0, "end": 1.2},
+            {"word": "tuh", "start": 1.2, "end": 1.5},
+            {"word": "sebenernya", "start": 1.5, "end": 2.0},
+        ],
+        "segments": [],
+    }
+    cues = build_subtitle_cues(transcript)
+    assert [cue["text"] for cue in cues] == ["MUTER MUTER TUH", "SEBENERNYA"]
+    assert all(len(cue["words"]) <= 3 for cue in cues)
+
+
+def test_subtitle_drops_same_word_alternative_but_keeps_later_repetition():
+    transcript = {
+        "duration": 2.0,
+        "words": [
+            {"word": "single", "start": 0.0, "end": 0.24},
+            {"word": "Single", "start": 0.0, "end": 0.64},
+            {"word": "gak", "start": 0.24, "end": 0.42},
+            {"word": "gak", "start": 0.64, "end": 0.8},
+        ],
+        "segments": [],
+    }
+    text = " ".join(cue["text"] for cue in build_subtitle_cues(transcript))
+    assert text == "SINGLE GAK GAK"
 
 
 def test_hook_infers_leading_person_name_shared_with_title():
@@ -187,6 +265,61 @@ def test_hook_bold_font_does_not_add_synthetic_outline(tmp_path, monkeypatch):
     assert strokes and set(strokes) == {3}
 
 
+def test_hook_overlay_preserves_inline_sentence_word_order(tmp_path, monkeypatch):
+    from PIL import ImageDraw
+
+    drawn = []
+    real_draw = ImageDraw.Draw
+
+    class RecordingDraw:
+        def __init__(self, image):
+            self.inner = real_draw(image)
+        def textbbox(self, *args, **kwargs):
+            return self.inner.textbbox(*args, **kwargs)
+        def text(self, xy, text, *args, **kwargs):
+            drawn.append(text)
+            return self.inner.text(xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw, "Draw", RecordingDraw)
+    renderer = object.__new__(LocalClipRenderer)
+    renderer.hook_style_settings = {"font_size": 0.075, "max_lines": 4}
+    renderer._create_hook_overlay("KENAPA [ALDI TAHER] TELAT TERUS?!", 1080, 1920, tmp_path / "order.png")
+    assert "".join(drawn) == "KENAPAALDITAHERTELATTERUS?!"
+
+
+def test_hook_name_is_cyan_when_inline(tmp_path):
+    from PIL import Image
+
+    renderer = object.__new__(LocalClipRenderer)
+    renderer.hook_style_settings = {"font_size": 0.075, "max_lines": 4}
+    output = tmp_path / "inline-name-cyan.png"
+    renderer._create_hook_overlay("TERNYATA [ZED QIX] BOHONG!", 540, 960, output)
+    pixels = Image.open(output).convert("RGBA").getdata()
+    assert any(r < 100 and g > 170 and b > 190 and a > 200 for r, g, b, a in pixels)
+
+
+def test_hook_name_is_only_slightly_larger_than_body(tmp_path, monkeypatch):
+    from PIL import ImageDraw
+
+    sizes = {}
+    real_draw = ImageDraw.Draw
+
+    class RecordingDraw:
+        def __init__(self, image):
+            self.inner = real_draw(image)
+        def textbbox(self, *args, **kwargs):
+            return self.inner.textbbox(*args, **kwargs)
+        def text(self, xy, text, *args, **kwargs):
+            sizes.setdefault(text, kwargs["font"].size)
+            return self.inner.text(xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw, "Draw", RecordingDraw)
+    renderer = object.__new__(LocalClipRenderer)
+    renderer.hook_style_settings = {"font_size": 0.075, "max_lines": 4}
+    renderer._create_hook_overlay("TERNYATA [ZED QIX] BOHONG!", 1080, 1920, tmp_path / "name-size.png")
+    assert 1.1 <= sizes["Z"] / sizes["B"] <= 1.25
+
+
 def test_hook_overlay_highlights_inline_name_blue(tmp_path):
     renderer = object.__new__(LocalClipRenderer)
     renderer.hook_style_settings = {
@@ -206,7 +339,7 @@ def test_subtitle_defaults_target_98px_and_reference_blue():
     sub = EDITOR_DEFAULTS["subtitle"]
     assert sub["color"] == "#2CCDE7"
     assert sub["text_transform"] == "uppercase"
-    assert sub["letter_spacing"] == pytest.approx(2 / 1080)
+    assert sub["letter_spacing"] == pytest.approx(1.5 / 1080)
     assert sub["font_family"] == "Poppins"
     assert sub["font_weight"] == 700
     assert sub["word_min"] == 3
@@ -236,10 +369,15 @@ def test_hook_defaults_max_six_words_four_lines():
     assert HOOK_MAX_WORDS == 6
     assert hook["max_lines"] == 4
     assert hook["max_words"] == 6
-    # size formula: font_size * 500 / 340 * width ≈ 119 @1080 (60px @540)
+    # compact hook: ≈111px @1080 (56px @540)
     px = int(max(16, float(hook["font_size"]) * 500) / 340 * 1080)
-    assert 118 <= px <= 120
-    assert hook["outline_thickness"] == pytest.approx(10 * 340 / 1080)
+    assert 110 <= px <= 112
+    assert hook["outline_thickness"] == pytest.approx(8 * 340 / 1080)
+
+
+def test_tts_pronunciation_keeps_jigong_overlay_but_guides_final_ng():
+    assert LocalClipRenderer._tts_text("[ALDI TAHER] BAHAS JIGONG!") == "ALDI TAHER BAHAS JIGONG!"
+    assert "ji-gong" in LocalClipRenderer._tts_pronunciation_text("ALDI TAHER BAHAS JIGONG!").lower()
 
 
 def test_sanitize_subtitle_strips_question_comma_period():
@@ -326,12 +464,12 @@ def test_v3_locked_settings_force_new_visual_contract():
 def test_vertical_full_uses_dense_chest_hook_and_98px_subtitle():
     vertical = v3_locked_render_settings({"video_layout": {"mode": "vertical_full"}})
     split = v3_locked_render_settings({"video_layout": {"mode": "split_middle"}})
-    assert vertical["hook_style"]["font_size"] == 0.075
+    assert vertical["hook_style"]["font_size"] == 0.070
     assert vertical["hook_style"]["letter_spacing"] == pytest.approx(-1.5 / 1080)
     assert vertical["hook_style"]["position_y"] == 0.62
     assert vertical["subtitle"]["size"] == 0.062
-    assert vertical["subtitle"]["letter_spacing"] == pytest.approx(2 / 1080)
-    assert split["hook_style"]["font_size"] == 0.075
+    assert vertical["subtitle"]["letter_spacing"] == pytest.approx(1.5 / 1080)
+    assert split["hook_style"]["font_size"] == 0.070
     assert split["subtitle"]["size"] == 0.062
 
 
@@ -397,6 +535,6 @@ def test_prompt_prioritizes_funny_moments():
     assert funny_idx != -1
     assert funny_idx < conflict_idx or "prioritas utama" in lower
     assert "maksimal 6 kata" in lower or "maks 6 kata" in lower
-    assert "3 baris putih" in lower
-    assert "membuat penasaran" in lower
+    assert "nama sedikit lebih besar dan cyan" in lower
+    assert "memberi konteks inti klip" in lower
     assert '"[lucu] "' in lower

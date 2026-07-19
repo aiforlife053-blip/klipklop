@@ -46,6 +46,7 @@ def test_output_geometry_default_and_quality_map():
     assert output_geometry("480") == (540, 960)
     assert output_geometry("720") == (720, 1280)
     assert output_geometry("1080") == (1080, 1920)
+    assert output_geometry("1440") == (1440, 2560)
 
 
 def test_modes_reject_or_accept_orientation_as_contracted():
@@ -262,7 +263,7 @@ def test_filtergraph_output_geometry_follows_quality(tmp_path):
         ],
         check=True,
     )
-    for quality, expected in (("480", (540, 960)), ("720", (720, 1280)), ("1080", (1080, 1920))):
+    for quality, expected in (("480", (540, 960)), ("720", (720, 1280)), ("1080", (1080, 1920)), ("1440", (1440, 2560))):
         out_w, out_h = output_geometry(quality)
         filters, label = build_filtergraph("vertical_full", 854, 480, None, out_w, out_h)
         target = tmp_path / f"q{quality}.mp4"

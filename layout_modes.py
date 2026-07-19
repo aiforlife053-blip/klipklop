@@ -19,6 +19,7 @@ V3_OUTPUT_GEOMETRIES = {
     "480": (540, 960),
     "720": (720, 1280),
     "1080": (V3_OUTPUT_WIDTH, V3_OUTPUT_HEIGHT),
+    "1440": (1440, 2560),
 }
 
 

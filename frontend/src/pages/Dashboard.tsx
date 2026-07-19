@@ -181,7 +181,6 @@ export default function Dashboard() {
               <option value="720">720p</option>
               <option value="1080">1080p</option>
               <option value="1440">1440p (2K)</option>
-              <option value="2160">2160p (4K)</option>
             </select>
             <label className="sr-only" htmlFor="clip-count">Jumlah Klip</label>
             <select id="clip-count" value={numClips} onChange={(event) => setNumClips(Number(event.target.value))} className="h-9 rounded-full border border-field bg-secondary px-3.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary">
