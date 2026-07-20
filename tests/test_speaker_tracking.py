@@ -333,6 +333,23 @@ def test_mediapipe_landmarks_create_face_box():
     assert mediapipe_face_box(landmarks, 1000, 500) == (250, 100, 250, 200)
 
 
+def test_pose_head_box_centers_wide_shot_person_when_face_mesh_misses():
+    from speaker_tracking import pose_head_box
+
+    landmarks = {
+        0: (0.80, 0.30, 0.99),
+        2: (0.82, 0.29, 0.99),
+        5: (0.78, 0.29, 0.99),
+        7: (0.84, 0.32, 0.99),
+        8: (0.76, 0.32, 0.99),
+    }
+    box = pose_head_box(landmarks, 1280, 720)
+    assert box is not None
+    x, _y, w, _h = box
+    assert abs((x + w / 2) - 1024) <= 2
+    assert crop_x_for_face(box, 1280, 405) == 822
+
+
 def test_hard_cut_switches_once_after_stable_new_talker():
     from speaker_tracking import hard_cut_positions
 
@@ -428,14 +445,38 @@ def test_hold_frames_adds_preroll_before_hidden_shot():
     ) == [False, False, True, True, True, True, False, False]
 
 
-def test_hold_render_frame_reuses_last_valid_face_frame():
+def test_portrait_renderer_never_freezes_previous_frame():
     from clipper_portrait import hold_render_frame
 
     current = np.full((2, 2, 3), 9, dtype=np.uint8)
     previous = np.full((2, 2, 3), 4, dtype=np.uint8)
     result, saved = hold_render_frame(current, previous, hold=True)
-    assert np.array_equal(result, previous)
-    assert np.array_equal(saved, previous)
+    assert np.array_equal(result, current)
+    assert np.array_equal(saved, current)
+
+
+def test_final_active_speaker_crops_switch_inside_same_source_shot():
+    from speaker_tracking import finalize_active_speaker_crops
+
+    targets = [100.0] * 4 + [500.0] * 4
+    speaker_ids = [0] * 4 + [1] * 4
+    source_cuts = [False] * 8
+    assert finalize_active_speaker_crops(targets, speaker_ids, source_cuts, fps=10) == [100] * 4 + [500] * 4
+
+
+def test_final_active_speaker_crop_centers_selected_face_not_other_visible_face():
+    from speaker_tracking import finalize_active_speaker_crops
+
+    targets = [100.0, 100.0, 500.0, 500.0]
+    speaker_ids = [0, 0, 1, 1]
+    assert finalize_active_speaker_crops(targets, speaker_ids, [False] * 4, fps=10) == [100, 100, 500, 500]
+
+
+def test_final_active_speaker_crops_remove_post_cut_flash_run():
+    from speaker_tracking import collapse_short_crop_runs
+
+    positions = [100] * 5 + [700] + [300] * 8
+    assert collapse_short_crop_runs(positions, fps=10, min_run_seconds=0.3) == [100] * 5 + [300] * 9
 
 
 def test_hold_frames_treats_detector_misses_as_no_face_not_previous_candidate():

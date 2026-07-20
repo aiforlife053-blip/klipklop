@@ -10,10 +10,8 @@ from clipper_base import ClipperBase
 from utils.logger import debug_log
 
 
-def hold_render_frame(current: np.ndarray, previous: np.ndarray | None, hold: bool):
-    """Return previous face frame when current source shot must be hidden."""
-    if hold and previous is not None:
-        return previous.copy(), previous
+def hold_render_frame(current, previous, hold: bool):
+    """Never freeze video; camera stability comes from crop positions."""
     return current, current.copy()
 
 

@@ -54,7 +54,7 @@ def extract_audio_energy(source_path: str, fps: float, frame_count: int, sample_
     return energies
 
 
-TRACKER_VERSION = "scene-face-v5-face-hold"
+TRACKER_VERSION = "scene-face-v7-pose-human-fallback"
 # Stay on current speaker ~1s after cut, then allow switch to next talker.
 HOLD_SECONDS = 1.0
 SMOOTH_SECONDS = 0.25
@@ -136,6 +136,21 @@ def mediapipe_face_box(landmarks: list[tuple[float, float]], frame_width: int, f
     left, right = int(min(xs) * frame_width), int(max(xs) * frame_width)
     top, bottom = int(min(ys) * frame_height), int(max(ys) * frame_height)
     return left, top, max(1, right - left), max(1, bottom - top)
+
+
+def pose_head_box(landmarks: dict[int, tuple[float, float, float]], frame_width: int, frame_height: int):
+    """Build a face-like box from visible MediaPipe Pose head landmarks."""
+    points = [landmarks[index] for index in (0, 2, 5, 7, 8) if index in landmarks and landmarks[index][2] >= 0.35]
+    if len(points) < 3 or frame_width <= 0 or frame_height <= 0:
+        return None
+    center_x = sum(point[0] for point in points) / len(points)
+    center_y = sum(point[1] for point in points) / len(points)
+    span = max(0.05, max(point[0] for point in points) - min(point[0] for point in points))
+    width = max(24, int(round(span * frame_width * 2.2)))
+    height = max(24, int(round(width * 1.15)))
+    left = int(round(center_x * frame_width - width / 2))
+    top = int(round(center_y * frame_height - height / 2))
+    return max(0, left), max(0, top), width, height
 
 
 def mediapipe_lip_activity(landmarks: dict[int, tuple[float, float]], previous=None) -> float:
@@ -762,6 +777,7 @@ def track_crop_positions(
         )
         use_faces = not cascade.empty()
         face_mesh = None
+        pose = None
         try:
             import mediapipe as mp
             face_mesh = mp.solutions.face_mesh.FaceMesh(
@@ -771,8 +787,15 @@ def track_crop_positions(
                 min_detection_confidence=0.5,
                 min_tracking_confidence=0.5,
             )
+            pose = mp.solutions.pose.Pose(
+                static_image_mode=False,
+                model_complexity=1,
+                min_detection_confidence=0.35,
+                min_tracking_confidence=0.35,
+            )
         except (ImportError, AttributeError, RuntimeError):
             face_mesh = None
+            pose = None
         hold_frames = max(1, int(round(fps * hold_seconds)))
         raw_targets: list[float] = []
         raw_ids: list[int | None] = []
@@ -811,8 +834,9 @@ def track_crop_positions(
             candidates = []
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             face_rows = []
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             if face_mesh is not None:
-                result = face_mesh.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                result = face_mesh.process(rgb)
                 for face_landmarks in result.multi_face_landmarks or []:
                     points = [(point.x, point.y) for point in face_landmarks.landmark]
                     box = mediapipe_face_box(points, source_width, source_height)
@@ -823,6 +847,19 @@ def track_crop_positions(
                     if valid_face_detection(f_score):
                         lips = {index: points[index] for index in (13, 14, 61, 291)}
                         face_rows.append((x, y, w, h, f_score, lips))
+            # Wide shots often defeat Face Mesh. Pose still finds a real human
+            # head, preventing scene fallback from centering racks/pots/walls.
+            if not face_rows and pose is not None:
+                pose_result = pose.process(rgb)
+                if pose_result.pose_landmarks:
+                    pose_points = {
+                        index: (point.x, point.y, point.visibility)
+                        for index, point in enumerate(pose_result.pose_landmarks.landmark)
+                    }
+                    box = pose_head_box(pose_points, source_width, source_height)
+                    if box is not None:
+                        x, y, w, h = box
+                        face_rows.append((x, y, w, h, 0.35, None))
             # MediaPipe miss/error path: retain OpenCV detector as fallback.
             if not face_rows and use_faces:
                 faces = cascade.detectMultiScale(
@@ -936,23 +973,13 @@ def track_crop_positions(
             raw_targets = [seed]
             raw_ids = [None]
 
-        # One fixed crop per active speaker. Switch only after stable debounce;
-        # no interpolation/pan between positions.
-        cut_positions = hard_cut_positions(
-            raw_targets,
-            raw_ids,
-            fps,
-            debounce_seconds=SWITCH_DEBOUNCE_SECONDS,
-            hold_seconds=hold_seconds,
+        # One fixed, centered crop per chosen-speaker run. The speaker selector
+        # already applies hysteresis; a second hold delayed real speaker cuts.
+        cut_positions = finalize_active_speaker_crops(
+            raw_targets, raw_ids, source_cuts, fps,
         )
-        cut_positions = stabilize_visible_crops(
-            cut_positions, frame_candidates, fallback_positions, source_cuts,
-            crop_width, source_width,
-        )
-        # Reference policy: active-speaker evidence chooses framing, then one
-        # fixed crop is held for each confirmed source shot.
-        cut_positions = lock_crop_per_source_shot(cut_positions, source_cuts)
-        hold_frames = build_hold_frames(frame_candidates, source_cuts, fps)
+        cut_positions = collapse_short_crop_runs(cut_positions, fps)
+        hold_frames = [False] * len(cut_positions)
         # Pad/truncate to total_frames if known
         if total_frames > 0:
             if len(cut_positions) < total_frames:
@@ -975,6 +1002,8 @@ def track_crop_positions(
     finally:
         if "face_mesh" in locals() and face_mesh is not None:
             face_mesh.close()
+        if "pose" in locals() and pose is not None:
+            pose.close()
         capture.release()
 
 
@@ -1018,6 +1047,49 @@ def lock_crop_per_source_shot(
         crop = members[len(members) // 2]
         locked[start:end] = [crop] * (end - start)
     return locked
+
+
+def finalize_active_speaker_crops(
+    targets: list[float],
+    speaker_ids: list[int | None],
+    source_cuts: list[bool],
+    fps: float,
+) -> list[int]:
+    """Lock a centered crop per chosen-speaker run, including switches inside a shot."""
+    if not targets:
+        return []
+    ids = list(speaker_ids[:len(targets)]) + [None] * max(0, len(targets) - len(speaker_ids))
+    cuts = list(source_cuts[:len(targets)]) + [False] * max(0, len(targets) - len(source_cuts))
+    out = [int(round(value)) for value in targets]
+    start = 0
+    for index in range(1, len(targets) + 1):
+        boundary = index == len(targets) or cuts[index] or ids[index] != ids[index - 1]
+        if not boundary:
+            continue
+        values = sorted(int(round(value)) for value in targets[start:index])
+        crop = values[len(values) // 2]
+        out[start:index] = [crop] * (index - start)
+        start = index
+    return out
+
+
+def collapse_short_crop_runs(
+    positions: list[int],
+    fps: float,
+    min_run_seconds: float = 0.3,
+) -> list[int]:
+    """Replace sub-300ms crop flashes with the following stable crop."""
+    out = list(positions)
+    minimum = max(1, int(round(max(0.0, fps) * min_run_seconds)))
+    start = 0
+    while start < len(out):
+        end = start + 1
+        while end < len(out) and out[end] == out[start]:
+            end += 1
+        if start > 0 and end < len(out) and end - start < minimum:
+            out[start:end] = [out[end]] * (end - start)
+        start = end
+    return out
 
 
 def build_hold_frames(
