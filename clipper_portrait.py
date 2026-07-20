@@ -10,6 +10,13 @@ from clipper_base import ClipperBase
 from utils.logger import debug_log
 
 
+def hold_render_frame(current: np.ndarray, previous: np.ndarray | None, hold: bool):
+    """Return previous face frame when current source shot must be hidden."""
+    if hold and previous is not None:
+        return previous.copy(), previous
+    return current, current.copy()
+
+
 class PortraitMixin(ClipperBase):
     def _get_target_portrait_dims(self, orig_w: int, orig_h: int) -> tuple[int, int]:
         """Get target (out_w, out_h) dynamically from self.output_resolution or source video dimensions."""
@@ -141,6 +148,7 @@ class PortraitMixin(ClipperBase):
             raise Exception(f"Active-speaker crop failed: {exc}") from exc
 
         crop_positions = tracking["crop_positions"]
+        hold_frames = tracking.get("hold_frames") or [False] * len(crop_positions)
         layouts = tracking.get("layouts") if supports_layouts else None
         layouts = layouts or ["crop"] * len(crop_positions)
         crop_w = int(tracking["crop_width"])
@@ -172,6 +180,7 @@ class PortraitMixin(ClipperBase):
         frame_idx = 0
         last_log_time = 0
         last_frame_time = time.time()
+        last_visible_frame = None
 
         while True:
             if self.is_cancelled():
@@ -211,10 +220,9 @@ class PortraitMixin(ClipperBase):
                 crop_x = max(0, min(int(crop_x), max(0, orig_w - crop_w)))
                 cropped = frame[0:crop_h, crop_x:crop_x + crop_w]
                 resized = cv2.resize(cropped, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
-            success = out.write(resized)
-            if not success:
-                print(f"[WARNING] Failed to write frame {frame_idx}")
-                sys.stdout.flush()
+            hold = hold_frames[frame_idx] if frame_idx < len(hold_frames) else False
+            resized, last_visible_frame = hold_render_frame(resized, last_visible_frame, hold)
+            out.write(resized)
 
             frame_idx += 1
             if frame_idx % 30 == 0 or (current_time - last_log_time) > 2:

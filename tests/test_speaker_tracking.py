@@ -385,3 +385,84 @@ def test_final_tracker_policy_removes_post_cut_settling_jitter():
     positions = [100, 100, 400, 430, 431, 430, 430]
     source_cuts = [False, False, True, False, False, False, False]
     assert lock_crop_per_source_shot(positions, source_cuts) == [100, 100, 430, 430, 430, 430, 430]
+
+
+def test_hold_frames_freezes_whole_shot_without_any_face():
+    from speaker_tracking import build_hold_frames
+
+    candidates = [[{"face": (1, 1, 10, 10)}], [], [], [{"face": (1, 1, 10, 10)}]]
+    cuts = [False, True, False, True]
+    assert build_hold_frames(candidates, cuts, fps=1, min_shot_seconds=0) == [False, True, True, False]
+
+
+def test_hold_frames_suppresses_subsecond_flash_shot():
+    from speaker_tracking import build_hold_frames
+
+    candidates = [[{"face": (1, 1, 10, 10)}]] * 8
+    cuts = [False, False, True, False, True, False, False, False]
+    assert build_hold_frames(
+        candidates, cuts, fps=4, min_shot_seconds=1.0, hold_preroll_seconds=0,
+    ) == [False, False, True, True, False, False, False, False]
+
+
+def test_hold_frames_rejects_sparse_false_face_in_broll_shot():
+    from speaker_tracking import build_hold_frames
+
+    face = [{"face": (1, 1, 10, 10)}]
+    candidates = [face, face, [], [], face, [], face, face]
+    cuts = [False, False, True, False, False, False, True, False]
+    assert build_hold_frames(
+        candidates, cuts, fps=2, min_shot_seconds=0, min_face_coverage=0.5,
+        hold_preroll_seconds=0,
+    ) == [False, False, True, True, True, True, False, False]
+
+
+def test_hold_frames_adds_preroll_before_hidden_shot():
+    from speaker_tracking import build_hold_frames
+
+    face = [{"face": (1, 1, 10, 10)}]
+    candidates = [face, face, face, face, [], [], face, face]
+    cuts = [False, False, False, False, True, False, True, False]
+    assert build_hold_frames(
+        candidates, cuts, fps=4, min_shot_seconds=0, hold_preroll_seconds=0.5,
+    ) == [False, False, True, True, True, True, False, False]
+
+
+def test_hold_render_frame_reuses_last_valid_face_frame():
+    from clipper_portrait import hold_render_frame
+
+    current = np.full((2, 2, 3), 9, dtype=np.uint8)
+    previous = np.full((2, 2, 3), 4, dtype=np.uint8)
+    result, saved = hold_render_frame(current, previous, hold=True)
+    assert np.array_equal(result, previous)
+    assert np.array_equal(saved, previous)
+
+
+def test_hold_frames_treats_detector_misses_as_no_face_not_previous_candidate():
+    from speaker_tracking import build_hold_frames
+
+    face = [{"face": (1, 1, 10, 10)}]
+    candidates = [face, face, [], [], [], [], face, face]
+    cuts = [False, False, True, False, False, False, True, False]
+    hold = build_hold_frames(candidates, cuts, fps=2, min_shot_seconds=0)
+    assert hold[2:6] == [True] * 4
+
+
+def test_hold_frames_ignores_unsampled_frames_for_face_coverage():
+    from speaker_tracking import build_hold_frames
+
+    face = [{"face": (1, 1, 10, 10)}]
+    candidates = [face, None, face, None, face, None]
+    assert build_hold_frames(
+        candidates, [False] * 6, fps=4, min_shot_seconds=1.0,
+    ) == [False] * 6
+
+
+def test_default_hold_suppresses_one_second_source_flash():
+    from speaker_tracking import build_hold_frames
+
+    face = [{"face": (1, 1, 10, 10)}]
+    candidates = [face] * 4 + [face] * 4 + [face] * 8
+    cuts = [False] * 4 + [True] + [False] * 3 + [True] + [False] * 7
+    hold = build_hold_frames(candidates, cuts, fps=4, hold_preroll_seconds=0)
+    assert hold[4:8] == [True] * 4

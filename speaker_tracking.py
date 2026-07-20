@@ -54,7 +54,7 @@ def extract_audio_energy(source_path: str, fps: float, frame_count: int, sample_
     return energies
 
 
-TRACKER_VERSION = "scene-face-v4-mediapipe-shot-lock"
+TRACKER_VERSION = "scene-face-v5-face-hold"
 # Stay on current speaker ~1s after cut, then allow switch to next talker.
 HOLD_SECONDS = 1.0
 SMOOTH_SECONDS = 0.25
@@ -776,7 +776,7 @@ def track_crop_positions(
         hold_frames = max(1, int(round(fps * hold_seconds)))
         raw_targets: list[float] = []
         raw_ids: list[int | None] = []
-        frame_candidates: list[list[dict]] = []
+        frame_candidates: list[list[dict] | None] = []
         prev_mouth_rois: dict[int, np.ndarray] = {}
         prev_lip_landmarks: dict[int, dict[int, tuple[float, float]]] = {}
         current_id = None
@@ -794,7 +794,9 @@ def track_crop_positions(
             if sample_stride > 1 and frame_index % sample_stride != 0 and raw_targets:
                 raw_targets.append(raw_targets[-1])
                 raw_ids.append(raw_ids[-1] if raw_ids else current_id)
-                frame_candidates.append(frame_candidates[-1] if frame_candidates else [])
+                # Position may be held on skipped analysis frames, but face
+                # evidence must not be fabricated from the previous frame.
+                frame_candidates.append(None)
                 frame_index += 1
                 continue
 
@@ -950,6 +952,7 @@ def track_crop_positions(
         # Reference policy: active-speaker evidence chooses framing, then one
         # fixed crop is held for each confirmed source shot.
         cut_positions = lock_crop_per_source_shot(cut_positions, source_cuts)
+        hold_frames = build_hold_frames(frame_candidates, source_cuts, fps)
         # Pad/truncate to total_frames if known
         if total_frames > 0:
             if len(cut_positions) < total_frames:
@@ -959,6 +962,7 @@ def track_crop_positions(
 
         return {
             "crop_positions": cut_positions,
+            "hold_frames": hold_frames,
             "source_cuts": source_cuts,
             "crop_width": crop_width,
             "source_width": source_width,
@@ -1014,6 +1018,33 @@ def lock_crop_per_source_shot(
         crop = members[len(members) // 2]
         locked[start:end] = [crop] * (end - start)
     return locked
+
+
+def build_hold_frames(
+    frame_candidates: list[list[dict] | None],
+    source_cuts: list[bool],
+    fps: float,
+    min_shot_seconds: float = 1.25,
+    min_face_coverage: float = 0.5,
+    hold_preroll_seconds: float = 0.5,
+) -> list[bool]:
+    """Freeze previous face frame for faceless or sub-second source shots."""
+    count = len(frame_candidates)
+    cuts = list(source_cuts[:count]) + [False] * max(0, count - len(source_cuts))
+    boundaries = [0] + [i for i in range(1, count) if cuts[i]] + [count]
+    hold = [False] * count
+    min_frames = max(0, int(round(max(0.0, fps) * min_shot_seconds)))
+    for start, end in zip(boundaries, boundaries[1:]):
+        analyzed = [frame_candidates[index] for index in range(start, end) if frame_candidates[index] is not None]
+        face_frames = sum(bool(candidates) for candidates in analyzed)
+        coverage = face_frames / max(1, len(analyzed))
+        if start > 0 and (coverage < min_face_coverage or (min_frames and end - start < min_frames)):
+            hold[start:end] = [True] * (end - start)
+
+    preroll = max(0, int(round(max(0.0, fps) * hold_preroll_seconds)))
+    for index in [i for i in range(1, count) if hold[i] and not hold[i - 1]]:
+        hold[max(0, index - preroll):index] = [True] * min(preroll, index)
+    return hold
 
 
 def track_shot_speaker_positions(source_path: str) -> dict:
