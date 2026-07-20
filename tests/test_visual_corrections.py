@@ -150,7 +150,7 @@ def test_subtitle_hyphenated_repetition_becomes_separate_words_with_two_word_cap
         "segments": [],
     }
     cues = build_subtitle_cues(transcript)
-    assert [cue["text"] for cue in cues] == ["MUTER MUTER", "TUH SEBENERNYA"]
+    assert [cue["text"] for cue in cues] == ["muter muter", "tuh sebenernya"]
     assert all(len(cue["words"]) <= 2 for cue in cues)
 
 
@@ -166,7 +166,7 @@ def test_subtitle_drops_same_word_alternative_but_keeps_later_repetition():
         "segments": [],
     }
     text = " ".join(cue["text"] for cue in build_subtitle_cues(transcript))
-    assert text == "SINGLE GAK GAK"
+    assert text == "single gak gak"
 
 
 def test_hook_infers_leading_person_name_shared_with_title():
@@ -191,7 +191,7 @@ def test_segment_only_subtitles_are_split_to_max_two_words():
         "words": [],
         "segments": [{"text": "one two three four five six", "start": 0.0, "end": 6.0}],
     })
-    assert [cue["text"] for cue in cues] == ["ONE TWO", "THREE FOUR", "FIVE SIX"]
+    assert [cue["text"] for cue in cues] == ["one two", "three four", "five six"]
     assert all(len(cue["text"].split()) <= 2 for cue in cues)
 
 
@@ -361,10 +361,10 @@ def test_hook_overlay_highlights_inline_name_blue(tmp_path):
     assert any(r > 220 and g > 220 and b > 220 and a > 200 for r, g, b, a in pixels)
 
 
-def test_subtitle_defaults_target_98px_and_reference_blue():
+def test_subtitle_defaults_target_108px_and_reference_blue():
     sub = EDITOR_DEFAULTS["subtitle"]
     assert sub["color"] == "#2CCDE7"
-    assert sub["text_transform"] == "uppercase"
+    assert sub["text_transform"] == "none"
     assert sub["letter_spacing"] == pytest.approx(1.5 / 1080)
     assert sub["font_family"] == "Poppins"
     assert sub["font_weight"] == 700
@@ -372,10 +372,12 @@ def test_subtitle_defaults_target_98px_and_reference_blue():
     assert sub["word_max"] == 2
     assert SUBTITLE_WORD_MIN == 2
     assert SUBTITLE_WORD_MAX == 2
-    # size formula: size * 500 / 340 * width ≈ 98 @1080 (49px @540)
+    # size formula: size * 500 / 340 * width ≈ 108 @1080
     size = float(sub["size"])
     px = int(max(12, size * 500) / 340 * 1080)
-    assert 97 <= px <= 99
+    assert 106 <= px <= 110
+    outline_px = int(round(float(sub["outline_thickness"]) / 340 * 1080))
+    assert 5 <= outline_px <= 7
     assert sub["position_y"] == 0.78
 
 
@@ -413,7 +415,7 @@ def test_sanitize_subtitle_strips_question_comma_period():
     assert sanitize_subtitle_text("Halo? apa, stop.") == "Halo apa stop"
 
 
-def test_subtitle_cues_are_max_2_words_uppercase_no_punct():
+def test_subtitle_cues_are_max_2_words_no_punct():
     words = [
         {"word": "Satu?", "start": 0.0, "end": 0.2},
         {"word": "dua,", "start": 0.2, "end": 0.4},
@@ -432,7 +434,7 @@ def test_subtitle_cues_are_max_2_words_uppercase_no_punct():
         assert "," not in cue["text"]
         assert "." not in cue["text"]
     assert len(cues[0]["text"].split()) == 2
-    assert cues[0]["text"] == "SATU DUA"
+    assert cues[0]["text"] == "Satu dua"
 
 
 def test_subtitle_cue_holds_through_short_speech_gap():
@@ -488,24 +490,27 @@ def test_v3_locked_settings_force_new_visual_contract():
     assert settings["video_layout"]["mode"] == "split_middle"
 
 
-def test_vertical_full_uses_dense_chest_hook_and_98px_subtitle():
+def test_vertical_full_uses_dense_chest_hook_and_108px_subtitle():
     vertical = v3_locked_render_settings({"video_layout": {"mode": "vertical_full"}})
     split = v3_locked_render_settings({"video_layout": {"mode": "split_middle"}})
     assert vertical["hook_style"]["font_size"] == 0.070
     assert vertical["hook_style"]["letter_spacing"] == pytest.approx(-1.5 / 1080)
     assert vertical["hook_style"]["position_y"] == 0.62
-    assert vertical["subtitle"]["size"] == 0.062
+    assert vertical["subtitle"]["size"] == 0.068
+    assert vertical["subtitle"]["text_transform"] == "none"
+    assert vertical["subtitle"]["outline_thickness"] == 2.0
     assert vertical["subtitle"]["letter_spacing"] == pytest.approx(1.5 / 1080)
     assert split["hook_style"]["font_size"] == 0.070
-    assert split["subtitle"]["size"] == 0.062
+    assert split["subtitle"]["size"] == 0.068
+    assert split["subtitle"]["text_transform"] == "none"
 
 
 def test_choose_speaker_holds_previous_when_two_active_scores_close():
     candidates = [
-        {"id": 0, "score": 0.80, "crop_x": 10},
-        {"id": 1, "score": 0.78, "crop_x": 400},
+        {"id": 0, "score": 0.80, "crop_x": 10, "mouth": 0.30},
+        {"id": 1, "score": 0.78, "crop_x": 400, "mouth": 0.28},
     ]
-    chosen, conf, hold = choose_speaker(candidates, current_id=0, hold_frames_left=0)
+    chosen, conf, hold, quiet = choose_speaker(candidates, current_id=0, hold_frames_left=0)
     assert chosen == 0
 
 

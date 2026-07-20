@@ -60,17 +60,20 @@ EDITOR_DEFAULTS = {
         "enabled": True,
         "color": "#2CCDE7",
         "text_color": "#FFFFFF",
-        "size": 0.062,
+        # ~108px @1080 (was ~98px at 0.062)
+        "size": 0.068,
         "position_x": 0.5,
         "position_y": 0.78,
-        "text_transform": "uppercase",
+        # Sentence case / as-transcribed — not ALL CAPS
+        "text_transform": "none",
         "letter_spacing": 0.001388888888888889,
         "bg_color": "#000000",
         "bg_opacity": 0.0,
         "font_family": "Poppins",
         "font_weight": 700,
         "outline_color": "#000000",
-        "outline_thickness": 1.0,
+        # ~6px stroke @1080 (was ~3px at 1.0)
+        "outline_thickness": 2.0,
         "shadow": 0,
         "word_min": SUBTITLE_WORD_MIN,
         "word_max": SUBTITLE_WORD_MAX,
@@ -103,11 +106,12 @@ def v3_locked_render_settings(base=None):
     settings["hook_style"]["enabled"] = True
     settings["hook_style"]["font_family"] = "Poppins"
     settings["subtitle"]["enabled"] = True
-    settings["subtitle"]["text_transform"] = "uppercase"
+    settings["subtitle"]["text_transform"] = "none"
     settings["subtitle"]["letter_spacing"] = EDITOR_DEFAULTS["subtitle"]["letter_spacing"]
     settings["subtitle"]["color"] = "#2CCDE7"
     settings["subtitle"]["text_color"] = "#FFFFFF"
     settings["subtitle"]["outline_color"] = "#000000"
+    settings["subtitle"]["outline_thickness"] = EDITOR_DEFAULTS["subtitle"]["outline_thickness"]
     settings["subtitle"]["shadow"] = 0
     settings["subtitle"]["font_family"] = "Poppins"
     settings["subtitle"]["font_weight"] = 700
@@ -122,8 +126,8 @@ def v3_locked_render_settings(base=None):
     settings["hook_style"]["letter_spacing"] = EDITOR_DEFAULTS["hook_style"]["letter_spacing"]
     mode = settings["video_layout"].get("mode")
     settings["hook_style"]["font_size"] = 0.070
-    if mode == "vertical_full":
-        settings["subtitle"]["size"] = 0.062
+    # Same subtitle size for vertical_full + split_middle (locked preset).
+    settings["subtitle"]["size"] = EDITOR_DEFAULTS["subtitle"]["size"]
     if mode in {"split_middle"}:
         settings["subtitle"]["position_y"] = 0.5
     else:

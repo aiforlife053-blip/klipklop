@@ -678,7 +678,19 @@ class ExportMixin(ClipperBase):
         watermark_settings = {**(settings.get("watermark") or {}), "enabled": False}
         credit_settings = {**(settings.get("credit_watermark") or {}), "enabled": True, "text": "sc: @{channel}"}
         hook_settings = {**(settings.get("hook_style") or {}), "enabled": True, "font_family": "Poppins"}
-        subtitle_settings = {**(settings.get("subtitle") or {}), "enabled": True, "text_transform": "uppercase", "font_family": "Poppins", "font_weight": 700, "color": "#2CCDE7", "text_color": "#FFFFFF", "outline_color": "#000000", "shadow": 0}
+        subtitle_settings = {
+            **(settings.get("subtitle") or {}),
+            "enabled": True,
+            "text_transform": "none",
+            "font_family": "Poppins",
+            "font_weight": 700,
+            "color": "#2CCDE7",
+            "text_color": "#FFFFFF",
+            "outline_color": "#000000",
+            "outline_thickness": float((settings.get("subtitle") or {}).get("outline_thickness", 2.0)),
+            "size": float((settings.get("subtitle") or {}).get("size", 0.068)),
+            "shadow": 0,
+        }
         blur_settings = {**(settings.get("blur_background") or {}), "enabled": False}
         self.watermark_settings = watermark_settings
         self.credit_watermark_settings = credit_settings
@@ -751,7 +763,18 @@ class ExportMixin(ClipperBase):
                 if mode == "vertical_full" and source_width > source_height:
                     draft_file = clip_dir / "draft.mp4"
                     reused_draft = False
-                    if draft_file.is_file() and draft_file.stat().st_size >= 1000:
+                    # Reuse draft only when stamped with current tracker version
+                    # (loop engineering / tracker upgrades must re-track).
+                    try:
+                        from speaker_tracking import TRACKER_VERSION as _TRACKER_VERSION
+                    except Exception:
+                        _TRACKER_VERSION = ""
+                    draft_stamp = clip_dir / "draft.tracker"
+                    stamp_ok = (
+                        draft_stamp.is_file()
+                        and draft_stamp.read_text(encoding="utf-8").strip() == str(_TRACKER_VERSION)
+                    )
+                    if draft_file.is_file() and draft_file.stat().st_size >= 1000 and stamp_ok:
                         try:
                             draft_w, draft_h, _ = self._probe_render_input(str(draft_file))
                         except Exception:
@@ -783,6 +806,13 @@ class ExportMixin(ClipperBase):
                             portrait_filters = [
                                 f"[0:v]setpts=PTS-STARTPTS,scale={width}:{height}:flags=lanczos,setsar=1[v0]"
                             ]
+                            # Refresh draft + stamp so next final render can reuse safely.
+                            try:
+                                import shutil as _shutil
+                                _shutil.copyfile(tracked_source, draft_file)
+                                draft_stamp.write_text(str(_TRACKER_VERSION), encoding="utf-8")
+                            except OSError:
+                                pass
                         else:
                             portrait_filters, _ = build_filtergraph(mode, source_width, source_height, roi=roi, out_w=width, out_h=height)
                 else:

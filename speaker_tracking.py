@@ -1,12 +1,13 @@
 """Vertical Full crop: active-speaker face crop with hard cuts.
 
-Policy:
-- Detect source camera shot changes (histogram/frame diff).
-- Pick crop once per shot from faces in that shot.
-- 1 dominant face → medium close-up lock on that face.
-- 2 roughly equal faces → center/two-shot crop.
-- Missing face → hold previous shot crop (or center if never seen).
-- Hard cut only when source shot changes. No pan. No lip/audio speaker guess.
+Policy (camera-first, full-frame only):
+- Follow the talking face; center crop on that face.
+- After a speaker switch, hold ~1s before another switch (anti-hunt).
+- New speaker must lead mouth activity briefly (debounce), then cut.
+- If nobody is clearly talking, lock onto any credible face (never empty B-roll).
+- Missing face → hold last known face crop (never re-center on pots/walls).
+- Never emit contain_blur / letterbox for vertical_full.
+- Never block/fail render when crop is imperfect.
 """
 
 from __future__ import annotations
@@ -53,21 +54,27 @@ def extract_audio_energy(source_path: str, fps: float, frame_count: int, sample_
     return energies
 
 
-TRACKER_VERSION = "scene-face-v1"
-HOLD_SECONDS = 2.0
-SMOOTH_SECONDS = 0.0
-SWITCH_MARGIN = 0.16
+TRACKER_VERSION = "scene-face-v3"
+# Stay on current speaker ~1s after cut, then allow switch to next talker.
+HOLD_SECONDS = 1.0
+SMOOTH_SECONDS = 0.25
+SWITCH_MARGIN = 0.12
 MIN_FACE_CONFIDENCE = 0.25
-SWITCH_DEBOUNCE_SECONDS = 1.2
+# New talker must lead continuously this long before hard-cut.
+SWITCH_DEBOUNCE_SECONDS = 0.45
 
 
 def tracking_strategy():
-    """Vertical Full locks one active-speaker crop per source shot, always full-frame."""
-    return track_shot_speaker_positions, False
-MOUTH_ACTIVE_THRESHOLD = 0.16
-MOUTH_LEAD_MARGIN = 0.06
-DEAD_ZONE_PX = 12.0
-MAX_PAN_PX_PER_FRAME = 6.0
+    """Vertical Full follows active speaker with full-frame face crops."""
+    return track_active_speaker_positions, False
+
+
+MOUTH_ACTIVE_THRESHOLD = 0.14
+MOUTH_LEAD_MARGIN = 0.04
+# Current speaker must be quiet this long before we leave them for a new talker.
+SPEAKER_RELEASE_SECONDS = 1.0
+DEAD_ZONE_PX = 16.0
+MAX_PAN_PX_PER_FRAME = 5.0
 SCENE_DIFF_THRESHOLD = 0.12
 MIN_SHOT_SECONDS = 0.7
 FACE_SAMPLE_PER_SHOT = 5
@@ -132,74 +139,21 @@ def combine_scores(face: float, mouth: float, audio: float) -> float:
     return max(0.0, min(1.0, 0.45 * face + 0.35 * mouth + 0.20 * audio))
 
 
-def choose_speaker(
-    candidates: list[dict],
-    current_id: int | None,
-    hold_frames_left: int,
-    switch_margin: float = SWITCH_MARGIN,
-    min_confidence: float = MIN_FACE_CONFIDENCE,
-    mouth_active_threshold: float = MOUTH_ACTIVE_THRESHOLD,
-    mouth_lead_margin: float = MOUTH_LEAD_MARGIN,
-) -> tuple[int | None, float, int]:
-    """Pick speaker id with hold + confidence margin + anti-laugh rules.
-
-    candidates: list of {id, score, crop_x, mouth?}
-    Returns (chosen_id, confidence, new_hold_frames_left).
-    """
-    if not candidates:
-        return current_id, 0.0, max(0, hold_frames_left - 1)
-
-    ranked = sorted(candidates, key=lambda item: item["score"], reverse=True)
-    best = ranked[0]
-    second = ranked[1]["score"] if len(ranked) > 1 else 0.0
-    margin = best["score"] - second
-
-    # Dual active mouths (both laughing / overlapping) → never switch.
-    mouths = [float(item.get("mouth", 0.0) or 0.0) for item in candidates]
-    active_mouths = sum(1 for mouth in mouths if mouth >= mouth_active_threshold)
-    if active_mouths >= 2 and current_id is not None:
-        current = next((item for item in ranked if item["id"] == current_id), None)
-        conf = current["score"] if current else second
-        return current_id, conf, max(0, hold_frames_left - 1)
-
-    if best["score"] < min_confidence:
-        return current_id, best["score"], max(0, hold_frames_left - 1)
-
-    if current_id is None:
-        return best["id"], best["score"], 0
-
-    if best["id"] == current_id:
-        return current_id, best["score"], max(0, hold_frames_left - 1)
-
-    # New speaker must lead on mouth activity, not just face size.
-    current = next((item for item in ranked if item["id"] == current_id), None)
-    best_mouth = float(best.get("mouth", 0.0) or 0.0)
-    current_mouth = float(current.get("mouth", 0.0) or 0.0) if current else 0.0
-    if best_mouth < mouth_active_threshold or best_mouth < current_mouth + mouth_lead_margin:
-        conf = current["score"] if current else second
-        return current_id, conf, max(0, hold_frames_left - 1)
-
-    # Ambiguous / early switch: keep current speaker
-    if hold_frames_left > 0 or margin < switch_margin:
-        conf = current["score"] if current else second
-        return current_id, conf, max(0, hold_frames_left - 1)
-
-    return best["id"], best["score"], 0
-
-
 def hard_cut_positions(
     targets: list[float],
     speaker_ids: list[int | None],
     fps: float,
     debounce_seconds: float = SWITCH_DEBOUNCE_SECONDS,
     hold_seconds: float = HOLD_SECONDS,
+    dead_zone_px: float = DEAD_ZONE_PX,
+    max_pan_px: float = MAX_PAN_PX_PER_FRAME,
 ) -> list[int]:
-    """Lock crop per speaker; hard-cut only after stable new speaker.
+    """Hard-cut on speaker switch; gentle re-center while same speaker.
 
-    - Same speaker: crop stays fixed (median of that speaker's targets).
-    - Candidate speaker must lead continuously for debounce_seconds.
-    - After a cut, hold_seconds before another cut is allowed.
-    - Ambiguous / None: keep previous crop.
+    - New speaker after debounce+hold → snap crop to that frame's face center.
+    - Same speaker → ease toward latest face center (dead-zone + pan cap) so
+      talker stays mid-frame without micro-shake.
+    - None / ambiguous → hold previous crop.
     """
     if not targets:
         return []
@@ -211,7 +165,6 @@ def hard_cut_positions(
     hold_frames = max(1, int(round(fps * hold_seconds))) if fps > 0 else 1
 
     current_id = next((sid for sid in speaker_ids if sid is not None), None)
-    # Seed crop from first non-null target for current speaker, else first target.
     current_crop = float(targets[0])
     for sid, target in zip(speaker_ids, targets):
         if current_id is not None and sid == current_id:
@@ -222,19 +175,13 @@ def hard_cut_positions(
     candidate_id: int | None = None
     candidate_streak = 0
     held = 0
-    speaker_samples: dict[int, list[float]] = {}
 
     for sid, target in zip(speaker_ids, targets):
-        if sid is not None:
-            speaker_samples.setdefault(sid, []).append(float(target))
-            # Keep only a short recent window to avoid old shot positions.
-            if len(speaker_samples[sid]) > 45:
-                speaker_samples[sid] = speaker_samples[sid][-45:]
+        target = float(target)
 
         if current_id is None and sid is not None:
             current_id = sid
-            samples = speaker_samples.get(sid) or [float(target)]
-            current_crop = float(np.median(samples))
+            current_crop = target
             held = 1
             candidate_id = None
             candidate_streak = 0
@@ -242,7 +189,14 @@ def hard_cut_positions(
             continue
 
         if sid is None or sid == current_id:
-            # Hard lock: head movement must not move the virtual camera.
+            # Soft re-center on talker; ignore tiny detector noise.
+            if sid == current_id:
+                delta = target - current_crop
+                if abs(delta) > dead_zone_px:
+                    step = delta
+                    if max_pan_px > 0:
+                        step = max(-max_pan_px, min(max_pan_px, step))
+                    current_crop = current_crop + step
             held += 1
             candidate_id = None
             candidate_streak = 0
@@ -265,8 +219,7 @@ def hard_cut_positions(
 
         if candidate_streak >= debounce_frames:
             current_id = sid
-            samples = speaker_samples.get(sid) or [float(target)]
-            current_crop = float(np.median(samples))
+            current_crop = target  # snap once onto new talker's face center
             held = 1
             candidate_id = None
             candidate_streak = 0
@@ -337,10 +290,81 @@ def enforce_hold(
 
 
 def crop_x_for_face(face, source_width: int, crop_width: int) -> int:
+    """Center the crop window on the face (speaker in middle of frame)."""
     x, _y, w, _h = face
     center = x + w / 2
     crop_x = int(round(center - crop_width / 2))
     return max(0, min(crop_x, source_width - crop_width))
+
+
+def choose_speaker(
+    candidates: list[dict],
+    current_id: int | None,
+    hold_frames_left: int,
+    switch_margin: float = SWITCH_MARGIN,
+    min_confidence: float = MIN_FACE_CONFIDENCE,
+    mouth_active_threshold: float = MOUTH_ACTIVE_THRESHOLD,
+    mouth_lead_margin: float = MOUTH_LEAD_MARGIN,
+    current_quiet_frames: int = 0,
+    release_frames: int = 0,
+) -> tuple[int | None, float, int, int]:
+    """Pick speaker id with hold + quiet-release + mouth lead.
+
+    Returns (chosen_id, confidence, new_hold_frames_left, new_quiet_frames).
+    Switch only after current speaker has been quiet for release_frames (≈1s)
+    unless there is no current speaker.
+    """
+    if not candidates:
+        quiet = current_quiet_frames + 1 if current_id is not None else 0
+        return current_id, 0.0, max(0, hold_frames_left - 1), quiet
+
+    ranked = sorted(candidates, key=lambda item: item["score"], reverse=True)
+    best = ranked[0]
+    second = ranked[1]["score"] if len(ranked) > 1 else 0.0
+    margin = best["score"] - second
+
+    current = next((item for item in ranked if item["id"] == current_id), None)
+    current_mouth = float(current.get("mouth", 0.0) or 0.0) if current else 0.0
+    if current is not None and current_mouth >= mouth_active_threshold:
+        quiet = 0
+    elif current_id is not None:
+        quiet = current_quiet_frames + 1
+    else:
+        quiet = 0
+
+    # Dual active mouths (both laughing / overlapping) → never switch.
+    mouths = [float(item.get("mouth", 0.0) or 0.0) for item in candidates]
+    active_mouths = sum(1 for mouth in mouths if mouth >= mouth_active_threshold)
+    if active_mouths >= 2 and current_id is not None:
+        conf = current["score"] if current else second
+        return current_id, conf, max(0, hold_frames_left - 1), quiet
+
+    if best["score"] < min_confidence:
+        return current_id, best["score"], max(0, hold_frames_left - 1), quiet
+
+    if current_id is None:
+        return best["id"], best["score"], 0, 0
+
+    if best["id"] == current_id:
+        return current_id, best["score"], max(0, hold_frames_left - 1), quiet
+
+    # New speaker must lead on mouth activity, not just face size.
+    best_mouth = float(best.get("mouth", 0.0) or 0.0)
+    if best_mouth < mouth_active_threshold or best_mouth < current_mouth + mouth_lead_margin:
+        conf = current["score"] if current else second
+        return current_id, conf, max(0, hold_frames_left - 1), quiet
+
+    # Hold window after last cut, or current still talking / not yet quiet 1s.
+    if hold_frames_left > 0 or margin < switch_margin:
+        conf = current["score"] if current else second
+        return current_id, conf, max(0, hold_frames_left - 1), quiet
+
+    if release_frames > 0 and quiet < release_frames and current is not None:
+        # Neighbor is talking but current only just stopped — wait ~1s.
+        conf = current["score"] if current else second
+        return current_id, conf, max(0, hold_frames_left - 1), quiet
+
+    return best["id"], best["score"], 0, 0
 
 
 def ensure_visible_face_crop(crop_x: float, candidates: list[dict], crop_width: int, source_width: int) -> int:
@@ -363,7 +387,11 @@ def resolve_visible_crop(crop_x: float, candidates: list[dict], fallback_crop_x:
 
 
 def stabilize_visible_crops(positions, frame_candidates, fallback_positions, source_cuts, crop_width: int, source_width: int) -> list[int]:
-    """Hold last face-verified crop through detector misses inside one source shot."""
+    """Hold last face-verified crop through detector misses; avoid micro-snaps.
+
+    Only re-snap when the locked crop contains ZERO complete faces. If a face
+    is already fully inside the crop, keep the position (kills geter).
+    """
     stabilized = []
     last_verified = None
     for index, (position, candidates) in enumerate(zip(positions, frame_candidates)):
@@ -371,8 +399,23 @@ def stabilize_visible_crops(positions, frame_candidates, fallback_positions, sou
         source_cut = source_cuts[min(index, len(source_cuts) - 1)] if source_cuts else False
         if source_cut:
             last_verified = None
+        left = max(0, min(int(position), max(0, source_width - crop_width)))
+        right = left + crop_width
         if candidates:
-            current = ensure_visible_face_crop(position, candidates, crop_width, source_width)
+            fully_inside = [
+                item for item in candidates
+                if left <= item["face"][0] and item["face"][0] + item["face"][2] <= right
+            ]
+            if fully_inside:
+                current = left
+            else:
+                # Prefer face nearest crop center (talker), not raw max score.
+                crop_cx = left + crop_width / 2
+                best = min(
+                    candidates,
+                    key=lambda item: abs((item["face"][0] + item["face"][2] / 2) - crop_cx),
+                )
+                current = max(0, min(int(best["crop_x"]), max(0, source_width - crop_width)))
             last_verified = current
         elif last_verified is not None:
             current = last_verified
@@ -410,6 +453,42 @@ def choose_scene_crop_x(
     return crop_x
 
 
+def face_motion_score(samples: list[float], source_width: int) -> float:
+    """0..1 how much a face center wanders inside one shot (body/camera motion)."""
+    if len(samples) < 2 or source_width <= 0:
+        return 0.0
+    arr = np.asarray(samples, dtype=np.float32)
+    span = float(np.max(arr) - np.min(arr)) / float(source_width)
+    return max(0.0, min(1.0, span / 0.18))
+
+
+def prefer_still_over_moving_speaker(
+    groups: list[dict],
+    dominant_ratio: float = DOMINANT_FACE_RATIO,
+    motion_threshold: float = 0.45,
+) -> dict:
+    """If the talker is moving hard and a still face exists, lock the still face."""
+    if not groups:
+        raise ValueError("groups required")
+    primary = groups[0]
+    if len(groups) < 2:
+        return primary
+    secondary = groups[1]
+    primary_motion = float(primary.get("motion", 0.0) or 0.0)
+    secondary_motion = float(secondary.get("motion", 0.0) or 0.0)
+    # Moving primary + calmer secondary → still face wins for camera stability.
+    if primary_motion >= motion_threshold and secondary_motion + 0.12 < primary_motion:
+        return secondary
+    # No clear talker lead on mouth: prefer larger/still face over empty space.
+    if float(primary.get("mouth", 0.0) or 0.0) < MOUTH_ACTIVE_THRESHOLD:
+        still = min(groups, key=lambda item: (float(item.get("motion", 0.0) or 0.0), -float(item.get("area", 0.0))))
+        return still
+    ratio = float(primary["area"]) / max(1.0, float(secondary["area"]))
+    if ratio < dominant_ratio and secondary_motion + 0.08 < primary_motion:
+        return secondary
+    return primary
+
+
 def choose_scene_layout(
     faces: list[tuple[int, int, int, int]],
     source_width: int,
@@ -418,46 +497,49 @@ def choose_scene_layout(
     dominant_ratio: float = DOMINANT_FACE_RATIO,
     previous_layout: str = "crop",
     detection_coverage: float | None = None,
+    last_face_crop_x: int | None = None,
+    face_centers: list[float] | None = None,
+    face_mouths: list[float] | None = None,
 ) -> tuple[int, str]:
-    """Return fixed crop x and layout; wide equal two-shots use blur-contain."""
-    center = center_crop_x(source_width, crop_width)
-    if detection_coverage is not None and detection_coverage < 0.4:
-        return center, "contain_blur"
+    """Return fixed full-frame crop x. Face-only; never empty center / blur."""
+    layout = "crop"
+    # Low coverage is not an excuse to show pots/walls — keep last face crop.
     if not faces:
-        return (center if previous_crop_x is None else int(previous_crop_x), previous_layout)
+        if last_face_crop_x is not None:
+            return int(last_face_crop_x), layout
+        if previous_crop_x is not None:
+            return int(previous_crop_x), layout
+        # Absolute last resort only when the whole clip never showed a face yet.
+        return center_crop_x(source_width, crop_width), layout
 
-    buckets: dict[int, list[tuple[int, int, int, int]]] = {}
-    for face in faces:
+    buckets: dict[int, list[tuple[int, int, int, int, float, float]]] = {}
+    centers = list(face_centers or [])
+    mouths = list(face_mouths or [])
+    for index, face in enumerate(faces):
         x, _y, w, _h = face
         cx = x + w / 2
         bucket = min(2, max(0, int(cx / max(1, source_width) * 3)))
-        buckets.setdefault(bucket, []).append(face)
+        motion_sample = centers[index] if index < len(centers) else cx
+        mouth_sample = mouths[index] if index < len(mouths) else 0.0
+        buckets.setdefault(bucket, []).append((x, _y, w, _h, motion_sample, mouth_sample))
 
     groups = []
     for items in buckets.values():
+        center_samples = [item[4] for item in items]
+        mouth_samples = [item[5] for item in items]
         groups.append({
-            "area": float(np.median([w * h for _x, _y, w, h in items])),
-            "center": float(np.median([x + w / 2 for x, _y, w, _h in items])),
-            "width": float(np.median([w for _x, _y, w, _h in items])),
+            "area": float(np.median([w * h for _x, _y, w, h, _m, _mo in items])),
+            "center": float(np.median([x + w / 2 for x, _y, w, _h, _m, _mo in items])),
+            "width": float(np.median([w for _x, _y, w, _h, _m, _mo in items])),
             "count": len(items),
+            "motion": face_motion_score(center_samples, source_width),
+            "mouth": float(np.median(mouth_samples)) if mouth_samples else 0.0,
         })
-    groups.sort(key=lambda item: (item["area"], item["count"]), reverse=True)
-    primary = groups[0]
-    layout = "crop"
-
-    if len(groups) >= 2:
-        secondary = groups[1]
-        ratio = primary["area"] / max(1.0, secondary["area"])
-        if ratio < dominant_ratio:
-            target_center = (primary["center"] + secondary["center"]) / 2
-            left = min(primary["center"] - primary["width"] / 2, secondary["center"] - secondary["width"] / 2)
-            right = max(primary["center"] + primary["width"] / 2, secondary["center"] + secondary["width"] / 2)
-            layout = "crop" if right - left <= crop_width else "contain_blur"
-        else:
-            target_center = primary["center"]
-    else:
-        target_center = primary["center"]
-
+    groups.sort(key=lambda item: (item["mouth"], item["area"], item["count"]), reverse=True)
+    primary = prefer_still_over_moving_speaker(groups, dominant_ratio=dominant_ratio)
+    # Weak coverage still uses the best face group — never demote to center/blur.
+    _ = detection_coverage
+    target_center = primary["center"]
     crop_x = int(round(target_center - crop_width / 2))
     return max(0, min(crop_x, source_width - crop_width)), layout
 
@@ -556,19 +638,27 @@ def track_scene_crop_positions(
         source_cuts = [False] * frame_index
         previous_crop = None
         previous_layout = "crop"
+        last_face_crop = None
         for start, end, faces, face_samples, face_hits in shots:
             detection_coverage = face_hits / face_samples if face_samples else 0.0
+            face_centers = [x + w / 2 for x, _y, w, _h in faces]
             crop_x, layout = choose_scene_layout(
                 faces, source_width, crop_width,
                 previous_crop_x=previous_crop, previous_layout=previous_layout,
                 detection_coverage=detection_coverage,
+                last_face_crop_x=last_face_crop,
+                face_centers=face_centers,
             )
+            # Always full-frame crop for vertical product contract.
+            layout = "crop"
             positions[start:end] = [crop_x] * max(0, end - start)
             layouts[start:end] = [layout] * max(0, end - start)
             if start > 0:
                 source_cuts[start] = True
             previous_crop = crop_x
             previous_layout = layout
+            if faces:
+                last_face_crop = crop_x
 
         if total_frames > 0:
             if len(positions) < total_frames:
@@ -649,6 +739,9 @@ def track_crop_positions(
         current_id = None
         hold_left = 0
         last_target = float(center_x)
+        last_face_target: float | None = None
+        quiet_frames = 0
+        last_face_centers: dict[int, float] = {}
         frame_index = 0
 
         while True:
@@ -669,66 +762,111 @@ def track_crop_positions(
                     gray, scaleFactor=1.1, minNeighbors=5,
                     minSize=(max(24, source_width // 40), max(24, source_height // 40)),
                 )
-                # Stable-ish IDs by horizontal bucket so left/right speakers keep identity.
+                # Stable IDs: match to previous face centers, else left/right by x.
+                face_rows = []
                 for x, y, w, h in faces:
-                    cx_norm = (x + w / 2) / max(1.0, source_width)
-                    face_id = 0 if cx_norm < 0.5 else 1
-                    # Prefer finer buckets when many faces cluster near center
-                    if abs(cx_norm - 0.5) < 0.08:
-                        face_id = 0 if current_id == 0 else (1 if current_id == 1 else (0 if cx_norm < 0.5 else 1))
-                    prev_center = None
-                    if raw_targets:
-                        prev_center = (raw_targets[-1] + crop_width / 2) / source_width
-                    f_score = face_score((x, y, w, h), source_width, source_height, prev_center)
+                    f_score = face_score((x, y, w, h), source_width, source_height, None)
                     if not valid_face_detection(f_score):
                         continue
+                    face_rows.append((int(x), int(y), int(w), int(h), f_score))
+                # Sort left→right so two-person framing is stable.
+                face_rows.sort(key=lambda row: row[0] + row[2] / 2)
+                assigned: dict[int, dict] = {}
+                for x, y, w, h, f_score in face_rows:
+                    cx = x + w / 2
+                    face_id = None
+                    if current_id is not None and last_face_centers:
+                        # Prefer continuity with current talker if close in x.
+                        prev_cx = last_face_centers.get(current_id)
+                        if prev_cx is not None and abs(cx - prev_cx) <= max(80.0, crop_width * 0.28):
+                            face_id = current_id
+                    if face_id is None and last_face_centers:
+                        best_id, best_dist = None, 1e18
+                        for pid, pcx in last_face_centers.items():
+                            dist = abs(cx - pcx)
+                            if dist < best_dist and dist <= max(100.0, crop_width * 0.35):
+                                best_id, best_dist = pid, dist
+                        face_id = best_id
+                    if face_id is None:
+                        # Fresh slot: 0 = left half, 1 = right half of frame.
+                        face_id = 0 if cx < source_width * 0.5 else 1
+                        if face_id in assigned:
+                            face_id = 1 - face_id
                     face_roi = gray[y:y + h, x:x + w]
                     m_score = mouth_motion_score(face_roi, prev_mouth_rois.get(face_id))
                     prev_mouth_rois[face_id] = face_roi.copy()
                     a_score = audio_energies[frame_index] if frame_index < len(audio_energies) else 0.0
                     score = combine_scores(f_score, m_score, a_score)
-                    # Prefer continuing current speaker when boxes are close.
                     if current_id is not None and face_id == current_id:
                         score = min(1.0, score + 0.08)
-                    candidates.append({
+                    item = {
                         "id": face_id,
                         "score": score,
                         "mouth": m_score,
-                        "face": (int(x), int(y), int(w), int(h)),
+                        "face": (x, y, w, h),
                         "crop_x": crop_x_for_face((x, y, w, h), source_width, crop_width),
-                    })
-                # If two detections map to same bucket, keep higher score only.
-                by_id = {}
-                for item in candidates:
-                    prev = by_id.get(item["id"])
+                        "center_x": cx,
+                    }
+                    prev = assigned.get(face_id)
                     if prev is None or item["score"] > prev["score"]:
-                        by_id[item["id"]] = item
-                candidates = list(by_id.values())
+                        assigned[face_id] = item
+                candidates = list(assigned.values())
+                last_face_centers = {item["id"]: float(item["center_x"]) for item in candidates}
 
-            chosen_id, conf, hold_left = choose_speaker(
-                candidates, current_id, hold_left,
+            # Prefer active talker: boost highest mouth score so crop follows speech.
+            if candidates:
+                talker = max(candidates, key=lambda item: float(item.get("mouth", 0.0) or 0.0))
+                if float(talker.get("mouth", 0.0) or 0.0) >= MOUTH_ACTIVE_THRESHOLD:
+                    talker["score"] = min(1.0, float(talker["score"]) + 0.12)
+
+            release_frames = max(1, int(round(fps * SPEAKER_RELEASE_SECONDS))) if fps > 0 else 1
+            chosen_id, conf, hold_left, quiet_frames = choose_speaker(
+                candidates,
+                current_id,
+                hold_left,
+                current_quiet_frames=quiet_frames,
+                release_frames=release_frames,
             )
+            # No face this frame: keep last face crop id; do not invent empty center target.
+            if not candidates and current_id is not None:
+                chosen_id = current_id
             if chosen_id is not None and (current_id is None or chosen_id != current_id):
                 if current_id is None or hold_left == 0:
                     hold_left = hold_frames
+                quiet_frames = 0
             current_id = chosen_id
             if chosen_id is not None:
                 match = next((item for item in candidates if item["id"] == chosen_id), None)
                 if match:
+                    # Always re-center crop on the chosen face each update.
                     last_target = float(match["crop_x"])
+                    last_face_target = last_target
+            elif candidates:
+                # Any face better than empty B-roll.
+                best = max(candidates, key=lambda item: float(item.get("score", 0.0)))
+                last_target = float(best["crop_x"])
+                last_face_target = last_target
+                current_id = best["id"]
+            elif last_face_target is not None:
+                last_target = float(last_face_target)
             # Safety invariant: every crop with credible detections must contain
             # one complete face, even while speaker debounce holds an old id.
-            fallback_crop = fallback_positions[min(frame_index, len(fallback_positions) - 1)] if fallback_positions else center_x
+            # Prefer last face crop over scene-center fallback (pots/walls).
+            face_fallback = last_face_target if last_face_target is not None else (
+                fallback_positions[min(frame_index, len(fallback_positions) - 1)] if fallback_positions else last_target
+            )
             source_cut = source_cuts[min(frame_index, len(source_cuts) - 1)] if source_cuts else False
-            last_target = float(resolve_visible_crop(last_target, candidates, fallback_crop, crop_width, source_width, source_cut))
-            # Missing face: hold last_target (already set); never-seen stays center
+            last_target = float(resolve_visible_crop(last_target, candidates, face_fallback, crop_width, source_width, source_cut))
+            # Missing face: hold last face crop; never re-center empty frame if a face was seen.
             raw_targets.append(last_target)
             raw_ids.append(current_id)
             frame_candidates.append(candidates)
             frame_index += 1
 
         if not raw_targets:
-            raw_targets = [float(center_x)]
+            # Absolute cold start only: no frames produced any face evidence.
+            seed = float(last_face_target) if last_face_target is not None else float(center_x)
+            raw_targets = [seed]
             raw_ids = [None]
 
         # One fixed crop per active speaker. Switch only after stable debounce;
@@ -766,6 +904,21 @@ def track_crop_positions(
         capture.release()
 
 
+def track_active_speaker_positions(source_path: str) -> dict:
+    """Follow talking face every frame (hard-cut), full-frame only.
+
+    Hold ~1s after a speaker finishes before switching (SPEAKER_RELEASE_SECONDS
+    + HOLD_SECONDS in hard_cut path). Never lock one crop for an entire camera shot.
+
+    sample_stride=2: analyze every other frame on small VPS (still 12.5 samples/s @25fps),
+    hold crop on skipped frames — cuts CPU ~half without returning to shot-lock.
+    """
+    result = track_crop_positions(source_path, sample_stride=2)
+    result["mode"] = "active_speaker"
+    result["layouts"] = ["crop"] * len(result.get("crop_positions") or [])
+    return result
+
+
 def lock_crop_per_source_shot(
     active_positions: list[int],
     source_cuts: list[bool],
@@ -795,7 +948,7 @@ def lock_crop_per_source_shot(
 
 
 def track_shot_speaker_positions(source_path: str) -> dict:
-    """Use active-speaker evidence, but permit crop changes only on source cuts."""
+    """Legacy: active-speaker evidence locked once per source cut (too sticky)."""
     result = track_crop_positions(source_path)
     positions = result.get("crop_positions") or []
     cuts = result.get("source_cuts") or [False] * len(positions)
