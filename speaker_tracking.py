@@ -54,7 +54,7 @@ def extract_audio_energy(source_path: str, fps: float, frame_count: int, sample_
     return energies
 
 
-TRACKER_VERSION = "scene-face-v3"
+TRACKER_VERSION = "scene-face-v4-mediapipe-shot-lock"
 # Stay on current speaker ~1s after cut, then allow switch to next talker.
 HOLD_SECONDS = 1.0
 SMOOTH_SECONDS = 0.25
@@ -127,6 +127,41 @@ def mouth_motion_score(gray_roi: np.ndarray, prev_gray_roi: np.ndarray | None) -
     return max(0.0, min(1.0, mad / 18.0))
 
 
+def mediapipe_face_box(landmarks: list[tuple[float, float]], frame_width: int, frame_height: int):
+    """Convert normalized MediaPipe landmarks to a clamped pixel face box."""
+    if not landmarks or frame_width <= 0 or frame_height <= 0:
+        return None
+    xs = [max(0.0, min(1.0, float(point[0]))) for point in landmarks]
+    ys = [max(0.0, min(1.0, float(point[1]))) for point in landmarks]
+    left, right = int(min(xs) * frame_width), int(max(xs) * frame_width)
+    top, bottom = int(min(ys) * frame_height), int(max(ys) * frame_height)
+    return left, top, max(1, right - left), max(1, bottom - top)
+
+
+def mediapipe_lip_activity(landmarks: dict[int, tuple[float, float]], previous=None) -> float:
+    """Score normalized mouth opening and frame-to-frame lip movement."""
+    required = (13, 14, 61, 291)
+    if not all(index in landmarks for index in required):
+        return 0.0
+    upper, lower = landmarks[13], landmarks[14]
+    left, right = landmarks[61], landmarks[291]
+    width = math.hypot(right[0] - left[0], right[1] - left[1])
+    if width <= 1e-6:
+        return 0.0
+    opening = math.hypot(lower[0] - upper[0], lower[1] - upper[1]) / width
+    movement = 0.0
+    if previous and all(index in previous for index in required):
+        prev_upper, prev_lower = previous[13], previous[14]
+        prev_left, prev_right = previous[61], previous[291]
+        prev_width = math.hypot(prev_right[0] - prev_left[0], prev_right[1] - prev_left[1])
+        if prev_width > 1e-6:
+            prev_opening = math.hypot(
+                prev_lower[0] - prev_upper[0], prev_lower[1] - prev_upper[1]
+            ) / prev_width
+            movement = abs(opening - prev_opening)
+    return max(0.0, min(1.0, opening * 0.4 + movement * 2.4))
+
+
 def audio_energy_score(samples: np.ndarray | None) -> float:
     """Normalize short-window RMS energy into 0..1."""
     if samples is None or samples.size == 0:
@@ -189,14 +224,8 @@ def hard_cut_positions(
             continue
 
         if sid is None or sid == current_id:
-            # Soft re-center on talker; ignore tiny detector noise.
-            if sid == current_id:
-                delta = target - current_crop
-                if abs(delta) > dead_zone_px:
-                    step = delta
-                    if max_pan_px > 0:
-                        step = max(-max_pan_px, min(max_pan_px, step))
-                    current_crop = current_crop + step
+            # Lock crop while speaker identity is unchanged. Detector drift must
+            # not become virtual camera motion.
             held += 1
             candidate_id = None
             candidate_streak = 0
@@ -399,7 +428,8 @@ def stabilize_visible_crops(positions, frame_candidates, fallback_positions, sou
         source_cut = source_cuts[min(index, len(source_cuts) - 1)] if source_cuts else False
         if source_cut:
             last_verified = None
-        left = max(0, min(int(position), max(0, source_width - crop_width)))
+        requested = last_verified if last_verified is not None and not source_cut else position
+        left = max(0, min(int(requested), max(0, source_width - crop_width)))
         right = left + crop_width
         if candidates:
             fully_inside = [
@@ -731,11 +761,24 @@ def track_crop_positions(
             str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml")
         )
         use_faces = not cascade.empty()
+        face_mesh = None
+        try:
+            import mediapipe as mp
+            face_mesh = mp.solutions.face_mesh.FaceMesh(
+                static_image_mode=False,
+                max_num_faces=3,
+                refine_landmarks=True,
+                min_detection_confidence=0.5,
+                min_tracking_confidence=0.5,
+            )
+        except (ImportError, AttributeError, RuntimeError):
+            face_mesh = None
         hold_frames = max(1, int(round(fps * hold_seconds)))
         raw_targets: list[float] = []
         raw_ids: list[int | None] = []
         frame_candidates: list[list[dict]] = []
         prev_mouth_rois: dict[int, np.ndarray] = {}
+        prev_lip_landmarks: dict[int, dict[int, tuple[float, float]]] = {}
         current_id = None
         hold_left = 0
         last_target = float(center_x)
@@ -755,63 +798,86 @@ def track_crop_positions(
                 frame_index += 1
                 continue
 
+            source_cut = source_cuts[min(frame_index, len(source_cuts) - 1)] if source_cuts else False
+            if source_cut:
+                current_id = None
+                hold_left = 0
+                quiet_frames = 0
+                last_face_centers.clear()
+                prev_lip_landmarks.clear()
+                prev_mouth_rois.clear()
             candidates = []
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            if use_faces:
+            face_rows = []
+            if face_mesh is not None:
+                result = face_mesh.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                for face_landmarks in result.multi_face_landmarks or []:
+                    points = [(point.x, point.y) for point in face_landmarks.landmark]
+                    box = mediapipe_face_box(points, source_width, source_height)
+                    if box is None:
+                        continue
+                    x, y, w, h = box
+                    f_score = face_score(box, source_width, source_height, None)
+                    if valid_face_detection(f_score):
+                        lips = {index: points[index] for index in (13, 14, 61, 291)}
+                        face_rows.append((x, y, w, h, f_score, lips))
+            # MediaPipe miss/error path: retain OpenCV detector as fallback.
+            if not face_rows and use_faces:
                 faces = cascade.detectMultiScale(
                     gray, scaleFactor=1.1, minNeighbors=5,
                     minSize=(max(24, source_width // 40), max(24, source_height // 40)),
                 )
-                # Stable IDs: match to previous face centers, else left/right by x.
-                face_rows = []
                 for x, y, w, h in faces:
-                    f_score = face_score((x, y, w, h), source_width, source_height, None)
-                    if not valid_face_detection(f_score):
-                        continue
-                    face_rows.append((int(x), int(y), int(w), int(h), f_score))
-                # Sort left→right so two-person framing is stable.
-                face_rows.sort(key=lambda row: row[0] + row[2] / 2)
-                assigned: dict[int, dict] = {}
-                for x, y, w, h, f_score in face_rows:
-                    cx = x + w / 2
-                    face_id = None
-                    if current_id is not None and last_face_centers:
-                        # Prefer continuity with current talker if close in x.
-                        prev_cx = last_face_centers.get(current_id)
-                        if prev_cx is not None and abs(cx - prev_cx) <= max(80.0, crop_width * 0.28):
-                            face_id = current_id
-                    if face_id is None and last_face_centers:
-                        best_id, best_dist = None, 1e18
-                        for pid, pcx in last_face_centers.items():
-                            dist = abs(cx - pcx)
-                            if dist < best_dist and dist <= max(100.0, crop_width * 0.35):
-                                best_id, best_dist = pid, dist
-                        face_id = best_id
-                    if face_id is None:
-                        # Fresh slot: 0 = left half, 1 = right half of frame.
-                        face_id = 0 if cx < source_width * 0.5 else 1
-                        if face_id in assigned:
-                            face_id = 1 - face_id
+                    box = (int(x), int(y), int(w), int(h))
+                    f_score = face_score(box, source_width, source_height, None)
+                    if valid_face_detection(f_score):
+                        face_rows.append((*box, f_score, None))
+
+            # Stable IDs: match previous x, else use left/right slot.
+            face_rows.sort(key=lambda row: row[0] + row[2] / 2)
+            assigned: dict[int, dict] = {}
+            for x, y, w, h, f_score, lips in face_rows:
+                cx = x + w / 2
+                face_id = None
+                if current_id is not None and last_face_centers:
+                    prev_cx = last_face_centers.get(current_id)
+                    if prev_cx is not None and abs(cx - prev_cx) <= max(80.0, crop_width * 0.28):
+                        face_id = current_id
+                if face_id is None and last_face_centers:
+                    best_id, best_dist = None, 1e18
+                    for pid, pcx in last_face_centers.items():
+                        dist = abs(cx - pcx)
+                        if dist < best_dist and dist <= max(100.0, crop_width * 0.35):
+                            best_id, best_dist = pid, dist
+                    face_id = best_id
+                if face_id is None:
+                    face_id = 0 if cx < source_width * 0.5 else 1
+                    if face_id in assigned:
+                        face_id = 1 - face_id
+                if lips is not None:
+                    m_score = mediapipe_lip_activity(lips, prev_lip_landmarks.get(face_id))
+                    prev_lip_landmarks[face_id] = lips
+                else:
                     face_roi = gray[y:y + h, x:x + w]
                     m_score = mouth_motion_score(face_roi, prev_mouth_rois.get(face_id))
                     prev_mouth_rois[face_id] = face_roi.copy()
-                    a_score = audio_energies[frame_index] if frame_index < len(audio_energies) else 0.0
-                    score = combine_scores(f_score, m_score, a_score)
-                    if current_id is not None and face_id == current_id:
-                        score = min(1.0, score + 0.08)
-                    item = {
-                        "id": face_id,
-                        "score": score,
-                        "mouth": m_score,
-                        "face": (x, y, w, h),
-                        "crop_x": crop_x_for_face((x, y, w, h), source_width, crop_width),
-                        "center_x": cx,
-                    }
-                    prev = assigned.get(face_id)
-                    if prev is None or item["score"] > prev["score"]:
-                        assigned[face_id] = item
-                candidates = list(assigned.values())
-                last_face_centers = {item["id"]: float(item["center_x"]) for item in candidates}
+                a_score = audio_energies[frame_index] if frame_index < len(audio_energies) else 0.0
+                score = combine_scores(f_score, m_score, a_score)
+                if current_id is not None and face_id == current_id:
+                    score = min(1.0, score + 0.08)
+                item = {
+                    "id": face_id,
+                    "score": score,
+                    "mouth": m_score,
+                    "face": (x, y, w, h),
+                    "crop_x": crop_x_for_face((x, y, w, h), source_width, crop_width),
+                    "center_x": cx,
+                }
+                prev = assigned.get(face_id)
+                if prev is None or item["score"] > prev["score"]:
+                    assigned[face_id] = item
+            candidates = list(assigned.values())
+            last_face_centers = {item["id"]: float(item["center_x"]) for item in candidates}
 
             # Prefer active talker: boost highest mouth score so crop follows speech.
             if candidates:
@@ -855,7 +921,6 @@ def track_crop_positions(
             face_fallback = last_face_target if last_face_target is not None else (
                 fallback_positions[min(frame_index, len(fallback_positions) - 1)] if fallback_positions else last_target
             )
-            source_cut = source_cuts[min(frame_index, len(source_cuts) - 1)] if source_cuts else False
             last_target = float(resolve_visible_crop(last_target, candidates, face_fallback, crop_width, source_width, source_cut))
             # Missing face: hold last face crop; never re-center empty frame if a face was seen.
             raw_targets.append(last_target)
@@ -882,6 +947,9 @@ def track_crop_positions(
             cut_positions, frame_candidates, fallback_positions, source_cuts,
             crop_width, source_width,
         )
+        # Reference policy: active-speaker evidence chooses framing, then one
+        # fixed crop is held for each confirmed source shot.
+        cut_positions = lock_crop_per_source_shot(cut_positions, source_cuts)
         # Pad/truncate to total_frames if known
         if total_frames > 0:
             if len(cut_positions) < total_frames:
@@ -901,17 +969,18 @@ def track_crop_positions(
             "frames_analyzed": frame_index,
         }
     finally:
+        if "face_mesh" in locals() and face_mesh is not None:
+            face_mesh.close()
         capture.release()
 
 
 def track_active_speaker_positions(source_path: str) -> dict:
-    """Follow talking face every frame (hard-cut), full-frame only.
+    """Choose talking face, then hold one full-frame crop per source shot.
 
-    Hold ~1s after a speaker finishes before switching (SPEAKER_RELEASE_SECONDS
-    + HOLD_SECONDS in hard_cut path). Never lock one crop for an entire camera shot.
+    MediaPipe lip landmarks rank speakers; OpenCV is fallback. Source cuts reset
+    identity, then final shot lock prevents detector noise from moving camera.
 
-    sample_stride=2: analyze every other frame on small VPS (still 12.5 samples/s @25fps),
-    hold crop on skipped frames — cuts CPU ~half without returning to shot-lock.
+    sample_stride=2 analyzes every other frame on small VPS.
     """
     result = track_crop_positions(source_path, sample_stride=2)
     result["mode"] = "active_speaker"

@@ -1,6 +1,9 @@
 # Runtime Dependencies
 openai>=1.0.0
-opencv-python>=4.8.0,<5
+opencv-python>=4.8.0,<4.12
+mediapipe==0.10.21
+protobuf>=4.25.3,<5
+google-api-core==2.24.2
 numpy>=1.24.0
 Pillow>=10.0.0
 requests>=2.31.0

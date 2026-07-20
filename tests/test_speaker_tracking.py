@@ -306,7 +306,7 @@ def test_vertical_full_follows_active_speaker_not_shot_lock():
 def test_hard_cut_recenters_same_speaker_without_jitter():
     from speaker_tracking import hard_cut_positions
 
-    # Same speaker; face drifts and dwells long enough past dead-zone.
+    # Same speaker; detector drift must not become virtual camera motion.
     targets = [100.0] * 3 + [160.0] * 40
     ids: list[int | None] = [0] * len(targets)
     out = hard_cut_positions(
@@ -314,20 +314,61 @@ def test_hard_cut_recenters_same_speaker_without_jitter():
         dead_zone_px=16.0, max_pan_px=5.0,
     )
     assert out[0] == 100
-    # Settles near target (within dead-zone), no thrash.
-    assert out[-1] >= 144
-    assert max(abs(out[i] - out[i - 1]) for i in range(1, len(out))) <= 5
+    assert out == [100] * len(out)
 
 
-def test_stabilize_keeps_crop_when_face_already_inside():
+def test_mediapipe_lip_activity_uses_normalized_mouth_opening_delta():
+    from speaker_tracking import mediapipe_lip_activity
+
+    closed = {13: (0.50, 0.50), 14: (0.50, 0.51), 61: (0.40, 0.50), 291: (0.60, 0.50)}
+    opened = {13: (0.50, 0.46), 14: (0.50, 0.56), 61: (0.40, 0.50), 291: (0.60, 0.50)}
+    assert mediapipe_lip_activity(closed, None) < 0.1
+    assert mediapipe_lip_activity(opened, closed) > mediapipe_lip_activity(closed, closed)
+
+
+def test_mediapipe_landmarks_create_face_box():
+    from speaker_tracking import mediapipe_face_box
+
+    landmarks = [(0.25, 0.20), (0.50, 0.60), (0.40, 0.45)]
+    assert mediapipe_face_box(landmarks, 1000, 500) == (250, 100, 250, 200)
+
+
+def test_hard_cut_switches_once_after_stable_new_talker():
+    from speaker_tracking import hard_cut_positions
+
+    targets = [100.0] * 30 + [500.0] * 20
+    ids = [0] * 30 + [1] * 20
+    out = hard_cut_positions(targets, ids, fps=10.0, debounce_seconds=0.5, hold_seconds=1.0)
+    switches = [i for i in range(1, len(out)) if out[i] != out[i - 1]]
+    assert len(switches) == 1
+    assert out[switches[0] - 1] == 100
+    assert out[switches[0]] == 500
+
+
+def test_stabilize_locks_crop_when_face_remains_inside():
     from speaker_tracking import stabilize_visible_crops
 
-    # Face fully inside both crop windows; must not snap to crop_x=180.
+    # Detector drift must not move camera while face remains fully visible.
     positions = [200, 210, 200]
     face = {"score": 0.9, "face": (250, 80, 80, 80), "crop_x": 180}
     candidates = [[face], [face], [face]]
     out = stabilize_visible_crops(positions, candidates, [200] * 3, [False] * 3, 270, 854)
-    assert out == [200, 210, 200]
+    assert out == [200, 200, 200]
+
+
+def test_stabilize_does_not_follow_detector_drift_after_reframing_locked_speaker():
+    from speaker_tracking import stabilize_visible_crops
+
+    positions = [100, 100, 100, 100]
+    candidates = [
+        [{"score": 0.9, "face": (140, 80, 80, 80), "crop_x": 100}],
+        [{"score": 0.9, "face": (520, 80, 80, 80), "crop_x": 430}],
+        [{"score": 0.9, "face": (521, 80, 80, 80), "crop_x": 431}],
+        [{"score": 0.9, "face": (522, 80, 80, 80), "crop_x": 432}],
+    ]
+    assert stabilize_visible_crops(
+        positions, candidates, [100] * 4, [False] * 4, 270, 854,
+    ) == [100, 430, 430, 430]
 
 
 def test_shot_speaker_vote_locks_one_full_vertical_crop_per_source_shot():
@@ -336,3 +377,11 @@ def test_shot_speaker_vote_locks_one_full_vertical_crop_per_source_shot():
     active = [100, 100, 300, 100, 300, 300, 300, 100]
     cuts = [False, False, False, False, True, False, False, False]
     assert lock_crop_per_source_shot(active, cuts) == [100] * 4 + [300] * 4
+
+
+def test_final_tracker_policy_removes_post_cut_settling_jitter():
+    from speaker_tracking import lock_crop_per_source_shot
+
+    positions = [100, 100, 400, 430, 431, 430, 430]
+    source_cuts = [False, False, True, False, False, False, False]
+    assert lock_crop_per_source_shot(positions, source_cuts) == [100, 100, 430, 430, 430, 430, 430]
