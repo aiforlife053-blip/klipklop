@@ -23,7 +23,7 @@ def test_overlap_at_cue_boundary_does_not_drop_transcript_word():
 
     cues = build_subtitle_cues(transcript)
 
-    assert [word["text"] for cue in cues for word in cue["words"]] == ["SATU", "DUA", "WAH", "EMPAT"]
+    assert [word["text"] for cue in cues for word in cue["words"]] == ["satu", "dua", "wah", "empat"]
     assert all(cue["end"] <= next_cue["start"] for cue, next_cue in zip(cues, cues[1:]))
 
 
@@ -48,8 +48,8 @@ def test_renderer_layer_does_not_invent_glued_or_sequential_repeat_tokens():
 
     cues = build_subtitle_cues(transcript)
 
-    assert [word["text"] for cue in cues for word in cue["words"]] == ["ALDITANYA", "ALLAH", "ALLAH"]
-    assert [cue["text"] for cue in cues] == ["ALDITANYA ALLAH", "ALLAH"]
+    assert [word["text"] for cue in cues for word in cue["words"]] == ["alditanya", "Allah", "Allah"]
+    assert [cue["text"] for cue in cues] == ["alditanya Allah", "Allah"]
     assert all(len(cue["active_word_indexes"]) == len(cue["words"]) for cue in cues)
 
 
@@ -62,7 +62,7 @@ def test_exact_overlapping_duplicate_provider_token_is_collapsed():
 
     cues = build_subtitle_cues(transcript)
 
-    assert [word["text"] for cue in cues for word in cue["words"]] == ["BENTAR!", "LANJUT"]
+    assert [word["text"] for cue in cues for word in cue["words"]] == ["bentar!", "lanjut"]
 
 
 def test_tail_word_survives_overlap_with_next_cue():
@@ -78,6 +78,6 @@ def test_tail_word_survives_overlap_with_next_cue():
     cues = build_subtitle_cues(transcript)
 
     assert [word["text"] for cue in cues for word in cue["words"]] == [
-        "AWAL", "MASIH", "ADA", "TAIL", "TETAP", "UTUH",
+        "awal", "masih", "ada", "tail", "tetap", "utuh",
     ]
     assert cues[-1]["end"] == 1.4

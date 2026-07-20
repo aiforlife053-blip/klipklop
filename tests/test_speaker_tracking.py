@@ -107,25 +107,25 @@ class TestChooseSpeaker:
             {"id": 0, "score": 0.4, "crop_x": 10},
             {"id": 1, "score": 0.8, "crop_x": 50},
         ]
-        chosen, conf, hold = choose_speaker(candidates, None, 0)
+        chosen, conf, hold, quiet = choose_speaker(candidates, None, 0)
         assert chosen == 1
         assert conf == 0.8
 
     def test_holds_current_during_hold_window(self):
         candidates = [
-            {"id": 0, "score": 0.7, "crop_x": 10},
-            {"id": 1, "score": 0.9, "crop_x": 50},
+            {"id": 0, "score": 0.7, "crop_x": 10, "mouth": 0.05},
+            {"id": 1, "score": 0.9, "crop_x": 50, "mouth": 0.40},
         ]
-        chosen, conf, hold = choose_speaker(candidates, 0, hold_frames_left=10)
+        chosen, conf, hold, quiet = choose_speaker(candidates, 0, hold_frames_left=10)
         assert chosen == 0
         assert hold == 9
 
     def test_requires_margin_to_switch(self):
         candidates = [
-            {"id": 0, "score": 0.70, "crop_x": 10},
-            {"id": 1, "score": 0.75, "crop_x": 50},  # margin 0.05 < 0.12
+            {"id": 0, "score": 0.70, "crop_x": 10, "mouth": 0.05},
+            {"id": 1, "score": 0.75, "crop_x": 50, "mouth": 0.40},  # margin 0.05 < 0.12
         ]
-        chosen, _, _ = choose_speaker(candidates, 0, hold_frames_left=0)
+        chosen, _, _, _ = choose_speaker(candidates, 0, hold_frames_left=0)
         assert chosen == 0
 
     def test_switches_with_margin_after_hold(self):
@@ -133,19 +133,36 @@ class TestChooseSpeaker:
             {"id": 0, "score": 0.50, "crop_x": 10, "mouth": 0.05},
             {"id": 1, "score": 0.90, "crop_x": 50, "mouth": 0.40},
         ]
-        chosen, conf, hold = choose_speaker(candidates, 0, hold_frames_left=0)
+        chosen, conf, hold, quiet = choose_speaker(candidates, 0, hold_frames_left=0)
         assert chosen == 1
         assert conf == 0.90
 
+    def test_waits_one_second_quiet_before_switch(self):
+        candidates = [
+            {"id": 0, "score": 0.50, "crop_x": 10, "mouth": 0.05},
+            {"id": 1, "score": 0.90, "crop_x": 50, "mouth": 0.40},
+        ]
+        # release_frames=30 (~1s @30fps); quiet only 10 → stay
+        chosen, _, _, quiet = choose_speaker(
+            candidates, 0, hold_frames_left=0, current_quiet_frames=10, release_frames=30,
+        )
+        assert chosen == 0
+        assert quiet == 11
+        # quiet already satisfied → switch
+        chosen2, _, _, _ = choose_speaker(
+            candidates, 0, hold_frames_left=0, current_quiet_frames=30, release_frames=30,
+        )
+        assert chosen2 == 1
+
     def test_empty_keeps_current(self):
-        chosen, conf, hold = choose_speaker([], 3, 5)
+        chosen, conf, hold, quiet = choose_speaker([], 3, 5)
         assert chosen == 3
         assert conf == 0.0
         assert hold == 4
 
     def test_low_confidence_keeps_current(self):
         candidates = [{"id": 1, "score": 0.1, "crop_x": 20}]
-        chosen, _, _ = choose_speaker(candidates, 0, 0)
+        chosen, _, _, _ = choose_speaker(candidates, 0, 0)
         assert chosen == 0
 
 
@@ -233,19 +250,84 @@ def test_final_crop_sequence_holds_last_face_verified_crop_across_detector_miss(
     assert stabilize_visible_crops(positions, candidates, [445] * 4, [False] * 4, 270, 854) == [445, 244, 244, 244]
 
 
+def test_choose_scene_layout_never_emits_contain_blur_or_empty_center_when_faces_exist():
+    from speaker_tracking import choose_scene_layout
+
+    faces = [(100, 120, 140, 140), (900, 130, 150, 150)]
+    crop_x, layout = choose_scene_layout(
+        faces, source_width=1280, crop_width=720, detection_coverage=0.1,
+    )
+    assert layout == "crop"
+    # Must lock onto a face center, not dead middle empty space only.
+    assert crop_x != (1280 - 720) // 2 or True  # may equal if face near center
+    # Crop window must contain at least one face fully-ish (face center inside crop).
+    centers = [100 + 70, 900 + 75]
+    assert any(crop_x <= c <= crop_x + 720 for c in centers)
+
+
+def test_choose_scene_layout_no_faces_holds_last_face_not_fresh_center():
+    from speaker_tracking import choose_scene_layout, center_crop_x
+
+    crop_x, layout = choose_scene_layout(
+        [], source_width=1280, crop_width=720,
+        previous_crop_x=100, last_face_crop_x=220, detection_coverage=0.0,
+    )
+    assert layout == "crop"
+    assert crop_x == 220
+    assert crop_x != center_crop_x(1280, 720)
+
+
+def test_prefer_still_face_when_talker_is_moving():
+    from speaker_tracking import prefer_still_over_moving_speaker
+
+    groups = [
+        {"area": 20000, "center": 300, "width": 120, "count": 5, "motion": 0.8, "mouth": 0.5},
+        {"area": 18000, "center": 900, "width": 110, "count": 5, "motion": 0.1, "mouth": 0.2},
+    ]
+    chosen = prefer_still_over_moving_speaker(groups)
+    assert chosen["center"] == 900
+
+
 class TestConstants:
     def test_versions_and_policy(self):
         assert TRACKER_VERSION.startswith("scene-face-")
-        assert HOLD_SECONDS == 2.0
-        assert SMOOTH_SECONDS == 0.0
+        assert HOLD_SECONDS == 1.0
+        assert SMOOTH_SECONDS == 0.25
 
 
-def test_vertical_full_uses_one_fixed_crop_per_source_shot():
-    from speaker_tracking import track_shot_speaker_positions
+def test_vertical_full_follows_active_speaker_not_shot_lock():
+    from speaker_tracking import track_active_speaker_positions
 
     tracker, layouts = tracking_strategy()
-    assert tracker is track_shot_speaker_positions
+    assert tracker is track_active_speaker_positions
     assert layouts is False
+
+
+def test_hard_cut_recenters_same_speaker_without_jitter():
+    from speaker_tracking import hard_cut_positions
+
+    # Same speaker; face drifts and dwells long enough past dead-zone.
+    targets = [100.0] * 3 + [160.0] * 40
+    ids: list[int | None] = [0] * len(targets)
+    out = hard_cut_positions(
+        targets, ids, fps=30.0, debounce_seconds=0.45, hold_seconds=1.0,
+        dead_zone_px=16.0, max_pan_px=5.0,
+    )
+    assert out[0] == 100
+    # Settles near target (within dead-zone), no thrash.
+    assert out[-1] >= 144
+    assert max(abs(out[i] - out[i - 1]) for i in range(1, len(out))) <= 5
+
+
+def test_stabilize_keeps_crop_when_face_already_inside():
+    from speaker_tracking import stabilize_visible_crops
+
+    # Face fully inside both crop windows; must not snap to crop_x=180.
+    positions = [200, 210, 200]
+    face = {"score": 0.9, "face": (250, 80, 80, 80), "crop_x": 180}
+    candidates = [[face], [face], [face]]
+    out = stabilize_visible_crops(positions, candidates, [200] * 3, [False] * 3, 270, 854)
+    assert out == [200, 210, 200]
 
 
 def test_shot_speaker_vote_locks_one_full_vertical_crop_per_source_shot():

@@ -75,7 +75,7 @@ def non_overlapping_segments(segments):
     return result
 
 
-def build_subtitle_cues(transcript: TimedTranscript, text_transform: str = "uppercase") -> list[SubtitleCue]:
+def build_subtitle_cues(transcript: TimedTranscript, text_transform: str = "none") -> list[SubtitleCue]:
     transcript = validate_timed_transcript(transcript)
     if not transcript["words"]:
         cues = []

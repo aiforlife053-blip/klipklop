@@ -28,7 +28,7 @@ def test_hook_caps_seven_words_four_lines():
     assert hook == hook.upper()
 
 
-def test_subtitle_contract_uppercase_and_punctuation_filter():
+def test_subtitle_contract_sentence_case_and_punctuation_filter():
     transcript = {
         "duration": 2.0,
         "words": [
@@ -40,7 +40,7 @@ def test_subtitle_contract_uppercase_and_punctuation_filter():
         "segments": [],
     }
     cues = build_subtitle_cues(transcript)
-    assert [cue["text"] for cue in cues] == ["HALO DUNIA!", "INI TES"]
+    assert [cue["text"] for cue in cues] == ["halo dunia!", "ini tes"]
     assert len(cues[0]["words"]) == 2
 
 
@@ -53,12 +53,12 @@ def test_locked_visuals_ignore_client_style():
     settings = v3_locked_render_settings({
         "watermark": {"enabled": True},
         "blur_background": {"enabled": True},
-        "subtitle": {"text_transform": "none"},
+        "subtitle": {"text_transform": "uppercase"},
         "video_layout": {"mode": "normal"},
     })
     assert settings["watermark"]["enabled"] is False
     assert settings["blur_background"]["enabled"] is False
-    assert settings["subtitle"]["text_transform"] == "uppercase"
+    assert settings["subtitle"]["text_transform"] == "none"
     assert settings["credit_watermark"]["text"] == "sc: @{channel}"
 
 
