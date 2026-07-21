@@ -1,5 +1,7 @@
 """Koreksi visual V3: subtitle, credit, hook, quality-aware defaults."""
 from pathlib import Path
+import inspect
+import base64
 
 import pytest
 
@@ -16,6 +18,7 @@ from speaker_tracking import choose_speaker
 from subtitle_cues import build_subtitle_cues
 from visual_style import find_hook_name_span, hook_name_from_title, hook_tts_text, normalize_generated_hook_text, normalize_hook_text, sanitize_subtitle_text, sanitize_subtitle_token, validate_hook_text
 from clipper_core import LocalClipRenderer
+from clipper_export import ExportMixin, HOOK_TTS_TEMPO
 from clipper_ai import ensure_five_hashtags
 
 
@@ -28,6 +31,36 @@ def test_description_gets_exactly_five_relevant_hashtags():
     assert description.count("#") == 5
     assert "#Raditya" in description
     assert "#Fisioterapi" in description
+
+
+def test_hook_tts_defaults_to_plain_charon_without_style_processing():
+    renderer = LocalClipRenderer()
+    assert renderer.tts_voice == "Charon"
+    assert HOOK_TTS_TEMPO == 1.0
+    source = inspect.getsource(ExportMixin._generate_hook_tts)
+    assert "style_prompt" not in source
+    assert "pronunciation_text" not in source
+
+
+def test_hook_tts_rotates_when_success_response_has_no_audio(monkeypatch, tmp_path):
+    class Response:
+        status_code = 200
+        def __init__(self, payload): self.payload = payload
+        def raise_for_status(self): pass
+        def json(self): return self.payload
+
+    pcm = b"\x00\x00" * 2400
+    responses = [
+        Response({"candidates": [{"content": {"parts": [{"text": "empty"}]}}]}),
+        Response({"candidates": [{"content": {"parts": [{"inlineData": {"data": base64.b64encode(pcm).decode(), "mimeType": "audio/L16"}}]}}]}),
+    ]
+    calls = []
+    monkeypatch.setattr("requests.post", lambda *args, **kwargs: calls.append(kwargs["headers"]["x-goog-api-key"]) or responses.pop(0))
+    renderer = LocalClipRenderer(output_dir=str(tmp_path), tts_api_keys=["first", "backup"], tts_voice="Charon")
+    output, duration = renderer._generate_hook_tts("HOOK TEST", tmp_path)
+    assert calls == ["first", "backup"]
+    assert output.is_file()
+    assert duration > 0
 
 
 def test_hook_sentence_keeps_name_inside_one_readable_sentence():

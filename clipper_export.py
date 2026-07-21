@@ -23,7 +23,7 @@ from visual_style import find_hook_name_span, hook_name_from_title, hook_tts_tex
 from speaker_tracking import detect_split_person_rois, split_rois_are_distinct
 from config.editor_defaults import HOOK_PAUSE_SECONDS, HOOK_SLIDE_SECONDS
 
-HOOK_TTS_TEMPO = 1.12
+HOOK_TTS_TEMPO = 1.0
 
 from utils.logger import debug_log
 
@@ -123,22 +123,10 @@ class ExportMixin(ClipperBase):
         if not api_keys:
             raise ValueError("Gemini API key diperlukan untuk suara hook")
         model = str(getattr(self, "tts_model", "") or "gemini-3.1-flash-tts-preview")
-        voice = str(getattr(self, "tts_voice", "") or "Fenrir")
+        voice = str(getattr(self, "tts_voice", "") or "Charon")
         base_url = str(getattr(self, "tts_base_url", "") or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
         spoken_text = self._tts_text(hook_text)
-        pronunciation_text = self._tts_pronunciation_text(spoken_text)
-        # style_v7: energetic delivery plus targeted final-consonant guidance.
-        style_prompt = (
-            "Ucapkan HANYA teks berikut dalam bahasa Indonesia. "
-            "Gaya: kreator pria Indonesia yang spontan, viral, dan langsung menghentak sejak suku kata pertama. "
-            "Pitch rendah-sedang, tempo cepat, artikulasi jelas. Ucapkan setiap kata secara utuh termasuk konsonan akhir; jangan menambah, menghilangkan, atau mengganti bunyi. "
-            "Ucapkan nama lengkap menyambung langsung ke kata berikutnya; jangan beri jeda atau koma setelah nama. "
-            "Gunakan perubahan intonasi yang berani, rasa kaget dan penasaran, volume suara penuh dan dekat mikrofon. "
-            "Bukan pembaca berita, bukan iklan formal, bukan robot, jangan datar, "
-            "tanpa membacakan instruksi ini.\n\n"
-            f"{pronunciation_text}"
-        )
-        digest = hashlib.sha256(f"{model}|{voice}|style_v7|{pronunciation_text}".encode("utf-8")).hexdigest()[:20]
+        digest = hashlib.sha256(f"{model}|{voice}|plain_v1|{spoken_text}".encode("utf-8")).hexdigest()[:20]
         # Shared tenant cache: survives across runs; still keyed by model/voice/style/text.
         output_root = Path(getattr(self, "output_dir", clip_dir))
         cache_dir = output_root.parent / "cache" / "hook-tts"
@@ -148,23 +136,27 @@ class ExportMixin(ClipperBase):
         output = cache_dir / f"{digest}.wav"
         if not output.is_file():
             payload = {
-                "contents": [{"parts": [{"text": style_prompt}]}],
+                "contents": [{"parts": [{"text": spoken_text}]}],
                 "generationConfig": {
                     "responseModalities": ["AUDIO"],
                     "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}},
                 },
             }
-            response = requests.Response()
+            audio = {}
             for index, api_key in enumerate(api_keys):
                 response = requests.post(f"{base_url}/models/{model}:generateContent", headers={"x-goog-api-key": api_key, "Content-Type": "application/json"}, json=payload, timeout=90)
-                if getattr(response, "status_code", 200) not in {401, 403, 429, 500, 502, 503, 504} or index == len(api_keys) - 1:
+                retryable_status = getattr(response, "status_code", 200) in {401, 403, 429, 500, 502, 503, 504}
+                if not retryable_status:
                     response.raise_for_status()
-                    break
-            parts = (((response.json().get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
-            audio = next((part.get("inlineData") or part.get("inline_data") for part in parts if part.get("inlineData") or part.get("inline_data")), {})
+                    parts = (((response.json().get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+                    audio = next((part.get("inlineData") or part.get("inline_data") for part in parts if part.get("inlineData") or part.get("inline_data")), {})
+                    if audio.get("data"):
+                        break
+                if index == len(api_keys) - 1:
+                    response.raise_for_status()
             encoded = audio.get("data") or ""
             if not encoded:
-                raise RuntimeError("Gemini TTS tidak menghasilkan audio")
+                raise RuntimeError("Gemini TTS tidak menghasilkan audio dari semua key")
             mime = str(audio.get("mimeType") or audio.get("mime_type") or "")
             if mime and not mime.lower().startswith("audio/l16"):
                 raise RuntimeError(f"Format audio Gemini TTS tidak didukung: {mime}")
@@ -489,7 +481,7 @@ class ExportMixin(ClipperBase):
             current = "vscaled"
         filters.append(f"[{current}]format=yuv420p[vout]")
         if tts_index is not None and intro_duration > 0:
-            filters.append(f"[{tts_index}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,atempo={HOOK_TTS_TEMPO:.2f},acompressor=threshold=-18dB:ratio=3:attack=5:release=80:makeup=3dB,volume=5dB,alimiter=limit=0.95,apad=pad_dur={HOOK_PAUSE_SECONDS + HOOK_SLIDE_SECONDS:.3f},atrim=duration={intro_duration:.3f},asetpts=PTS-STARTPTS[atts]")
+            filters.append(f"[{tts_index}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,apad=pad_dur={HOOK_PAUSE_SECONDS + HOOK_SLIDE_SECONDS:.3f},atrim=duration={intro_duration:.3f},asetpts=PTS-STARTPTS[atts]")
             if audio_source:
                 filters.append(f"[{audio_index}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[aoriginal]")
             else:

@@ -348,7 +348,7 @@ class WebJobManager:
         providers = cfg.get("ai_providers", {})
         hook = providers.get("hook_maker", {})
         api_key = self._vault_read_key("hook") if self._vault_enabled else hook.get("api_key", "")
-        return {"tts_api_key": str(api_key or ""), "tts_api_keys": [api_key, *(hook.get("backup_api_keys") or [])], "tts_base_url": str(hook.get("base_url") or "https://generativelanguage.googleapis.com/v1beta"), "tts_model": str(hook.get("model") or "gemini-3.1-flash-tts-preview"), "tts_voice": str(hook.get("voice") or "Fenrir")}
+        return {"tts_api_key": str(api_key or ""), "tts_api_keys": [api_key, *(hook.get("backup_api_keys") or [])], "tts_base_url": str(hook.get("base_url") or "https://generativelanguage.googleapis.com/v1beta"), "tts_model": str(hook.get("model") or "gemini-3.1-flash-tts-preview"), "tts_voice": str(hook.get("voice") or "Charon")}
 
     def get_settings(self):
         cfg = self._config().config
@@ -372,7 +372,7 @@ class WebJobManager:
             "hook_key_saved": hook_key_saved,
             "hook_api_key": "",
             "hook_model": str(hook_provider.get("model") or "gemini-3.1-flash-tts-preview"),
-            "hook_voice": str(hook_provider.get("voice") or "Fenrir"),
+            "hook_voice": str(hook_provider.get("voice") or "Charon"),
             "model": model,
             "provider": {"base_url": base_url, "api_key": "", "model": model},
             "subtitle_language": str(cfg.get("subtitle_language", "id")),
@@ -470,7 +470,7 @@ class WebJobManager:
         caption_model = str(payload.get("caption_model", cfg_mgr.config.get("ai_providers", {}).get("caption_maker", {}).get("model", GROQ_MODEL))).strip() or GROQ_MODEL
         hook_api_key = str(payload.get("hook_api_key", "")).strip()
         hook_model = str(payload.get("hook_model", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("model", "gemini-3.1-flash-tts-preview"))).strip() or "gemini-3.1-flash-tts-preview"
-        hook_voice = str(payload.get("hook_voice", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("voice", "Fenrir"))).strip() or "Fenrir"
+        hook_voice = str(payload.get("hook_voice", cfg_mgr.config.get("ai_providers", {}).get("hook_maker", {}).get("voice", "Charon"))).strip() or "Charon"
         output_dir = str(self.output_dir)
         subtitle_language = str(payload.get("subtitle_language", cfg_mgr.config.get("subtitle_language", "id")) or "id")[:10]
         video_quality = str(payload.get("video_quality", cfg_mgr.config.get("video_quality", "720")) or "720")

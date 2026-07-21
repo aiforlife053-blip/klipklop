@@ -77,7 +77,7 @@ class ConfigManager:
                     config[key] = value
                     dirty = True
             hook_maker = config.setdefault("ai_providers", {}).setdefault("hook_maker", {})
-            hook_defaults = {"base_url": "https://generativelanguage.googleapis.com/v1beta", "model": "gemini-3.1-flash-tts-preview", "voice": "Fenrir"}
+            hook_defaults = {"base_url": "https://generativelanguage.googleapis.com/v1beta", "model": "gemini-3.1-flash-tts-preview", "voice": "Charon"}
             for key, value in hook_defaults.items():
                 if not hook_maker.get(key) or hook_maker.get(key) in {"id-ID-ArdiNeural", "tts-1"}:
                     hook_maker[key] = value
@@ -193,7 +193,7 @@ class ConfigManager:
                 "base_url": "https://generativelanguage.googleapis.com/v1beta",
                 "api_key": "",
                 "model": "gemini-3.1-flash-tts-preview",
-                "voice": "Fenrir"
+                "voice": "Charon"
             }
         }
     
@@ -223,7 +223,7 @@ class ConfigManager:
                 "base_url": "https://generativelanguage.googleapis.com/v1beta",
                 "api_key": "",
                 "model": "gemini-3.1-flash-tts-preview",
-                "voice": "Fenrir"
+                "voice": "Charon"
             }
         }
         
