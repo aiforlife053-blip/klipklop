@@ -66,7 +66,7 @@ class LocalClipRenderer(FfmpegMixin, PortraitMixin, ExportMixin):
         tts_api_keys: list = None,
         tts_base_url: str = "https://generativelanguage.googleapis.com/v1beta",
         tts_model: str = "gemini-3.1-flash-tts-preview",
-        tts_voice: str = "Fenrir",
+        tts_voice: str = "Charon",
     ):
         self.ffmpeg_path = ffmpeg_path
         self.output_dir = Path(output_dir)
@@ -94,7 +94,7 @@ class LocalClipRenderer(FfmpegMixin, PortraitMixin, ExportMixin):
         ))
         self.tts_base_url = str(tts_base_url or "https://generativelanguage.googleapis.com/v1beta")
         self.tts_model = str(tts_model or "gemini-3.1-flash-tts-preview")
-        self.tts_voice = str(tts_voice or "Fenrir")
+        self.tts_voice = str(tts_voice or "Charon")
         self.render_timeout = 900
         self.is_cancelled = cancel_check or (lambda: False)
         self.log = log_callback or print

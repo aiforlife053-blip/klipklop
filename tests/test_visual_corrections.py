@@ -1,5 +1,6 @@
 """Koreksi visual V3: subtitle, credit, hook, quality-aware defaults."""
 from pathlib import Path
+import inspect
 
 import pytest
 
@@ -16,6 +17,7 @@ from speaker_tracking import choose_speaker
 from subtitle_cues import build_subtitle_cues
 from visual_style import find_hook_name_span, hook_name_from_title, hook_tts_text, normalize_generated_hook_text, normalize_hook_text, sanitize_subtitle_text, sanitize_subtitle_token, validate_hook_text
 from clipper_core import LocalClipRenderer
+from clipper_export import ExportMixin, HOOK_TTS_TEMPO
 from clipper_ai import ensure_five_hashtags
 
 
@@ -28,6 +30,15 @@ def test_description_gets_exactly_five_relevant_hashtags():
     assert description.count("#") == 5
     assert "#Raditya" in description
     assert "#Fisioterapi" in description
+
+
+def test_hook_tts_defaults_to_plain_charon_without_style_processing():
+    renderer = LocalClipRenderer()
+    assert renderer.tts_voice == "Charon"
+    assert HOOK_TTS_TEMPO == 1.0
+    source = inspect.getsource(ExportMixin._generate_hook_tts)
+    assert "style_prompt" not in source
+    assert "pronunciation_text" not in source
 
 
 def test_hook_sentence_keeps_name_inside_one_readable_sentence():
