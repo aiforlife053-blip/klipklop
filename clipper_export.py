@@ -142,17 +142,21 @@ class ExportMixin(ClipperBase):
                     "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}},
                 },
             }
-            response = requests.Response()
+            audio = {}
             for index, api_key in enumerate(api_keys):
                 response = requests.post(f"{base_url}/models/{model}:generateContent", headers={"x-goog-api-key": api_key, "Content-Type": "application/json"}, json=payload, timeout=90)
-                if getattr(response, "status_code", 200) not in {401, 403, 429, 500, 502, 503, 504} or index == len(api_keys) - 1:
+                retryable_status = getattr(response, "status_code", 200) in {401, 403, 429, 500, 502, 503, 504}
+                if not retryable_status:
                     response.raise_for_status()
-                    break
-            parts = (((response.json().get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
-            audio = next((part.get("inlineData") or part.get("inline_data") for part in parts if part.get("inlineData") or part.get("inline_data")), {})
+                    parts = (((response.json().get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+                    audio = next((part.get("inlineData") or part.get("inline_data") for part in parts if part.get("inlineData") or part.get("inline_data")), {})
+                    if audio.get("data"):
+                        break
+                if index == len(api_keys) - 1:
+                    response.raise_for_status()
             encoded = audio.get("data") or ""
             if not encoded:
-                raise RuntimeError("Gemini TTS tidak menghasilkan audio")
+                raise RuntimeError("Gemini TTS tidak menghasilkan audio dari semua key")
             mime = str(audio.get("mimeType") or audio.get("mime_type") or "")
             if mime and not mime.lower().startswith("audio/l16"):
                 raise RuntimeError(f"Format audio Gemini TTS tidak didukung: {mime}")
