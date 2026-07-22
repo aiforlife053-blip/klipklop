@@ -16,7 +16,7 @@ class DownloadMixin(ClipperBase):
         return f"bestvideo[height<={max_height}][fps<=30]+bestaudio/best[height<={max_height}][fps<=30]/bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]"
 
     def _format_sort(self):
-        return ["res", "vcodec:h264", "fps:30", "br"]
+        return ["res", "fps:30", "br"]
 
     def _cookies_path(self):
         path = getattr(self, "cookies_path", None)

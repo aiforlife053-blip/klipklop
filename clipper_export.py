@@ -23,7 +23,7 @@ from visual_style import find_hook_name_span, hook_name_from_title, hook_tts_tex
 from speaker_tracking import detect_split_person_rois, split_rois_are_distinct
 from config.editor_defaults import HOOK_PAUSE_SECONDS, HOOK_SLIDE_SECONDS
 
-HOOK_TTS_TEMPO = 1.0
+HOOK_TTS_TEMPO = 1.2
 
 from utils.logger import debug_log
 
@@ -113,21 +113,21 @@ class ExportMixin(ClipperBase):
     @staticmethod
     def _tts_pronunciation_text(spoken_text: str) -> str:
         """Add minimal phonetic guidance without changing overlay metadata."""
-        return re.sub(r"\bJIGONG\b", "ji-gong", spoken_text, flags=re.IGNORECASE)
+        text = re.sub(r"\bJIGONG\b", "ji-gong", spoken_text, flags=re.IGNORECASE)
+        text = re.sub(r"oy\b", "oi", text, flags=re.IGNORECASE)
+        return re.sub(r"[\[\]]", "", text)
+
+    @staticmethod
+    def _hook_overlay_text(hook_text: str, content_category: str = "") -> str:
+        text = str(hook_text or "").strip()
+        return f"{text} 🤣" if str(content_category).upper() == "LUCU" and not text.endswith("🤣") else text
 
     def _generate_hook_tts(self, hook_text: str, clip_dir: Path) -> tuple[Path, float]:
-        import requests
-        api_keys = list(dict.fromkeys(
-            str(key) for key in (getattr(self, "tts_api_keys", None) or [getattr(self, "tts_api_key", "")]) if key
-        ))
-        if not api_keys:
-            raise ValueError("Gemini API key diperlukan untuk suara hook")
-        model = str(getattr(self, "tts_model", "") or "gemini-3.1-flash-tts-preview")
-        voice = str(getattr(self, "tts_voice", "") or "Charon")
-        base_url = str(getattr(self, "tts_base_url", "") or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
-        spoken_text = self._tts_text(hook_text)
-        digest = hashlib.sha256(f"{model}|{voice}|plain_v1|{spoken_text}".encode("utf-8")).hexdigest()[:20]
-        # Shared tenant cache: survives across runs; still keyed by model/voice/style/text.
+        import edge_tts
+
+        voice = "id-ID-ArdiNeural"
+        spoken_text = self._tts_pronunciation_text(hook_text)
+        digest = hashlib.sha256(f"edge|{voice}|edge-ardi-v10-oy-to-oi|rate=+0%|pitch=+2Hz|volume=+6%|{spoken_text}".encode("utf-8")).hexdigest()[:20]
         output_root = Path(getattr(self, "output_dir", clip_dir))
         cache_dir = output_root.parent / "cache" / "hook-tts"
         if not cache_dir.parent.exists():
@@ -135,40 +135,30 @@ class ExportMixin(ClipperBase):
         cache_dir.mkdir(parents=True, exist_ok=True)
         output = cache_dir / f"{digest}.wav"
         if not output.is_file():
-            payload = {
-                "contents": [{"parts": [{"text": spoken_text}]}],
-                "generationConfig": {
-                    "responseModalities": ["AUDIO"],
-                    "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}},
-                },
-            }
-            audio = {}
-            for index, api_key in enumerate(api_keys):
-                response = requests.post(f"{base_url}/models/{model}:generateContent", headers={"x-goog-api-key": api_key, "Content-Type": "application/json"}, json=payload, timeout=90)
-                retryable_status = getattr(response, "status_code", 200) in {401, 403, 429, 500, 502, 503, 504}
-                if not retryable_status:
-                    response.raise_for_status()
-                    parts = (((response.json().get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
-                    audio = next((part.get("inlineData") or part.get("inline_data") for part in parts if part.get("inlineData") or part.get("inline_data")), {})
-                    if audio.get("data"):
-                        break
-                if index == len(api_keys) - 1:
-                    response.raise_for_status()
-            encoded = audio.get("data") or ""
-            if not encoded:
-                raise RuntimeError("Gemini TTS tidak menghasilkan audio dari semua key")
-            mime = str(audio.get("mimeType") or audio.get("mime_type") or "")
-            if mime and not mime.lower().startswith("audio/l16"):
-                raise RuntimeError(f"Format audio Gemini TTS tidak didukung: {mime}")
-            pcm = base64.b64decode(encoded)
-            temporary = output.with_suffix(".tmp.wav")
-            with wave.open(str(temporary), "wb") as handle:
-                handle.setnchannels(1)
-                handle.setsampwidth(2)
-                handle.setframerate(24000)
-                handle.writeframes(pcm)
-            os.replace(temporary, output)
-        return output, self._probe_media_duration(str(output)) / HOOK_TTS_TEMPO
+            temporary_mp3 = output.with_suffix(".tmp.mp3")
+            temporary_wav = output.with_suffix(".tmp.wav")
+            try:
+                edge_tts.Communicate(
+                    spoken_text,
+                    voice,
+                    rate="+0%",
+                    pitch="+2Hz",
+                    volume="+6%",
+                ).save_sync(str(temporary_mp3))
+                subprocess.run(
+                    [
+                        self.ffmpeg_path, "-y", "-v", "error", "-i", str(temporary_mp3),
+                        "-af", "acompressor=threshold=-18dB:ratio=2:attack=15:release=120,loudnorm=I=-16:LRA=7:TP=-1.5",
+                        "-ac", "1", "-ar", "48000", str(temporary_wav),
+                    ],
+                    check=True,
+                    creationflags=SUBPROCESS_FLAGS,
+                )
+                os.replace(temporary_wav, output)
+            finally:
+                temporary_mp3.unlink(missing_ok=True)
+                temporary_wav.unlink(missing_ok=True)
+        return output, self._probe_media_duration(str(output))
 
     def _create_hook_overlay(self, hook_text: str, width: int, height: int, output_path: Path, known_names=None):
         from PIL import Image, ImageDraw, ImageFont
@@ -213,9 +203,12 @@ class ExportMixin(ClipperBase):
         max_lines = max(1, int(style.get("max_lines", 3)))
         body_font = load_font(body_px)
         name_font = load_font(name_px) if name_span else body_font
+        emoji_font_path = Path("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf")
         space_w = 0
 
         def measure(word: str, is_name: bool) -> float:
+            if word == "🤣":
+                return float(body_px)
             font = name_font if is_name else body_font
             try:
                 width_px = sum(float(font.getlength(char)) for char in word)
@@ -316,6 +309,18 @@ class ExportMixin(ClipperBase):
             for i, (word, is_name) in enumerate(line):
                 font = name_font if is_name else body_font
                 fill = name_color if is_name else body_color
+                if word == "🤣" and emoji_font_path.is_file():
+                    tile = Image.new("RGBA", (150, 150), (0, 0, 0, 0))
+                    tile_draw = ImageDraw.Draw(tile)
+                    emoji_font = ImageFont.truetype(str(emoji_font_path), 109)
+                    tile_draw.text((0, 0), word, font=emoji_font, embedded_color=True)
+                    bbox = tile.getbbox()
+                    if bbox:
+                        glyph = tile.crop(bbox)
+                        glyph.thumbnail((body_px, body_px), Image.Resampling.LANCZOS)
+                        overlay.alpha_composite(glyph, (int(x), int(baseline_y - glyph.height)))
+                    x += measure(word, False) + space_w
+                    continue
                 bbox = draw.textbbox((0, 0), word, font=font, stroke_width=stroke_width, anchor="ls")
                 text_x = min(max(x, stroke_width - bbox[0]), width - bbox[2] - stroke_width)
                 draw_word(draw, (text_x, baseline_y), word, font, (*fill, 255), stroke_width, (*outline_color, 255))
@@ -582,6 +587,7 @@ class ExportMixin(ClipperBase):
                     "source_title": self.video_info.get("title", ""),
                     "source_description": self.video_info.get("description", ""),
                     "hook_text": highlight.get("hook_text", highlight["title"]),
+                    "content_category": highlight.get("content_category", ""),
                     "start_time": highlight["start_time"],
                     "end_time": highlight["end_time"],
                     "duration_seconds": highlight["duration_seconds"],
@@ -741,6 +747,7 @@ class ExportMixin(ClipperBase):
             portrait_filters = None
             tracked_source = None
             raw_hook = str(metadata.get("hook_text") or metadata.get("title", "") or "")
+            overlay_hook = self._hook_overlay_text(raw_hook, metadata.get("content_category", ""))
             known = [
                 hook_name_from_title(raw_hook, str(metadata.get("title") or "")),
                 metadata.get("channel_name"),
@@ -815,7 +822,7 @@ class ExportMixin(ClipperBase):
                 tts_executor.shutdown(wait=False, cancel_futures=True)
 
             intro_duration = spoken_duration + HOOK_PAUSE_SECONDS + HOOK_SLIDE_SECONDS
-            self._create_hook_overlay(raw_hook, width, height, hook_overlay, known_names=known)
+            self._create_hook_overlay(overlay_hook, width, height, hook_overlay, known_names=known)
             if not transcript:
                 raise ValueError("Transcript subtitle tidak tersedia")
             ass_file = clip_dir / f"render-{operation_id}.captions.ass"

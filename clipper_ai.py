@@ -99,6 +99,7 @@ def rank_highlights_by_priority(highlights: list[dict]) -> list[dict]:
         item = dict(highlight)
         match = _HIGHLIGHT_CATEGORY_RE.match(str(item.get("description", "")))
         category = match.group(1).upper() if match else ""
+        item["content_category"] = category
         item["description"] = _HIGHLIGHT_CATEGORY_RE.sub("", str(item.get("description", "")), count=1)
         ranked.append((_HIGHLIGHT_CATEGORY_PRIORITY.get(category, 0), float(item.get("virality_score", 0) or 0), -position, item))
     ranked.sort(key=lambda entry: entry[:3], reverse=True)
@@ -246,7 +247,7 @@ Setiap object HARUS memiliki:
 3. "title" (string) → Maks 60 karakter, padat & click-worthy
 4. "description" (string) → Maks 150 karakter, jelaskan kenapa viral
 5. "virality_score" (integer) → 1–10 (HARUS ANGKA, BUKAN STRING)
-6. "hook_text" (string) → Bahasa Indonesia, maksimal 6 kata; nama orang wajib ada dan ditandai [NAMA]; gunakan headline deklaratif kontekstual. Ejaan nama WAJIB disalin persis dari judul/channel/transcript sumber, jangan menebak atau mengubah ejaan.
+6. "hook_text" (string) → Bahasa Indonesia, maksimal 6 kata; nama orang wajib ada dan ditandai [NAMA]; gunakan hook kontekstual yang memicu rasa penasaran. Ejaan nama WAJIB disalin persis dari judul/channel/transcript sumber, jangan menebak atau mengubah ejaan.
 
 Awali description dengan tepat satu marker kategori internal:
 * "[LUCU] " untuk humor/komedi dengan setup dan payoff.
@@ -298,16 +299,18 @@ WAJIB:
 * Bahasa Indonesia
 * Maksimal 6 kata
 * Tanpa emoji
-* WAJIB berupa headline deklaratif, bukan kalimat tanya
 * WAJIB satu kalimat utuh, natural, dan enak dibaca
 * Gunakan bahasa lisan Shorts: terdengar seperti ucapan teman saat menceritakan momen, bukan judul berita
+* Pilih sudut paling "lah kok bisa" yang benar-benar didukung klip; utamakan kontras, pengakuan, akibat, salah paham, atau punchline
+* Pertanyaan boleh jika jawabannya benar-benar ada dalam klip; statement juga boleh jika sudah memicu rasa penasaran
+* Dilarang membuat ringkasan datar berbentuk NAMA + kata kerja + objek ketika ada sudut yang lebih mengejutkan
 * Pilih kata sehari-hari yang ringkas, spesifik, dan sesuai transcript
 * Hindari bahasa berita atau frasa generik kaku seperti "yang sangat parah", "aksi mengejutkan", "kejadian tak terduga", "momen mengharukan", dan "ungkap fakta"
 * Nama orang wajib ada, tetapi nama boleh berada di posisi mana pun dalam kalimat
 * Nama sedikit lebih besar dan cyan; isi lain putih
 * Tandai hanya nama orang dengan kurung siku agar render bisa mewarnainya; kurung tidak tampil dan tidak dibaca TTS
 * Jangan merangkai potongan transcript yang tidak membentuk kalimat utuh
-* Harus memberi konteks inti klip, bukan curiosity gap kosong
+* Harus memberi konteks inti klip, bukan curiosity gap kosong atau klaim yang jawabannya tidak ada
 * Kata penentu konteks bersifat opsional: sering, selalu, berulang kali, pertama kali, diam-diam, hampir, atau kata setara
 * DILARANG menambah kata penentu konteks jika tidak dinyatakan atau tidak didukung transcript
 * Jika kata tersebut didukung transcript dan penting bagi makna, pertahankan; jika tidak penting, jangan dipaksakan
@@ -320,7 +323,7 @@ Contoh benar:
 
 Contoh salah:
 "RADITYA DIKA: GUA HAMPIR BANGKRUT"
-"KENAPA [ALDI TAHER] TELAT TERUS?" — kalimat tanya tanpa konteks
+"KENAPA [ALDI TAHER] TELAT TERUS?" — terlalu generik; pertanyaan harus membawa sudut spesifik yang dijawab klip
 "[ALDI TAHER] UNGKAP ALASAN TERLAMBAT" — menghilangkan konteks bahwa kejadian sering berulang
 "KEJAILAN [KOMENG] YANG SANGAT PARAH" — bahasa berita generik dan kaku
 
@@ -336,7 +339,7 @@ Periksa:
 2. Semua durasi 40–70 detik (target 50–70) ?
 3. Semua punya tepat 6 field ?
 4. virality_score berupa integer 1–10 ?
-5. hook_text maksimal 7 kata, berupa headline deklaratif kontekstual, dan berisi nama bertanda [NAMA] di posisi natural ?
+5. hook_text maksimal 6 kata, kontekstual, memicu rasa penasaran tanpa mengarang, dan berisi nama bertanda [NAMA] di posisi natural ?
 6. Tidak ada field lain ?
 7. Tidak ada teks di luar JSON ?
 

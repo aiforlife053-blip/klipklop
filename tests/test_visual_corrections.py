@@ -1,7 +1,7 @@
 """Koreksi visual V3: subtitle, credit, hook, quality-aware defaults."""
 from pathlib import Path
 import inspect
-import base64
+
 
 import pytest
 
@@ -18,6 +18,7 @@ from speaker_tracking import choose_speaker
 from subtitle_cues import build_subtitle_cues
 from visual_style import find_hook_name_span, hook_name_from_title, hook_tts_text, normalize_generated_hook_text, normalize_hook_text, sanitize_subtitle_text, sanitize_subtitle_token, validate_hook_text
 from clipper_core import LocalClipRenderer
+from clipper_core import AutoClipperCore
 from clipper_export import ExportMixin, HOOK_TTS_TEMPO
 from clipper_ai import ensure_five_hashtags
 
@@ -33,34 +34,40 @@ def test_description_gets_exactly_five_relevant_hashtags():
     assert "#Fisioterapi" in description
 
 
-def test_hook_tts_defaults_to_plain_charon_without_style_processing():
-    renderer = LocalClipRenderer()
-    assert renderer.tts_voice == "Charon"
-    assert HOOK_TTS_TEMPO == 1.0
+def test_hook_tts_uses_ardi_with_indonesian_shorts_tuning():
     source = inspect.getsource(ExportMixin._generate_hook_tts)
-    assert "style_prompt" not in source
-    assert "pronunciation_text" not in source
+    source_lower = source.lower()
+    assert 'voice = "id-ID-ArdiNeural"' in source
+    assert 'rate="+0%"' in source
+    assert 'pitch="+2Hz"' in source
+    assert 'volume="+6%"' in source
+    assert "acompressor=" in source
+    assert "loudnorm=" in source
+    assert "edge-ardi-v10-oy-to-oi" in source
+    assert '.rstrip(".!?") + "?"' not in source
 
 
-def test_hook_tts_rotates_when_success_response_has_no_audio(monkeypatch, tmp_path):
-    class Response:
-        status_code = 200
-        def __init__(self, payload): self.payload = payload
-        def raise_for_status(self): pass
-        def json(self): return self.payload
+def test_hook_tts_joins_leading_marked_name_without_changing_overlay():
+    assert ExportMixin._tts_pronunciation_text("[ALOY] DIBOHONGI DOKTER") == "ALoi DIBOHONGI DOKTER"
+    assert ExportMixin._tts_pronunciation_text("DOKTER BOHONGI [ALOY]") == "DOKTER BOHONGI ALoi"
 
-    pcm = b"\x00\x00" * 2400
-    responses = [
-        Response({"candidates": [{"content": {"parts": [{"text": "empty"}]}}]}),
-        Response({"candidates": [{"content": {"parts": [{"inlineData": {"data": base64.b64encode(pcm).decode(), "mimeType": "audio/L16"}}]}}]}),
-    ]
-    calls = []
-    monkeypatch.setattr("requests.post", lambda *args, **kwargs: calls.append(kwargs["headers"]["x-goog-api-key"]) or responses.pop(0))
-    renderer = LocalClipRenderer(output_dir=str(tmp_path), tts_api_keys=["first", "backup"], tts_voice="Charon")
-    output, duration = renderer._generate_hook_tts("HOOK TEST", tmp_path)
-    assert calls == ["first", "backup"]
-    assert output.is_file()
-    assert duration > 0
+
+def test_highlight_client_uses_first_backup_when_primary_is_empty(tmp_path):
+    core = AutoClipperCore(
+        client=None,
+        output_dir=str(tmp_path),
+        ai_providers={
+            "highlight_finder": {
+                "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+                "model": "gemini-2.5-flash",
+                "api_key": "",
+                "backup_api_keys": ["backup-key"],
+            }
+        },
+    )
+    assert core.highlight_client.api_key == "backup-key"
+    assert len(core.highlight_clients) == 1
+
 
 
 def test_hook_sentence_keeps_name_inside_one_readable_sentence():
@@ -119,12 +126,12 @@ def test_prompt_requires_name_but_does_not_force_it_to_the_front():
     assert "satu kalimat utuh, natural" in prompt
 
 
-def test_prompt_requires_contextual_declarative_hook_not_empty_question():
+def test_prompt_requires_contextual_hook_not_empty_question():
     from clipper_ai import AiMixin
 
     prompt = AiMixin.get_default_prompt().lower()
-    assert "headline deklaratif" in prompt
-    assert "bukan kalimat tanya" in prompt
+    assert "hook kontekstual yang memicu rasa penasaran" in prompt
+    assert "pertanyaan boleh jika jawabannya benar-benar ada" in prompt
     assert "kata penentu konteks bersifat opsional" in prompt
     assert "dilarang menambah" in prompt
     assert "alasan [aldi taher] sering terlambat" in prompt
@@ -142,6 +149,18 @@ def test_prompt_requires_spoken_shorts_hook_instead_of_stiff_news_language():
     assert "kejailan [komeng] yang sangat parah" in prompt
     assert "yang sangat parah" in prompt
     assert "hindari bahasa berita" in prompt
+
+
+def test_prompt_requires_curiosity_without_inventing_context():
+    from clipper_ai import AiMixin
+
+    prompt = AiMixin.get_default_prompt().lower()
+    assert "lah kok bisa" in prompt
+    assert "kontras, pengakuan, akibat, salah paham, atau punchline" in prompt
+    assert "ringkasan datar" in prompt
+    assert "pertanyaan boleh" in prompt
+    assert "jawabannya benar-benar ada dalam klip" in prompt
+    assert "curiosity gap kosong" in prompt
 
 
 def test_hook_removes_emoji_from_overlay_and_tts():
@@ -694,6 +713,13 @@ def test_highlight_priority_is_funny_then_informative_then_emotional():
 
     assert [item["title"] for item in ranked] == ["punchline", "tips", "curhat"]
     assert [item["description"] for item in ranked] == ["setup dan payoff", "cara berguna", "cerita berat"]
+    assert [item["content_category"] for item in ranked] == ["LUCU", "INFORMATIF", "EMOSIONAL"]
+
+
+def test_only_funny_hook_gets_rendered_laughing_emoji():
+    assert ExportMixin._hook_overlay_text("[ALOY] DIBOHONGI DOKTER", "LUCU").endswith(" 🤣")
+    assert ExportMixin._hook_overlay_text("[ALOY] DIBOHONGI DOKTER", "INFORMATIF") == "[ALOY] DIBOHONGI DOKTER"
+    assert ExportMixin._hook_overlay_text("[ALOY] DIBOHONGI DOKTER", "EMOSIONAL") == "[ALOY] DIBOHONGI DOKTER"
 
 
 def test_unmarked_highlight_is_last_fallback_even_with_high_score():

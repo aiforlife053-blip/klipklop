@@ -1353,7 +1353,16 @@ def test_section_format_has_hard_cap_and_fast_codec_sort():
     assert selector.count("height<=1080") == 4
     assert selector.endswith("best[height<=1080]")
     assert all("height<=1080" in fallback for fallback in selector.split("/"))
-    assert harness._format_sort() == ["res", "vcodec:h264", "fps:30", "br"]
+    assert harness._format_sort() == ["res", "fps:30", "br"]
+
+
+def test_cpu_1080_encoder_uses_upload_quality_crf():
+    harness = object.__new__(LocalClipRenderer)
+    harness.gpu_enabled = False
+    harness.gpu_encoder_args = []
+    harness.video_quality = "1080"
+    harness.optimize_mode = "hosting_2cpu"
+    assert harness.get_video_encoder_args() == ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21"]
 
 
 def test_section_download_does_not_force_reencode():

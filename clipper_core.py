@@ -132,8 +132,10 @@ class AutoClipperCore(FfmpegMixin, DownloadMixin, AiMixin, PortraitMixin, Export
         self.ai_providers = ai_providers or {}
         if self.ai_providers:
             hf_config = self.ai_providers.get("highlight_finder", {})
+            highlight_keys = [hf_config.get("api_key", ""), *(hf_config.get("backup_api_keys") or [])]
+            highlight_keys = list(dict.fromkeys(str(key) for key in highlight_keys if key))
             self.highlight_client = OpenAI(
-                api_key=hf_config.get("api_key", ""),
+                api_key=highlight_keys[0] if highlight_keys else "",
                 base_url=hf_config.get("base_url", "https://generativelanguage.googleapis.com/v1beta/openai"),
                 timeout=float(hf_config.get("timeout", 180.0) or 180.0),
             )

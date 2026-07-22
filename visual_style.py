@@ -84,6 +84,7 @@ def normalize_generated_hook_text(text: str, max_words: int = HOOK_MAX_WORDS) ->
 def normalize_hook_text(text: str, max_words: int = HOOK_MAX_WORDS, max_lines: int = HOOK_MAX_LINES) -> str:
     """One uppercase sentence; strip legacy colon; wrap ≤ max_lines."""
     cleaned = strip_hook_colon(text)
+    laughing = "🤣" in cleaned
     cleaned = "".join(ch for ch in cleaned if not unicodedata.category(ch).startswith(("S", "C")))
     if not cleaned:
         return "MOMEN INI WAJIB DITONTON!"
@@ -108,7 +109,8 @@ def normalize_hook_text(text: str, max_words: int = HOOK_MAX_WORDS, max_lines: i
         chunks.append(" ".join(words[idx:idx + take]).upper())
         idx += take
     chunks = [c for c in chunks if c]
-    return "\n".join(chunks)
+    rendered = "\n".join(chunks)
+    return f"{rendered} 🤣" if laughing else rendered
 
 
 def validate_hook_text(text: str) -> str:
